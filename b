@@ -2,7 +2,7 @@
 set -e
 
 datatime() {
-    date '+%Y-%M-%d %H:%I:%S'
+    date '+%Y-%m-%d %H:%M:%S'
 }
 
 notify() {
@@ -12,7 +12,9 @@ notify() {
 }
 
 main() {
-    ./build.sh -e cpu
+    env \
+        OPENSSL_ROOT_DIR=$HOME/local/openssl \
+        ./build.sh -e cpu
 }
 
 notify "start building mindspore at $(datatime)"
