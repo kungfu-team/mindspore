@@ -16,8 +16,30 @@ class Mul(ms.nn.Cell):
         return self.mul(x, y)
 
 
-x = ms.Tensor(np.array([1.0, 2.0, 3.0]).astype(np.float32))
-y = ms.Tensor(np.array([4.0, 5.0, 6.0]).astype(np.float32))
+def test_mul():
+    x = ms.Tensor(np.array([1.0, 2.0, 3.0]).astype(np.float32))
+    y = ms.Tensor(np.array([4.0, 5.0, 6.0]).astype(np.float32))
 
-mul = Mul()
-print(mul(x, y))
+    mul = Mul()
+    print(mul(x, y))
+
+
+class AllReduce(ms.nn.Cell):
+    def __init__(self):
+        super(AllReduce, self).__init__()
+        self.all_reduce = ms.ops.operations.KungFuAllReduce()
+
+    def construct(self, x):
+        return self.all_reduce(x)
+
+
+def test_all_reduce():
+    x = ms.Tensor(np.array([1.0, 2.0, 3.0]).astype(np.float32))
+
+    all_reduce = AllReduce()
+    y = all_reduce(x)
+    print(y)
+
+
+test_mul()
+# test_all_reduce()
