@@ -24,10 +24,19 @@ def test_mul():
     print(mul(x, y))
 
 
+class KungFuAllReduce(ms.ops.PrimitiveWithInfer):
+    @ms.ops.prim_attr_register
+    def __init__(self):
+        self.init_prim_io_names(inputs=['x'], outputs=['y'])
+
+    def __infer__(self, x):
+        return x
+
+
 class AllReduce(ms.nn.Cell):
     def __init__(self):
         super(AllReduce, self).__init__()
-        self.all_reduce = ms.ops.operations.KungFuAllReduce()
+        self.all_reduce = KungFuAllReduce()
 
     def construct(self, x):
         return self.all_reduce(x)
@@ -42,4 +51,4 @@ def test_all_reduce():
 
 
 test_mul()
-# test_all_reduce()
+test_all_reduce()
