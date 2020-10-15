@@ -29,7 +29,9 @@ bool KungFuAllReduceCPUKernel::Launch(const std::vector<AddressPtr> &inputs, con
   using T = float;
   constexpr auto dtype = kungfu::type_encoder::value<T>();
   constexpr auto op = KungFu_SUM;
-  const int count = 1;  // TODO: get count
+  const auto px = inputs.at(0);
+  const auto py = outputs.at(0);
+  const auto count = px->size / sizeof(T);
   _kungfu_peer->AllReduce(px->addr, py->addr, count, dtype, op, "");
   return true;
 }
