@@ -6,10 +6,10 @@
 namespace mindspore {
 namespace kernel {
 
-class KungFuAllReduceCPUKernel : public CPUKernel {
+class KungFuResizeCPUKernel : public CPUKernel {
  public:
-  KungFuAllReduceCPUKernel() {}
-  ~KungFuAllReduceCPUKernel() override = default;
+  KungFuResizeCPUKernel() {}
+  ~KungFuResizeCPUKernel() override = default;
 
   void InitKernel(const CNodePtr &kernel_node) override;
 
@@ -17,8 +17,10 @@ class KungFuAllReduceCPUKernel : public CPUKernel {
               const std::vector<AddressPtr> &outputs) override;
 };
 
-MS_REG_CPU_KERNEL(KungFuAllReduce, KernelAttr().AddInputAttr(kNumberTypeFloat32).AddOutputAttr(kNumberTypeFloat32),
-                  KungFuAllReduceCPUKernel);
+MS_REG_CPU_KERNEL(
+  KungFuResize,
+  KernelAttr().AddInputAttr(kNumberTypeUInt32).AddOutputAttr(kNumberTypeBool).AddOutputAttr(kNumberTypeBool),
+  KungFuResizeCPUKernel);
 
 }  // namespace kernel
 }  // namespace mindspore
