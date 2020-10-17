@@ -9,6 +9,8 @@ if [ ! -d KungFu ]; then
 fi
 
 cd KungFu
+git checkout master
+git pull
 
 ./configure --prefix=$PREFIX
 make -j 8

@@ -63,12 +63,12 @@ def elastic_run(max_step, schedule):
 
         if step in schedule:
             new_size = ms.Tensor(schedule[step], dtype=ms.uint32)
-            changed, keep = resize(new_size)
-            print("changed: ", changed)
-            print("keep: ", keep)
+            changed, detached = resize(new_size)
+            # print("changed: ", changed)
+            # print("detached: ", detached)
             if changed:
                 need_sync = True
-            if not keep:
+            if detached:
                 break
         step += 1
         if step >= max_step:
