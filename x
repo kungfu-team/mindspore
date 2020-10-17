@@ -4,6 +4,7 @@ set -e
 # ./b
 # ./U
 
+# export KUNGFU_MINDSPORE_DEBUG=1
 export LD_LIBRARY_PATH=$PWD/third_party/kungfu/lib
 
 kungfu_run_flags() {

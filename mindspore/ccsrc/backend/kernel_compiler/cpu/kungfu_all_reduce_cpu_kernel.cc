@@ -7,15 +7,14 @@
 
 namespace mindspore {
 namespace kernel {
-
 void KungFuAllReduceCPUKernel::InitKernel(const CNodePtr &kernel_node) {
-  std::cerr << "KungFuAllReduceCPUKernel::" << __func__ << " called" << std::endl;
+  LOG_InitKernel("KungFuAllReduceCPUKernel");
   init_kungfu_once();
 }
 
 bool KungFuAllReduceCPUKernel::Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
                                       const std::vector<AddressPtr> &outputs) {
-  LOG_CALL("KungFuAllReduceCPUKernel", inputs, workspace, outputs);
+  LOG_Kernel_Launch("KungFuAllReduceCPUKernel", inputs, workspace, outputs);
   using T = float;
   constexpr auto dtype = kungfu::type_encoder::value<T>();
   constexpr auto op = KungFu_SUM;
@@ -25,6 +24,5 @@ bool KungFuAllReduceCPUKernel::Launch(const std::vector<AddressPtr> &inputs, con
   _kungfu_peer->AllReduce(px->addr, py->addr, count, dtype, op, "");
   return true;
 }
-
 }  // namespace kernel
 }  // namespace mindspore

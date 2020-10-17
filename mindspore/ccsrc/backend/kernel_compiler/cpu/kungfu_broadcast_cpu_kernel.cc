@@ -6,15 +6,14 @@
 
 namespace mindspore {
 namespace kernel {
-
 void KungFuBroadcastCPUKernel::InitKernel(const CNodePtr &kernel_node) {
-  std::cerr << "KungFuBroadcastCPUKernel::" << __func__ << " called" << std::endl;
+  LOG_InitKernel("KungFuBroadcastCPUKernel");
   init_kungfu_once();
 }
 
 bool KungFuBroadcastCPUKernel::Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
                                       const std::vector<AddressPtr> &outputs) {
-  LOG_CALL("KungFuBroadcastCPUKernel", inputs, workspace, outputs);
+  LOG_Kernel_Launch("KungFuBroadcastCPUKernel", inputs, workspace, outputs);
   using T = float;
   constexpr auto dtype = kungfu::type_encoder::value<T>();
   const auto px = inputs.at(0);
@@ -23,6 +22,5 @@ bool KungFuBroadcastCPUKernel::Launch(const std::vector<AddressPtr> &inputs, con
   _kungfu_peer->Broadcast(px->addr, py->addr, count, dtype, "");
   return true;
 }
-
 }  // namespace kernel
 }  // namespace mindspore

@@ -5,13 +5,13 @@
 namespace mindspore {
 namespace kernel {
 void KungFuResizeCPUKernel::InitKernel(const CNodePtr &kernel_node) {
-  std::cerr << "KungFuResizeCPUKernel::" << __func__ << " called" << std::endl;
+  LOG_InitKernel("KungFuResizeCPUKernel");
   init_kungfu_once();
 }
 
 bool KungFuResizeCPUKernel::Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
                                    const std::vector<AddressPtr> &outputs) {
-  LOG_CALL("KungFuResizeCPUKernel", inputs, workspace, outputs);
+  LOG_Kernel_Launch("KungFuResizeCPUKernel", inputs, workspace, outputs);
   uint32_t *p_new_size = reinterpret_cast<uint32_t *>(inputs.at(0)->addr);
   bool *pChanged = reinterpret_cast<bool *>(outputs.at(0)->addr);
   bool *pKeep = reinterpret_cast<bool *>(outputs.at(1)->addr);
