@@ -15,7 +15,7 @@ bool KungFuResizeCPUKernel::Launch(const std::vector<AddressPtr> &inputs, const 
   uint32_t *p_new_size = reinterpret_cast<uint32_t *>(inputs.at(0)->addr);
   bool *pChanged = reinterpret_cast<bool *>(outputs.at(0)->addr);
   bool *pDetached = reinterpret_cast<bool *>(outputs.at(1)->addr);
-  _kungfu_peer->ResizeCluster(*p_new_size, pDetached, pKeep);
+  _kungfu_peer->ResizeCluster(*p_new_size, pChanged, pDetached);
   return true;
 }
 }  // namespace kernel
