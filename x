@@ -35,6 +35,14 @@ run_elastic() {
         --max-step 100
 }
 
+run_train_mnist_slp() {
+    python3.7 ./kungfu_examples/train_mnist_slp.py
+}
+
+run_train_mnist_lenet() {
+    ./kungfu_examples/lenet/run.sh
+}
+
 trace() {
     echo "BEGIN $@"
     $@
@@ -44,9 +52,11 @@ trace() {
 }
 
 main() {
-    trace run_single
-    trace run_parallel
-    trace run_elastic
+    # trace run_single
+    # trace run_parallel
+    # trace run_elastic
+    # trace run_train_mnist_slp
+    trace run_train_mnist_lenet
 }
 
 main
