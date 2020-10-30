@@ -3,6 +3,7 @@ include_directories(${CMAKE_SOURCE_DIR}/mindspore/core)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_BINARY_DIR})
 link_directories(${CMAKE_SOURCE_DIR}/build/mindspore/graphengine)
+link_directories(${CMAKE_SOURCE_DIR}/third_party/kungfu/lib)
 
 if (CMAKE_SYSTEM_NAME MATCHES "Windows")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-attributes -DHAVE_SNPRINTF")
@@ -177,6 +178,7 @@ set_property(SOURCE ${SUB_OBJECTS_SRC} PROPERTY COMPILE_DEFINITIONS SUBMODULE_ID
 add_library(mindspore STATIC ${SUB_OBJECTS_SRC})
 
 target_link_libraries(mindspore mindspore_core)
+target_link_libraries(mindspore kungfu)
 
 if (ENABLE_DEBUGGER)
     # debugger: link grpc
