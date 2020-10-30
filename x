@@ -43,6 +43,10 @@ run_train_mnist_lenet() {
     ./kungfu_examples/lenet/run.sh
 }
 
+run_train_mnist_lenet_elastic() {
+    ./kungfu_examples/lenet-elastic/run.sh
+}
+
 trace() {
     echo "BEGIN $@"
     $@
@@ -56,7 +60,8 @@ main() {
     # trace run_parallel
     # trace run_elastic
     # trace run_train_mnist_slp
-    trace run_train_mnist_lenet
+    # trace run_train_mnist_lenet
+    trace run_train_mnist_lenet_elastic
 }
 
 main
