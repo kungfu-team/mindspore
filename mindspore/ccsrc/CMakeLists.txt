@@ -179,6 +179,10 @@ add_library(mindspore STATIC ${SUB_OBJECTS_SRC})
 
 target_link_libraries(mindspore mindspore_core)
 target_link_libraries(mindspore kungfu)
+if (ENABLE_GPU)
+    target_link_libraries(mindspore kungfu_nccl)
+    target_link_libraries(mindspore mindspore::nccl)
+endif()
 
 if (ENABLE_DEBUGGER)
     # debugger: link grpc

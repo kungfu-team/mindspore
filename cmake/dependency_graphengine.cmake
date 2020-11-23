@@ -9,6 +9,7 @@ include(${GE_SOURCE_DIR}/cmake/external_libs/gtest.cmake)
 include(${GE_SOURCE_DIR}/cmake/external_libs/protobuf.cmake)
 include(${GE_SOURCE_DIR}/cmake/external_libs/onnx.cmake)
 include(${GE_SOURCE_DIR}/cmake/external_libs/securec.cmake)
+include(${GE_SOURCE_DIR}/cmake/external_libs/kungfu.cmake)
 
 # for UT, find slog and error_manager from local prebuild
 if (NOT ENABLE_D)

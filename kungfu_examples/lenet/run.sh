@@ -22,8 +22,11 @@ kungfu_run() {
 
 train_flags() {
     local data_dir=$HOME/var/data/mindspore/mnist
-
     echo --data-dir $data_dir
+
+    # echo --device CPU
+    echo --device GPU
+
     # echo --epoch-size 1
     # echo --repeat-size 1
 }

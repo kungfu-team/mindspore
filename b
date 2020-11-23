@@ -11,10 +11,18 @@ notify() {
     fi
 }
 
+CUDA_HOME=/usr/local/cuda
+export CUDACXX=$CUDA_HOME/bin/nvcc
+
+build_flags() {
+    # echo -e cpu
+    echo -e gpu
+}
+
 main() {
     env \
         OPENSSL_ROOT_DIR=$HOME/local/openssl \
-        ./build.sh -e cpu
+        ./build.sh $(build_flags)
 }
 
 notify "start building mindspore at $(datatime)"

@@ -11,8 +11,16 @@ fi
 cd KungFu
 git checkout master
 git pull
+git checkout lg-libkungfu_nccl
+git pull
 
-./configure --prefix=$PREFIX
+config_flags() {
+    echo --prefix=$PREFIX
+    echo --enable-nccl
+    echo --with-nccl=$PWD/build/mindspore/_deps/nccl-src/build
+}
+
+./configure $(config_flags)
 make -j 8
 
 if [ -d $PREFIX ]; then
