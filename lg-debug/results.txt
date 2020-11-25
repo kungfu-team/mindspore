@@ -1,0 +1,3 @@
+np=4
+NCCL: 14.740GiB/s
+CPU: NOT supported
