@@ -1,8 +1,10 @@
 import argparse
+import os
 import time
 
 import mindspore as ms
 import numpy as np
+from mindspore.communication.management import get_group_size, get_rank, init
 
 import kungfu_mindspore_ops as kf
 
@@ -33,8 +35,19 @@ def parse_args():
                    type=str,
                    default="CPU",
                    choices=['Ascend', 'GPU', 'CPU'])
+    p.add_argument('--warmup-steps', type=int, default=3)
     p.add_argument('--steps', type=int, default=10)
+    p.add_argument('--collective',
+                   type=str,
+                   default='mindspore',
+                   choices=['mindspore', 'kungfu'])
     return p.parse_args()
+
+
+def print_env():
+    # for e in sorted(os.environ):
+    #     print(e)
+    print(os.getenv('LD_LIBRARY_PATH'))
 
 
 def main():
@@ -42,25 +55,46 @@ def main():
     ms.context.set_context(mode=ms.context.GRAPH_MODE,
                            device_target=args.device)
 
-    all_reduce = kf.AllReduce()
+    if args.collective == 'mindspore':
+        init()
+        cluster_size = get_group_size()
+        rank = get_rank()
+    else:
+        # init() # will be faster
+        cluster_size = 4
+        rank = 0  # TODO: get kungfu rank
+
+    print('rank: %d, size: %d' % (rank, cluster_size))
+
+    if args.collective == 'mindspore':
+        all_reduce = ms.ops.operations.AllReduce()
+    elif args.collective == 'kungfu':
+        all_reduce = kf.AllReduce()
+    else:
+        raise RuntimeError('invalid collective')
 
     xs = [
         ms.Tensor(np.array([1.0] * size).astype(np.float32))
         for size in grad_sizes
     ]
 
-    data_size = sum(grad_sizes) * 4
-    cluster_size = 4  # TODO: get from API
+    data_size = sum(grad_sizes) * 4  # 1 float is 4 bytes
     multiplier = 4 * (cluster_size - 1)
     Gi = 1024 * 1024 * 1024
 
-    for i in range(args.steps):
-        t0 = time.time()
-        ys = [all_reduce(x) for x in xs]
-        t1 = time.time()
-        d = t1 - t0
-        rate = float(data_size) * multiplier / Gi / d
-        print('took %.3fms, data rate: %.3fGiB/s' % (d * 1e3, rate))
+    def run_stage(name, steps):
+        for i in range(steps):
+            t0 = time.time()
+            ys = [all_reduce(x) for x in xs]
+            t1 = time.time()
+            d = t1 - t0
+            rate = float(data_size) * multiplier / Gi / d
+            if rank == 0:
+                print('%s %d took %.3fms, data rate: %.3fGiB/s' %
+                      (name, i + 1, d * 1e3, rate))
+
+    run_stage('warmup', args.warmup_steps)
+    run_stage('step', args.steps)
 
 
 main()
