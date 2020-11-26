@@ -38,7 +38,7 @@ app_flags() {
     echo --device GPU
 
     echo --warmup-steps 2
-    echo --steps 8
+    echo --steps 100
 
     # echo --collective mindspore
     echo --collective kungfu

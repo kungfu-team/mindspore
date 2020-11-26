@@ -6,6 +6,37 @@
 #include <string>
 
 namespace kungfu {
+class metric {
+ public:
+  using C = std::chrono::high_resolution_clock;
+  using Duration = std::chrono::duration<long, std::nano>;
+
+  Duration min_;
+  Duration max_;
+  Duration total_;
+  size_t n_;
+
+  metric() { reset(); }
+
+  void reset() {
+    min_ = std::chrono::hours(1);
+    max_ = std::chrono::hours(0);
+    total_ = std::chrono::hours(0);
+    n_ = 0;
+  }
+
+  void update(const Duration &d) {
+    if (d < min_) {
+      min_ = d;
+    }
+    if (d > max_) {
+      max_ = d;
+    }
+    total_ += d;
+    ++n_;
+  }
+};
+
 class site_profiler {
   using C = std::chrono::high_resolution_clock;
   using Duration = std::chrono::duration<long, std::nano>;
@@ -39,13 +70,9 @@ class site_profiler {
     return ss.str();
   }
 
-  const int report_period_ = 0;
   const std::string name_;
-
-  Duration min_;
-  Duration max_;
-  Duration total_;
-  size_t n_;
+  metric metric_;
+  std::vector<Duration> history_;
 
  public:
   class scope {
@@ -66,25 +93,28 @@ class site_profiler {
   site_profiler(std::string name) : name_(std::move(name)) { reset(); }
 
   void reset() {
-    min_ = std::chrono::hours(1);
-    max_ = std::chrono::hours(0);
-    total_ = std::chrono::hours(0);
-    n_ = 0;
+    metric_.reset();
+    history_.clear();
   }
 
   void report() {
-    const auto mean_ = total_ / n_;
-    std::cout << "called " << show(n_) << " times "   //
-              << " mean: " << show_duration(mean_)    //
-              << " total: " << show_duration(total_)  //
-              << " min: " << show_duration(min_)      //
-              << " max: " << show_duration(max_)      //
-              << " call site: " << name_              //
+    const auto mean_ = metric_.total_ / metric_.n_;
+    std::cout << "called " << show(metric_.n_) << " times"        //
+              << ",    mean: " << show_duration(mean_)            //
+              << ",    total: " << show_duration(metric_.total_)  //
+              << ",    min: " << show_duration(metric_.min_)      //
+              << ",    max: " << show_duration(metric_.max_)      //
+              << ",    @" << name_                                //
               << std::endl;
+    if (history_.size() < 100) {
+      for (auto &d : history_) {
+        std::cout << "  took: " << show_duration(d) << " @" << name_ << std::endl;
+      }
+    }
   }
 
   ~site_profiler() {
-    if (n_ > 0) {
+    if (metric_.n_ > 0) {
       report();
     }
   }
@@ -92,19 +122,8 @@ class site_profiler {
   void begin() {}
 
   void end(Duration d) {
-    if (d < min_) {
-      min_ = d;
-    }
-    if (d > max_) {
-      max_ = d;
-    }
-    total_ += d;
-    ++n_;
-
-    if (report_period_ > 0 && n_ % report_period_ == 0) {
-      report();
-      reset();
-    }
+    metric_.update(d);
+    history_.push_back(d);
   }
 };
 }  // namespace kungfu

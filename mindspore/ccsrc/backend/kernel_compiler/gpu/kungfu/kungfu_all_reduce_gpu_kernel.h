@@ -83,13 +83,22 @@ class KungFuAllReduceGpuKernel : public GpuKernel {
 
  protected:
   void InitResource() override {
-    init_kungfu_once();
-    init_kungfu_nccl_once();
+    {
+      KUNGFU_PROFILE_SITE(KungFuAllReduceGpuKernel::InitResource::init_kungfu_once);
+      init_kungfu_once();
+    }
+    {
+      KUNGFU_PROFILE_SITE(KungFuAllReduceGpuKernel::InitResource::init_kungfu_nccl_once);
+      init_kungfu_nccl_once();
+    }
     const auto nccl_scope_ = KungFu_NCCL_GLOBAL;
     nccl_scheduler_ = _kungfu_nccl_helper->EnsureScheduler(nccl_scope_);
     nccl_controller_ = _kungfu_nccl_helper->EnsureController(nccl_scope_);
     kungfu::Peer *peer = _kungfu_peer.get();
-    nccl_scheduler_->Do([=] { nccl_controller_->InitOnce(peer); });
+    {
+      KUNGFU_PROFILE_SITE(KungFuAllReduceGpuKernel::InitResource::init_nccl_controller);
+      nccl_scheduler_->Do([=] { nccl_controller_->InitOnce(peer); });
+    }
   }
 
   void InitSizeLists() override {
