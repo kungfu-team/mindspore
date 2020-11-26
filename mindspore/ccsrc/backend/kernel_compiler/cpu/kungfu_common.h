@@ -5,6 +5,7 @@
 #include <kungfu.h>
 
 #include "backend/kernel_compiler/cpu/cpu_kernel.h"
+#include "backend/kernel_compiler/cpu/kungfu_profiler.h"
 
 extern std::unique_ptr<kungfu::Peer> _kungfu_peer;
 extern bool _show_kungfu_debug_log;

@@ -16,7 +16,7 @@ export LD_LIBRARY_PATH=$KUNGFU_LIB_PATH:$ROOT/mindspore/lib:$ROOT/build/mindspor
 kungfu_run_flags() {
     echo -q
     echo -logdir logs
-    echo -np 1
+    echo -np $np
 }
 
 kungfu_run() {
@@ -44,10 +44,21 @@ app_flags() {
     echo --collective kungfu
 }
 
+trace() {
+    echo "BEGIN $@"
+    $@
+    echo "END $@"
+    echo
+    echo
+}
+
 main() {
     # kungfu_run python3.7 ./hello_world.py $(app_flags)
-    # kungfu_run python3.7 ./benchmark_all_reduce.py $(app_flags)
-    mpi_run python3.7 ./benchmark_all_reduce.py $(app_flags)
+    # for np in $(seq  4); do
+    np=4
+    trace kungfu_run python3.7 ./benchmark_all_reduce.py $(app_flags)
+    # done
+    # mpi_run python3.7 ./benchmark_all_reduce.py $(app_flags)
 }
 
 main

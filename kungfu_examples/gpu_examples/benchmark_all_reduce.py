@@ -50,6 +50,17 @@ def print_env():
     print(os.getenv('LD_LIBRARY_PATH'))
 
 
+def parse_kungfu_size():
+    val = os.getenv('KUNGFU_INIT_PEERS')
+    return len(val.split(','))
+
+
+def parse_kungfu_port():
+    val = os.getenv('KUNGFU_SELF_SPEC')
+    print(val)
+    return int(val.split(':')[1])
+
+
 def main():
     args = parse_args()
     ms.context.set_context(mode=ms.context.GRAPH_MODE,
@@ -60,9 +71,8 @@ def main():
         cluster_size = get_group_size()
         rank = get_rank()
     else:
-        # init() # will be faster
-        cluster_size = 4
-        rank = 0  # TODO: get kungfu rank
+        cluster_size = parse_kungfu_size()
+        rank = parse_kungfu_port() - 10000
 
     print('rank: %d, size: %d' % (rank, cluster_size))
 
