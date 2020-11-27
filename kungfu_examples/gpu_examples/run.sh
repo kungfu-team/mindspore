@@ -25,7 +25,7 @@ kungfu_run() {
 
 mpi_run_flags() {
     echo --allow-run-as-root
-    echo -np 4
+    echo -np $np
     echo -x LD_LIBRARY_PATH
 }
 
@@ -40,8 +40,9 @@ app_flags() {
     echo --warmup-steps 2
     echo --steps 100
 
+    echo --model vgg16
     # echo --collective mindspore
-    echo --collective kungfu
+    # echo --collective kungfu
 }
 
 trace() {
@@ -57,7 +58,6 @@ main() {
     # for np in $(seq  4); do
     np=4
     trace kungfu_run python3.7 ./benchmark_all_reduce.py $(app_flags)
-    # done
     # mpi_run python3.7 ./benchmark_all_reduce.py $(app_flags)
 }
 

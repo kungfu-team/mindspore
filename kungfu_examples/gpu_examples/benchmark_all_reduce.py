@@ -8,7 +8,7 @@ from mindspore.communication.management import get_group_size, get_rank, init
 
 import kungfu_mindspore_ops as kf
 
-grad_sizes = [
+resnet50 = [
     1000, 2048000, 2048, 2048, 2048, 1048576, 512, 512, 512, 2359296, 512, 512,
     512, 1048576, 2048, 2048, 2048, 1048576, 512, 512, 512, 2359296, 512, 512,
     512, 1048576, 2048, 2048, 2048, 2048, 2048, 2048, 1048576, 512, 512, 512,
@@ -28,20 +28,16 @@ grad_sizes = [
     16384, 16384, 64, 64, 64, 36864, 64, 64, 64, 4096, 64, 64, 64, 9408
 ]
 
+vgg16 = [
+    1728, 64, 36864, 64, 73728, 128, 147456, 128, 294912, 256, 589824, 256,
+    589824, 256, 1179648, 512, 2359296, 512, 2359296, 512, 2359296, 512,
+    2359296, 512, 2359296, 512, 102760448, 4096, 16777216, 4096, 4096000, 1000
+]
 
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument('--device',
-                   type=str,
-                   default="CPU",
-                   choices=['Ascend', 'GPU', 'CPU'])
-    p.add_argument('--warmup-steps', type=int, default=3)
-    p.add_argument('--steps', type=int, default=10)
-    p.add_argument('--collective',
-                   type=str,
-                   default='mindspore',
-                   choices=['mindspore', 'kungfu'])
-    return p.parse_args()
+model_grad_sizes = {
+    'resnet50': resnet50,
+    'vgg16': vgg16,
+}
 
 
 def print_env():
@@ -61,8 +57,30 @@ def parse_kungfu_port():
     return int(val.split(':')[1])
 
 
+def using_kungfu():
+    return bool(os.getenv('KUNGFU_SELF_SPEC'))
+
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument('--device',
+                   type=str,
+                   default="CPU",
+                   choices=['Ascend', 'GPU', 'CPU'])
+    p.add_argument('--warmup-steps', type=int, default=3)
+    p.add_argument('--steps', type=int, default=10)
+    p.add_argument('--model',
+                   type=str,
+                   default='resnet50',
+                   choices=['resnet50', 'vgg16'])
+    args = p.parse_args()
+    args.collective = 'kungfu' if using_kungfu() else 'mindspore'
+    return args
+
+
 def main():
     args = parse_args()
+    grad_sizes = model_grad_sizes[args.model]
     ms.context.set_context(mode=ms.context.GRAPH_MODE,
                            device_target=args.device)
 
