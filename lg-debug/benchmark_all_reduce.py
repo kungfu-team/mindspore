@@ -5,6 +5,7 @@ import time
 import mindspore as ms
 import numpy as np
 from mindspore.communication.management import get_group_size, get_rank, init
+from mindspore.ops import composite as C
 
 grad_sizes = [
     1000, 2048000, 2048, 2048, 2048, 1048576, 512, 512, 512, 2359296, 512, 512,
@@ -61,6 +62,7 @@ def main():
         ms.Tensor(np.array([1.0] * size).astype(np.float32))
         for size in grad_sizes
     ]
+    map_ = C.Map()
 
     data_size = sum(grad_sizes) * 4  #
     multiplier = 4 * (cluster_size - 1)
@@ -69,7 +71,7 @@ def main():
     def run_stage(name, steps):
         for i in range(steps):
             t0 = time.time()
-            ys = [all_reduce(x) for x in xs]
+            ys = map_(all_reduce, xs)
             t1 = time.time()
             d = t1 - t0
             rate = float(data_size) * multiplier / Gi / d
