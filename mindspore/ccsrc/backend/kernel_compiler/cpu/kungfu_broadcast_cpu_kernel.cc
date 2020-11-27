@@ -6,10 +6,7 @@
 
 namespace mindspore {
 namespace kernel {
-void KungFuBroadcastCPUKernel::InitKernel(const CNodePtr &kernel_node) {
-  LOG_InitKernel("KungFuBroadcastCPUKernel");
-  init_kungfu_once();
-}
+void KungFuBroadcastCPUKernel::InitKernel(const CNodePtr &kernel_node) { LOG_InitKernel("KungFuBroadcastCPUKernel"); }
 
 bool KungFuBroadcastCPUKernel::Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
                                       const std::vector<AddressPtr> &outputs) {

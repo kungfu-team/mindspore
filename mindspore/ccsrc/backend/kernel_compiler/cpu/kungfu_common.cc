@@ -21,13 +21,6 @@ void kungfu_finalize() {
   MS_LOG(ERROR) << "END " << __func__;
 }
 
-// TODO: mutex?
-void init_kungfu_once() {
-  if (_kungfu_peer.get() == nullptr) {
-    _kungfu_peer.reset(new kungfu::Peer);
-  }
-}
-
 void LOG_InitKernel(const std::string &kernel_name) {
   if (_show_kungfu_debug_log) {
     std::cerr << kernel_name << "::InitKernel called" << std::endl;

@@ -1,5 +1,3 @@
-#include <mutex>
-
 #include <kungfu/nccl/helper.hpp>
 
 #include "pybind_api/api_register.h"
@@ -32,16 +30,6 @@ void kungfu_nccl_finalize() {
   _kungfu_nccl_helper.reset(nullptr);
   MS_LOG(ERROR) << "END " << __func__;
 }
-
-void init_kungfu_nccl_once() {
-  static std::mutex mu;
-  std::lock_guard<std::mutex> _(mu);
-  if (_kungfu_nccl_helper.get() == nullptr) {
-    _kungfu_nccl_helper.reset(new kungfu::NCCLHelper);
-  }
-}
-
-void finalize_kungfu_nccl() { _kungfu_nccl_helper.reset(nullptr); }
 
 REGISTER_PYBIND_DEFINE(KungFuNccl, ([](py::module *m) {
                          m->def("kungfu_nccl_init", &kungfu_nccl_init);

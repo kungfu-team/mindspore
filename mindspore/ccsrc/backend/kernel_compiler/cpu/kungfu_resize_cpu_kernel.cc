@@ -4,10 +4,7 @@
 
 namespace mindspore {
 namespace kernel {
-void KungFuResizeCPUKernel::InitKernel(const CNodePtr &kernel_node) {
-  LOG_InitKernel("KungFuResizeCPUKernel");
-  init_kungfu_once();
-}
+void KungFuResizeCPUKernel::InitKernel(const CNodePtr &kernel_node) { LOG_InitKernel("KungFuResizeCPUKernel"); }
 
 bool KungFuResizeCPUKernel::Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
                                    const std::vector<AddressPtr> &outputs) {

@@ -13,8 +13,6 @@ extern bool _show_kungfu_debug_log;
 namespace mindspore {
 namespace kernel {
 
-void init_kungfu_once();
-
 void LOG_InitKernel(const std::string &kernel_name);
 
 void LOG_Kernel_Launch(const std::string &kernel_name, const std::vector<AddressPtr> &inputs,
