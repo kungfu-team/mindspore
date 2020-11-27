@@ -8,8 +8,7 @@ from mindspore._c_expression import (kungfu_finalize, kungfu_hello_world,
                                      kungfu_init, kungfu_nccl_finalize,
                                      kungfu_nccl_init)
 from mindspore.communication.management import get_group_size, get_rank, init
-
-import kungfu_mindspore_ops as kf
+from mindspore.ops.operations.kungfu_comm_ops import KungFuAllReduce
 
 resnet50 = [
     1000, 2048000, 2048, 2048, 2048, 1048576, 512, 512, 512, 2359296, 512, 512,
@@ -104,7 +103,7 @@ def main():
     if args.collective == 'mindspore':
         all_reduce = ms.ops.operations.AllReduce()
     elif args.collective == 'kungfu':
-        all_reduce = kf.AllReduce()
+        all_reduce = KungFuAllReduce()
     else:
         raise RuntimeError('invalid collective')
 
