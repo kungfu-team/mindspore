@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <vector>
 #include <string>
+#include <thread>
 #include <map>
 #include "backend/kernel_compiler/gpu/gpu_kernel.h"
 #include "backend/kernel_compiler/gpu/gpu_kernel_factory.h"
@@ -75,6 +76,8 @@ class NcclGpuKernel : public GpuKernel {
   bool Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &,
               const std::vector<AddressPtr> &outputs, void *stream_ptr) override {
     KUNGFU_PROFILE_SITE(NcclGpuKernel::Launch);
+    MS_LOG(WARNING) << "NcclGpuKernel::Launch tid: " << std::this_thread::get_id();
+
     T *input_addr = GetDeviceAddress<T>(inputs, 0);
     T *output_addr = GetDeviceAddress<T>(outputs, 0);
 

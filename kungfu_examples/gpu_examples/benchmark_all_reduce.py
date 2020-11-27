@@ -4,6 +4,9 @@ import time
 
 import mindspore as ms
 import numpy as np
+from mindspore._c_expression import (kungfu_finalize, kungfu_hello_world,
+                                     kungfu_init, kungfu_nccl_finalize,
+                                     kungfu_nccl_init)
 from mindspore.communication.management import get_group_size, get_rank, init
 
 import kungfu_mindspore_ops as kf
@@ -79,8 +82,10 @@ def parse_args():
 
 
 def main():
+    kungfu_hello_world()
     args = parse_args()
     grad_sizes = model_grad_sizes[args.model]
+
     ms.context.set_context(mode=ms.context.GRAPH_MODE,
                            device_target=args.device)
 
@@ -89,6 +94,8 @@ def main():
         cluster_size = get_group_size()
         rank = get_rank()
     else:
+        kungfu_init()
+        kungfu_nccl_init()
         cluster_size = parse_kungfu_size()
         rank = parse_kungfu_port() - 10000
 
@@ -123,6 +130,10 @@ def main():
 
     run_stage('warmup', args.warmup_steps)
     run_stage('step', args.steps)
+
+    if args.collective == 'kungfu':
+        kungfu_nccl_finalize()
+        kungfu_finalize()
 
 
 main()

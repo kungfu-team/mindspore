@@ -2,8 +2,8 @@
 
 #include <kungfu/nccl/helper.hpp>
 
-// #include "backend/kernel_compiler/cpu/cpu_kernel_factory.h"
-// #include "backend/kernel_compiler/cpu/cpu_kernel.h"
+#include "pybind_api/api_register.h"
+#include "backend/kernel_compiler/cpu/kungfu_common.h"
 #include "backend/kernel_compiler/gpu/gpu_kernel_factory.h"
 #include "backend/kernel_compiler/gpu/gpu_kernel.h"
 #include "backend/kernel_compiler/gpu/kungfu/kungfu_gpu_common.h"
@@ -13,6 +13,26 @@ std::unique_ptr<kungfu::NCCLHelper> _kungfu_nccl_helper;
 
 namespace mindspore {
 namespace kernel {
+void kungfu_nccl_init() {
+  MS_LOG(ERROR) << "BEGIN " << __func__;
+  _kungfu_nccl_helper.reset(new kungfu::NCCLHelper);
+
+  const auto nccl_scope = KungFu_NCCL_GLOBAL;
+  // auto nccl_scheduler =
+  _kungfu_nccl_helper->EnsureScheduler(nccl_scope);
+  auto nccl_controller = _kungfu_nccl_helper->EnsureController(nccl_scope);
+
+  kungfu::Peer *peer = _kungfu_peer.get();
+  nccl_controller->InitOnce(peer);
+  MS_LOG(ERROR) << "END " << __func__;
+}
+
+void kungfu_nccl_finalize() {
+  MS_LOG(ERROR) << "BEGIN " << __func__;
+  _kungfu_nccl_helper.reset(nullptr);
+  MS_LOG(ERROR) << "END " << __func__;
+}
+
 void init_kungfu_nccl_once() {
   static std::mutex mu;
   std::lock_guard<std::mutex> _(mu);
@@ -23,21 +43,9 @@ void init_kungfu_nccl_once() {
 
 void finalize_kungfu_nccl() { _kungfu_nccl_helper.reset(nullptr); }
 
-/*
-class KungFuFinalizeNcclCPUKernel : public CPUKernel {
-   public:
-    KungFuFinalizeNcclCPUKernel() { MS_LOG(WARNING) << __func__ << " called"; }
-
-    void InitKernel(const CNodePtr &kernel_node) override {}
-
-    bool Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
-                const std::vector<AddressPtr> &outputs) override {
-        MS_LOG(WARNING) << "KungFuFinalizeNcclCPUKernel" << __func__ << " called";
-        finalize_kungfu_nccl();
-    }
-};
-
-MS_REG_CPU_KERNEL(KungFuFinalizeNccl, KernelAttr(), KungFuFinalizeNcclCPUKernel);
-*/
+REGISTER_PYBIND_DEFINE(KungFuNccl, ([](py::module *m) {
+                         m->def("kungfu_nccl_init", &kungfu_nccl_init);
+                         m->def("kungfu_nccl_finalize", &kungfu_nccl_finalize);
+                       }));
 }  // namespace kernel
 }  // namespace mindspore

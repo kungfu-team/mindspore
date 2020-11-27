@@ -37,8 +37,8 @@ app_flags() {
     # echo --device CPU
     echo --device GPU
 
-    echo --warmup-steps 2
-    echo --steps 100
+    echo --warmup-steps 1
+    echo --steps 3
 
     # echo --model vgg16
     echo --model resnet50
@@ -58,8 +58,9 @@ main() {
     # kungfu_run python3.7 ./hello_world.py $(app_flags)
     # for np in $(seq  4); do
     np=4
-    trace kungfu_run python3.7 ./benchmark_all_reduce.py $(app_flags)
-    # mpi_run python3.7 ./benchmark_all_reduce.py $(app_flags)
+    # trace kungfu_run python3.7 ./benchmark_all_reduce.py $(app_flags)
+    mpi_run python3.7 ./benchmark_all_reduce.py $(app_flags)
 }
 
+# export GLOG_v=0
 main

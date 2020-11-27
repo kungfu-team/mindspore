@@ -100,23 +100,9 @@ class KungFuAllReduceGpuKernel : public GpuKernel {
 
  protected:
   void InitResource() override {
-    {
-      KUNGFU_PROFILE_SITE(KungFuAllReduceGpuKernel::InitResource::init_kungfu_once);
-      init_kungfu_once();
-    }
-    {
-      KUNGFU_PROFILE_SITE(KungFuAllReduceGpuKernel::InitResource::init_kungfu_nccl_once);
-      init_kungfu_nccl_once();
-    }
     const auto nccl_scope_ = KungFu_NCCL_GLOBAL;
     nccl_scheduler_ = _kungfu_nccl_helper->EnsureScheduler(nccl_scope_);
     nccl_controller_ = _kungfu_nccl_helper->EnsureController(nccl_scope_);
-    kungfu::Peer *peer = _kungfu_peer.get();
-    {
-      KUNGFU_PROFILE_SITE(KungFuAllReduceGpuKernel::InitResource::init_nccl_controller);
-      // nccl_scheduler_->Do([=] { nccl_controller_->InitOnce(peer); });
-      nccl_controller_->InitOnce(peer);
-    }
   }
 
   void InitSizeLists() override {
@@ -126,9 +112,7 @@ class KungFuAllReduceGpuKernel : public GpuKernel {
   }
 
  private:
-  void DestroyResource() noexcept {
-    // noop
-  }
+  void DestroyResource() noexcept {}
 
   void InferInAndOutDesc(const std::vector<size_t> &input_shape, const std::vector<size_t> &output_shape) {
     input_count_ = std::accumulate(input_shape.begin(), input_shape.end(), 1, std::multiplies<size_t>());
