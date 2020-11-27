@@ -44,7 +44,7 @@ class site_profiler {
 
   static std::string show_duration(const Duration &d) {
     std::stringstream ss;
-    ss << std::setprecision(4) << std::setw(6);
+    ss << std::setprecision(4) << std::setw(8);
     if (d < std::chrono::microseconds(1)) {
       ss << d.count() << "ns";
     } else if (d < std::chrono::milliseconds(1)) {

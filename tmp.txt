@@ -1,0 +1,3 @@
+called  21828 times,    mean:  292.9us,    total:  6.393s,    min:  43.87us,    max:   21.1ms,    @KungFuAllReduceGpuKernel::Launch
+called  21828 times,    mean:  8.189us,    total:  178.8ms,    min:   6.62us,    max:  67.55us,    @NcclGpuKernel::Launch
+called  21828 times,    mean:    73.65us,    total:    1.608s,    min:    22.39us,    max:    1.727ms,    @KungFuAllReduceGpuKernel::Launch

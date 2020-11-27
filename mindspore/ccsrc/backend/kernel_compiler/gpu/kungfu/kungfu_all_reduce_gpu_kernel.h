@@ -23,6 +23,7 @@ class KungFuAllReduceGpuKernel : public GpuKernel {
   KungFuAllReduceGpuKernel()
       : nccl_controller_(nullptr),
         nccl_scheduler_(nullptr),
+        comm_stream_(nullptr),
         input_count_(0),
         output_count_(0),
         input_size_(0),
@@ -45,13 +46,13 @@ class KungFuAllReduceGpuKernel : public GpuKernel {
     const T *input_addr = GetDeviceAddress<T>(inputs, 0);
     T *output_addr = GetDeviceAddress<T>(outputs, 0);
 
+    cudaStream_t stream = comm_stream_ ? comm_stream_ : reinterpret_cast<cudaStream_t>(stream_ptr);
+    // MS_LOG(WARNING) << "using stream " << stream;
+
     auto w = make_kungfu_workspace(input_addr, output_addr, input_count_);
     const auto op = KungFu_SUM;  // TODO: support more ops
     // TODO: support async
-    nccl_scheduler_->Do([=] {
-      auto done = [] {};
-      nccl_controller_->AllReduce(w, op, done);
-    });
+    nccl_scheduler_->Do([=] { nccl_controller_->AllReduce(w, op, stream); });
     return true;
   }
 
@@ -78,6 +79,20 @@ class KungFuAllReduceGpuKernel : public GpuKernel {
     InferInAndOutDesc(inputA_shape, outputC_shape);
 
     InitSizeLists();
+
+    // [ERROR] KERNEL(19509,python3.7):2020-11-27-05:25:13.791.838
+    // [mindspore/ccsrc/backend/kernel_compiler/gpu/gpu_kernel.h:76] GetAttr] The attr(group) of kernel(KungFuAllReduce)
+    // not exist
+    // group_name_ = GetAttr<std::string>(kernel_node, kAttrGroup); MS_LOG(WARNING) <<
+    // AnfAlgo::GetCNodeName(kernel_node) << " for group " << group_name_;
+
+    auto comm_stream_attr = AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr("stream_id");
+    if (comm_stream_attr) {
+      comm_stream_ = reinterpret_cast<cudaStream_t>(GetValue<uintptr_t>(comm_stream_attr));
+      MS_EXCEPTION_IF_NULL(comm_stream_);
+      MS_LOG(WARNING) << "got kernel_node stream_id: " << comm_stream_;
+    }
+
     return true;
   }
 
@@ -122,7 +137,9 @@ class KungFuAllReduceGpuKernel : public GpuKernel {
   kungfu::NCCLController *nccl_controller_;
   kungfu::NCCLScheduler *nccl_scheduler_;
 
+  cudaStream_t comm_stream_;
   cudnnDataType_t data_type_;
+  std::string group_name_;
 
   size_t input_count_;
   size_t output_count_;

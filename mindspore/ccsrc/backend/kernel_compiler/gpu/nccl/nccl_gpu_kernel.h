@@ -27,6 +27,7 @@
 #include "backend/kernel_compiler/gpu/gpu_kernel_factory.h"
 #include "backend/kernel_compiler/gpu/kernel_constants.h"
 #include "runtime/device/gpu/distribution/collective_init.h"
+#include "backend/kernel_compiler/cpu/kungfu_profiler.h"
 
 namespace mindspore {
 namespace kernel {
@@ -73,6 +74,7 @@ class NcclGpuKernel : public GpuKernel {
   const std::vector<size_t> &GetWorkspaceSizeList() const override { return workspace_size_list_; }
   bool Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &,
               const std::vector<AddressPtr> &outputs, void *stream_ptr) override {
+    KUNGFU_PROFILE_SITE(NcclGpuKernel::Launch);
     T *input_addr = GetDeviceAddress<T>(inputs, 0);
     T *output_addr = GetDeviceAddress<T>(outputs, 0);
 
