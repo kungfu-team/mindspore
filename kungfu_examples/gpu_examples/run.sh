@@ -40,7 +40,8 @@ app_flags() {
     echo --warmup-steps 2
     echo --steps 100
 
-    echo --model vgg16
+    # echo --model vgg16
+    echo --model resnet50
     # echo --collective mindspore
     # echo --collective kungfu
 }

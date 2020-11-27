@@ -51,8 +51,10 @@ class KungFuAllReduceGpuKernel : public GpuKernel {
 
     auto w = make_kungfu_workspace(input_addr, output_addr, input_count_);
     const auto op = KungFu_SUM;  // TODO: support more ops
+
     // TODO: support async
-    nccl_scheduler_->Do([=] { nccl_controller_->AllReduce(w, op, stream); });
+    // nccl_scheduler_->Do([=] { nccl_controller_->AllReduce(w, op, stream); });
+    nccl_controller_->AllReduce(w, op, stream);
     return true;
   }
 
@@ -112,7 +114,8 @@ class KungFuAllReduceGpuKernel : public GpuKernel {
     kungfu::Peer *peer = _kungfu_peer.get();
     {
       KUNGFU_PROFILE_SITE(KungFuAllReduceGpuKernel::InitResource::init_nccl_controller);
-      nccl_scheduler_->Do([=] { nccl_controller_->InitOnce(peer); });
+      // nccl_scheduler_->Do([=] { nccl_controller_->InitOnce(peer); });
+      nccl_controller_->InitOnce(peer);
     }
   }
 

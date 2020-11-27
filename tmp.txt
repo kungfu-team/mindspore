@@ -6,6 +6,10 @@ called  21828 times,    mean:    8.139us,    total:    177.7ms,    min:    6.505
 called  21828 times,    mean:    9.131us,    total:    199.3ms,    min:    7.058us,    max:     3.69ms,    @NcclGpuKernel::Launch
 called  21828 times,    mean:     8.47us,    total:    184.9ms,    min:    7.062us,    max:    119.7us,    @NcclGpuKernel::Launch
 
+without scheduler:
+step 100 took 131.851ms, data rate: 8.674GiB/s
+called  21828 times,    mean:    9.926us,    total:    216.7ms,    min:    5.757us,    max:    65.84us,    @KungFuAllReduceGpuKernel::Launch
+
 
 
 vgg16
