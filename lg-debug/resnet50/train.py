@@ -19,9 +19,8 @@ import inspect
 import os
 
 
-def lineno():
-    """Returns the current line number in our program."""
-    return inspect.currentframe().f_back.f_lineno
+def src_location(name=''):
+    return '%s:%d' % (name, inspect.currentframe().f_back.f_lineno)
 
 
 import mindspore.common.initializer as weight_init
@@ -165,7 +164,7 @@ if __name__ == '__main__':
                                             cell.weight.shape,
                                             cell.weight.dtype))
 
-    print("reached line:%d" % (lineno()))
+    print("reached %s" % (src_location(__file__)))
 
     # init lr
     if args_opt.net == "resnet50" or args_opt.net == "se-resnet50":
@@ -183,7 +182,7 @@ if __name__ == '__main__':
                                         config.pretrain_epoch_size * step_size)
     lr = Tensor(lr)
 
-    print("reached line:%d" % (lineno()))
+    print("reached %s" % (src_location(__file__)))
 
     # define opt
     decayed_params = []
@@ -203,7 +202,7 @@ if __name__ == '__main__':
         'order_params': net.trainable_params()
     }]
 
-    print("reached line:%d" % (lineno()))
+    print("reached %s" % (src_location(__file__)))
 
     opt = Momentum(group_params,
                    lr,
@@ -243,7 +242,7 @@ if __name__ == '__main__':
 
         if (args_opt.net == "resnet101" or args_opt.net
                 == "resnet50") and not args_opt.parameter_server:
-            print("reached line:%d" % (lineno()))
+            print("reached %s" % (src_location(__file__)))
             opt = Momentum(
                 filter(lambda x: x.requires_grad, net.get_parameters()), lr,
                 config.momentum, config.weight_decay, config.loss_scale)
@@ -257,7 +256,7 @@ if __name__ == '__main__':
                           metrics={'acc'},
                           amp_level="O2",
                           keep_batchnorm_fp32=False)
-            print("reached line:%d" % (lineno()))
+            print("reached %s" % (src_location(__file__)))
         else:
             ## fp32 training
             opt = Momentum(
@@ -265,7 +264,7 @@ if __name__ == '__main__':
                 config.momentum, config.weight_decay)
             model = Model(net, loss_fn=loss, optimizer=opt, metrics={'acc'})
 
-    print("reached line:%d" % (lineno()))
+    print("reached %s" % (src_location(__file__)))
 
     # define callbacks
     time_cb = TimeMonitor(data_size=step_size)
@@ -280,12 +279,13 @@ if __name__ == '__main__':
                                   config=config_ck)
         cb += [ckpt_cb]
 
-    print("reached line:%d" % (lineno()))
+    print("reached %s" % (src_location(__file__)))
 
     print('before train model')
     # train model
     if args_opt.net == "se-resnet50":
         config.epoch_size = config.train_epoch_size
+    print("reached %s" % (src_location(__file__)))
     model.train(config.epoch_size - config.pretrain_epoch_size,
                 dataset,
                 callbacks=cb,

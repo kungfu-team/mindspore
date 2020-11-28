@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright 2020 Huawei Technologies Co., Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,28 +14,34 @@
 # limitations under the License.
 # ============================================================================
 """Model."""
+import inspect
+import math
+import os
 from collections.abc import Iterable
 
-import os
-import math
 import numpy as np
-
 from mindspore import log as logger
+
+from .. import context, nn
+from .._checkparam import (Validator, check_input_data, check_int,
+                           check_output_data)
 from ..common.tensor import Tensor
-from ..nn.metrics import get_metrics
-from .._checkparam import check_input_data, check_output_data, Validator, check_int
-from .callback import _InternalCallbackParam, RunContext, _CallbackManager
-from .. import context
-from ..parallel._utils import _get_parallel_mode, _get_device_num, _get_global_rank, \
-    _get_parameter_broadcast, _device_number_check, _parameter_broadcast_check
-from ..parallel._ps_context import _is_role_pserver, _is_role_sched
-from ..nn.metrics import Loss
-from .. import nn
-from ..nn.wrap.cell_wrapper import _VirtualDatasetCell
 from ..context import ParallelMode
+from ..nn.metrics import Loss, get_metrics
+from ..nn.wrap.cell_wrapper import _VirtualDatasetCell
 from ..parallel._cost_model_context import _set_multi_subgraphs
-from .dataset_helper import DatasetHelper, connect_network_with_dataset
+from ..parallel._ps_context import _is_role_pserver, _is_role_sched
+from ..parallel._utils import (_device_number_check, _get_device_num,
+                               _get_global_rank, _get_parallel_mode,
+                               _get_parameter_broadcast,
+                               _parameter_broadcast_check)
 from . import amp
+from .callback import RunContext, _CallbackManager, _InternalCallbackParam
+from .dataset_helper import DatasetHelper, connect_network_with_dataset
+
+
+def src_location(name=''):
+    return '%s:%d' % (name, inspect.currentframe().f_back.f_lineno)
 
 
 def _transfer_tensor_to_tuple(inputs):
@@ -42,7 +49,7 @@ def _transfer_tensor_to_tuple(inputs):
     If the input is a tensor, convert it to a tuple. If not, the output is unchanged.
     """
     if isinstance(inputs, Tensor):
-        return (inputs,)
+        return (inputs, )
 
     return inputs
 
@@ -111,9 +118,15 @@ class Model:
         >>> dataset = get_dataset()
         >>> model.train(2, dataset)
     """
-
-    def __init__(self, network, loss_fn=None, optimizer=None, metrics=None, eval_network=None,
-                 eval_indexes=None, amp_level="O0", **kwargs):
+    def __init__(self,
+                 network,
+                 loss_fn=None,
+                 optimizer=None,
+                 metrics=None,
+                 eval_network=None,
+                 eval_indexes=None,
+                 amp_level="O0",
+                 **kwargs):
         self._network = network
         self._loss_fn = loss_fn
         self._optimizer = optimizer
@@ -150,26 +163,30 @@ class Model:
         """Build train network"""
         network = self._network
         if self._loss_scale_manager is not None and self._optimizer is None:
-            raise ValueError("Optimizer can not be None when set loss_scale_manager.")
+            raise ValueError(
+                "Optimizer can not be None when set loss_scale_manager.")
         if self._optimizer:
             if self._loss_scale_manager_set:
-                network = amp.build_train_network(network,
-                                                  self._optimizer,
-                                                  self._loss_fn,
-                                                  level=self._amp_level,
-                                                  loss_scale_manager=self._loss_scale_manager,
-                                                  keep_batchnorm_fp32=self._keep_bn_fp32)
+                network = amp.build_train_network(
+                    network,
+                    self._optimizer,
+                    self._loss_fn,
+                    level=self._amp_level,
+                    loss_scale_manager=self._loss_scale_manager,
+                    keep_batchnorm_fp32=self._keep_bn_fp32)
             else:
-                network = amp.build_train_network(network,
-                                                  self._optimizer,
-                                                  self._loss_fn,
-                                                  level=self._amp_level,
-                                                  keep_batchnorm_fp32=self._keep_bn_fp32)
+                network = amp.build_train_network(
+                    network,
+                    self._optimizer,
+                    self._loss_fn,
+                    level=self._amp_level,
+                    keep_batchnorm_fp32=self._keep_bn_fp32)
         elif self._loss_fn:
             network = nn.WithLossCell(network, self._loss_fn)
         # If need to check if loss_fn is not None, but optimizer is None
 
-        if self._parallel_mode in (ParallelMode.SEMI_AUTO_PARALLEL, ParallelMode.AUTO_PARALLEL):
+        if self._parallel_mode in (ParallelMode.SEMI_AUTO_PARALLEL,
+                                   ParallelMode.AUTO_PARALLEL):
             network.set_auto_parallel()
             if self._optimizer is None:
                 # In this case, multiple optimizer(s) is supposed to be included in 'self._network'
@@ -183,19 +200,25 @@ class Model:
             return
 
         if eval_network is not None:
-            if eval_indexes is not None and not (isinstance(eval_indexes, list) and len(eval_indexes) == 3):
-                raise ValueError("Eval_indexes must be a list or None. If eval_indexes is a list, length of it \
-                                 must be three. But got {}".format(eval_indexes))
+            if eval_indexes is not None and not (isinstance(
+                    eval_indexes, list) and len(eval_indexes) == 3):
+                raise ValueError(
+                    "Eval_indexes must be a list or None. If eval_indexes is a list, length of it \
+                                 must be three. But got {}".format(
+                        eval_indexes))
 
             self._eval_network = eval_network
             self._eval_indexes = eval_indexes
         else:
             if self._loss_fn is None:
                 raise ValueError("loss_fn can not be None.")
-            self._eval_network = nn.WithEvalCell(self._network, self._loss_fn, self._amp_level in ["O2", "O3", "auto"])
+            self._eval_network = nn.WithEvalCell(
+                self._network, self._loss_fn, self._amp_level
+                in ["O2", "O3", "auto"])
             self._eval_indexes = [0, 1, 2]
 
-        if self._parallel_mode in (ParallelMode.SEMI_AUTO_PARALLEL, ParallelMode.AUTO_PARALLEL):
+        if self._parallel_mode in (ParallelMode.SEMI_AUTO_PARALLEL,
+                                   ParallelMode.AUTO_PARALLEL):
             if self._optimizer:
                 self._eval_network = _VirtualDatasetCell(self._eval_network)
             if self._optimizer is None:
@@ -206,7 +229,8 @@ class Model:
     def _build_predict_network(self):
         """Build the network for prediction."""
         self._predict_network = self._network
-        if self._parallel_mode in (ParallelMode.SEMI_AUTO_PARALLEL, ParallelMode.AUTO_PARALLEL):
+        if self._parallel_mode in (ParallelMode.SEMI_AUTO_PARALLEL,
+                                   ParallelMode.AUTO_PARALLEL):
             self._predict_network = _VirtualDatasetCell(self._network)
             # Unlike the cases in build_train_network() and build_eval_network(), 'multi_subgraphs' is not set
             self._predict_network.set_auto_parallel()
@@ -222,7 +246,8 @@ class Model:
             raise ValueError("The `outputs` is not tuple.")
 
         if self._eval_indexes is not None and len(outputs) < 3:
-            raise ValueError("The length of `outputs` must be greater than or equal to 3, \
+            raise ValueError(
+                "The length of `outputs` must be greater than or equal to 3, \
                              but got {}".format(len(outputs)))
 
         for metric in self._metric_fns.values():
@@ -232,7 +257,8 @@ class Model:
                 if isinstance(metric, Loss):
                     metric.update(outputs[self._eval_indexes[0]])
                 else:
-                    metric.update(outputs[self._eval_indexes[1]], outputs[self._eval_indexes[2]])
+                    metric.update(outputs[self._eval_indexes[1]],
+                                  outputs[self._eval_indexes[2]])
 
     def _get_metrics(self):
         """Get metrics local values."""
@@ -250,11 +276,19 @@ class Model:
             scaling_sens /= self._device_number
         return scaling_sens
 
-    def _exec_preprocess(self, network, is_train, phase, dataset, dataset_sink_mode, sink_size=-1, epoch_num=1):
+    def _exec_preprocess(self,
+                         network,
+                         is_train,
+                         phase,
+                         dataset,
+                         dataset_sink_mode,
+                         sink_size=-1,
+                         epoch_num=1):
         """Initializes dataset."""
         if dataset_sink_mode and not is_train:
             dataset.__loop_size__ = 1
-        dataset_helper = DatasetHelper(dataset, dataset_sink_mode, sink_size, epoch_num)
+        dataset_helper = DatasetHelper(dataset, dataset_sink_mode, sink_size,
+                                       epoch_num)
 
         if dataset_sink_mode:
             network = connect_network_with_dataset(network, dataset_helper)
@@ -262,7 +296,8 @@ class Model:
         network.set_train(is_train)
         network.phase = phase
 
-        if self._parallel_mode in (ParallelMode.SEMI_AUTO_PARALLEL, ParallelMode.AUTO_PARALLEL):
+        if self._parallel_mode in (ParallelMode.SEMI_AUTO_PARALLEL,
+                                   ParallelMode.AUTO_PARALLEL):
             network.set_auto_parallel()
 
         return dataset_helper, network
@@ -281,26 +316,34 @@ class Model:
                                      will be initialized, and `metrics` in `Model` can not be None. Default: None.
             sink_size (int): Control the amount of data in each sink. Default: -1.
         """
-        if context.get_context("mode") != context.GRAPH_MODE or context.get_context("device_target") != "Ascend":
-            raise RuntimeError('Pre-init process only supports GRAPH MODE and Ascend target currently.')
+        if context.get_context(
+                "mode") != context.GRAPH_MODE or context.get_context(
+                    "device_target") != "Ascend":
+            raise RuntimeError(
+                'Pre-init process only supports GRAPH MODE and Ascend target currently.'
+            )
 
         if not train_dataset and not valid_dataset:
-            raise ValueError('Both train_dataset and valid_dataset can not be None or empty.')
+            raise ValueError(
+                'Both train_dataset and valid_dataset can not be None or empty.'
+            )
 
         _device_number_check(self._parallel_mode, self._device_number)
 
         if train_dataset:
-            _parameter_broadcast_check(self._parallel_mode, self._parameter_broadcast)
+            _parameter_broadcast_check(self._parallel_mode,
+                                       self._parameter_broadcast)
             if self._parameter_broadcast:
                 self._train_network.set_broadcast_flag()
 
             train_dataset.__no_send__ = True
-            train_dataset_helper, train_network = self._exec_preprocess(self._train_network,
-                                                                        is_train=True,
-                                                                        phase='train',
-                                                                        dataset=train_dataset,
-                                                                        dataset_sink_mode=True,
-                                                                        sink_size=sink_size)
+            train_dataset_helper, train_network = self._exec_preprocess(
+                self._train_network,
+                is_train=True,
+                phase='train',
+                dataset=train_dataset,
+                dataset_sink_mode=True,
+                sink_size=sink_size)
             self._train_network = train_network
             for inputs in train_dataset_helper:
                 self._train_network.compile(*inputs)
@@ -308,20 +351,29 @@ class Model:
 
         if valid_dataset:
             if not self._metric_fns:
-                raise RuntimeError('If define `valid_dataset`, metric fn can not be None or empty.')
+                raise RuntimeError(
+                    'If define `valid_dataset`, metric fn can not be None or empty.'
+                )
 
             valid_dataset.__no_send__ = True
-            valid_dataset_helper, eval_network = self._exec_preprocess(self._eval_network,
-                                                                       is_train=False,
-                                                                       phase='eval',
-                                                                       dataset=valid_dataset,
-                                                                       dataset_sink_mode=True)
+            valid_dataset_helper, eval_network = self._exec_preprocess(
+                self._eval_network,
+                is_train=False,
+                phase='eval',
+                dataset=valid_dataset,
+                dataset_sink_mode=True)
             self._eval_network = eval_network
             for inputs in valid_dataset_helper:
                 self._eval_network.compile(*inputs)
                 break
 
-    def _train(self, epoch, train_dataset, callbacks=None, dataset_sink_mode=True, sink_size=-1):
+    def _train(self,
+               epoch,
+               train_dataset,
+               callbacks=None,
+               dataset_sink_mode=True,
+               sink_size=-1):
+        print("reached %s" % (src_location(__file__)))
         """
         Training.
 
@@ -339,10 +391,13 @@ class Model:
                                       dataset not sink.
             sink_size (int): Control the amount of data in each sink. Default: -1.
         """
+        print("reached %s" % (src_location(__file__)))
         epoch = Validator.check_positive_int(epoch)
+        print("reached %s" % (src_location(__file__)))
         if self._parameter_broadcast:
             self._train_network.set_broadcast_flag()
 
+        print("reached %s" % (src_location(__file__)))
         cb_params = _InternalCallbackParam()
         cb_params.train_network = self._train_network
         cb_params.epoch_num = epoch
@@ -361,17 +416,26 @@ class Model:
         cb_params.network = self._network
         if _is_role_pserver() or _is_role_sched():
             epoch = 1
-
+        print("reached %s" % (src_location(__file__)))
         # build callback list
         with _CallbackManager(callbacks) as list_callback:
             if not dataset_sink_mode:
-                self._train_process(epoch, train_dataset, list_callback, cb_params)
-            elif context.get_context("mode") == context.PYNATIVE_MODE or context.get_context("device_target") == "CPU":
-                logger.warning("The pynative mode and CPU cannot support dataset sink mode currently."
-                               "So the training process will be performed with dataset not sink.")
-                self._train_process(epoch, train_dataset, list_callback, cb_params)
+                self._train_process(epoch, train_dataset, list_callback,
+                                    cb_params)
+            elif context.get_context(
+                    "mode") == context.PYNATIVE_MODE or context.get_context(
+                        "device_target") == "CPU":
+                logger.warning(
+                    "The pynative mode and CPU cannot support dataset sink mode currently."
+                    "So the training process will be performed with dataset not sink."
+                )
+                self._train_process(epoch, train_dataset, list_callback,
+                                    cb_params)
             else:
-                self._train_dataset_sink_process(epoch, train_dataset, list_callback, cb_params, sink_size)
+                print("reached %s" % (src_location(__file__)))
+                self._train_dataset_sink_process(epoch, train_dataset,
+                                                 list_callback, cb_params,
+                                                 sink_size)
 
     @staticmethod
     def _transform_callbacks(callbacks):
@@ -384,7 +448,13 @@ class Model:
 
         return [callbacks]
 
-    def _train_dataset_sink_process(self, epoch, train_dataset, list_callback=None, cb_params=None, sink_size=-1):
+    def _train_dataset_sink_process(self,
+                                    epoch,
+                                    train_dataset,
+                                    list_callback=None,
+                                    cb_params=None,
+                                    sink_size=-1):
+        print("reached %s" % (src_location(__file__)))
         """
         Training process. The data would be passed to network through dataset channel.
 
@@ -402,15 +472,19 @@ class Model:
         if sink_size == -1:
             epoch_num = epoch
         else:
-            epoch_num = math.ceil(epoch * sink_size / train_dataset.get_dataset_size())
+            epoch_num = math.ceil(epoch * sink_size /
+                                  train_dataset.get_dataset_size())
 
-        dataset_helper, train_network = self._exec_preprocess(self._train_network,
-                                                              is_train=True,
-                                                              phase='train',
-                                                              dataset=train_dataset,
-                                                              dataset_sink_mode=True,
-                                                              sink_size=sink_size,
-                                                              epoch_num=epoch_num)
+        print("reached %s" % (src_location(__file__)))
+        dataset_helper, train_network = self._exec_preprocess(
+            self._train_network,
+            is_train=True,
+            phase='train',
+            dataset=train_dataset,
+            dataset_sink_mode=True,
+            sink_size=sink_size,
+            epoch_num=epoch_num)
+        print("reached %s" % (src_location(__file__)))
         self._train_network = train_network
         cb_params.train_network = self._train_network
         cb_params.cur_step_num = 0
@@ -420,29 +494,50 @@ class Model:
 
         # used to stop training for early stop, such as stopAtTIme or stopATStep
         should_stop = False
+        print("reached %s" % (src_location(__file__)))
         for i in range(epoch):
+            print("reached %s" % (src_location(__file__)))
             cb_params.cur_epoch_num = i + 1
+            print("reached %s" % (src_location(__file__)))
             list_callback.epoch_begin(run_context)
 
             # for data sink dataset_helper only iter once, other wise iter epoch_size times.
             for inputs in dataset_helper:
+                print("reached %s" % (src_location(__file__)))
                 cb_params.train_dataset_element = inputs
+                print("reached %s" % (src_location(__file__)))
                 list_callback.step_begin(run_context)
+                print("reached %s" % (src_location(__file__)))
                 outputs = self._train_network(*inputs)
+                print("reached %s" % (src_location(__file__)))
                 cb_params.cur_step_num += dataset_helper.sink_size()
+                print("reached %s" % (src_location(__file__)))
                 cb_params.net_outputs = outputs
+                print("reached %s" % (src_location(__file__)))
                 list_callback.step_end(run_context)
 
+            print("reached %s" % (src_location(__file__)))
             dataset_helper.continue_send()
+            print("reached %s" % (src_location(__file__)))
             list_callback.epoch_end(run_context)
+            print("reached %s" % (src_location(__file__)))
             should_stop = should_stop or run_context.get_stop_requested()
+            print("reached %s" % (src_location(__file__)))
             if should_stop:
                 break
+            print("reached %s" % (src_location(__file__)))
         dataset_helper.stop_send()
+        print("reached %s" % (src_location(__file__)))
 
+        print("reached %s" % (src_location(__file__)))
         list_callback.end(run_context)
 
-    def _train_process(self, epoch, train_dataset, list_callback=None, cb_params=None):
+    def _train_process(self,
+                       epoch,
+                       train_dataset,
+                       list_callback=None,
+                       cb_params=None):
+        print("reached %s" % (src_location(__file__)))
         """
         Training process. The data would be passed to network directly.
 
@@ -456,19 +551,23 @@ class Model:
             list_callback (Callback): Executor of callback list. Default: None.
             cb_params (_InternalCallbackParam): Callback parameters. Default: None.
         """
+        print("reached %s" % (src_location(__file__)))
         dataset_helper, _ = self._exec_preprocess(self._train_network,
                                                   is_train=True,
                                                   phase='train',
                                                   dataset=train_dataset,
                                                   dataset_sink_mode=False,
                                                   epoch_num=epoch)
+        print("reached %s" % (src_location(__file__)))
         cb_params.cur_step_num = 0
         run_context = RunContext(cb_params)
         list_callback.begin(run_context)
         # used to stop training for early stop, such as stopAtTIme or stopATStep
         should_stop = False
 
+        print("reached %s" % (src_location(__file__)))
         for i in range(epoch):
+            print("reached %s" % (src_location(__file__)))
             cb_params.cur_epoch_num = i + 1
 
             list_callback.epoch_begin(run_context)
@@ -477,15 +576,17 @@ class Model:
                 len_element = len(next_element)
                 next_element = _transfer_tensor_to_tuple(next_element)
                 if self._loss_fn and len_element != 2:
-                    raise ValueError("when loss_fn is not None, train_dataset should"
-                                     "return two elements, but got {}".format(len_element))
+                    raise ValueError(
+                        "when loss_fn is not None, train_dataset should"
+                        "return two elements, but got {}".format(len_element))
                 cb_params.cur_step_num += 1
 
                 cb_params.train_dataset_element = next_element
                 list_callback.step_begin(run_context)
                 outputs = self._train_network(*next_element)
                 cb_params.net_outputs = outputs
-                if self._loss_scale_manager and self._loss_scale_manager.get_drop_overflow_update():
+                if self._loss_scale_manager and self._loss_scale_manager.get_drop_overflow_update(
+                ):
                     _, overflow, _ = outputs
                     overflow = np.all(overflow.asnumpy())
                     self._loss_scale_manager.update_loss_scale(overflow)
@@ -506,7 +607,13 @@ class Model:
 
         list_callback.end(run_context)
 
-    def train(self, epoch, train_dataset, callbacks=None, dataset_sink_mode=True, sink_size=-1):
+    def train(self,
+              epoch,
+              train_dataset,
+              callbacks=None,
+              dataset_sink_mode=True,
+              sink_size=-1):
+        print("reached %s" % (src_location(__file__)))
         """
         Training API where the iteration is controlled by python front-end.
 
@@ -548,23 +655,35 @@ class Model:
             >>> model = Model(net, loss_fn=loss, optimizer=optim, metrics=None, loss_scale_manager=loss_scale_manager)
             >>> model.train(2, dataset)
         """
+        print("reached %s" % (src_location(__file__)))
         dataset_sink_mode = Validator.check_bool(dataset_sink_mode)
+        print("reached %s" % (src_location(__file__)))
         if sink_size == -1:
             sink_size = train_dataset.get_dataset_size()
+        print("reached %s" % (src_location(__file__)))
         check_int(sink_size)
+        print("reached %s" % (src_location(__file__)))
         if sink_size < -1 or sink_size == 0:
-            raise ValueError("The sink_size must be -1 or positive, but got sink_size {}.".format(sink_size))
+            raise ValueError(
+                "The sink_size must be -1 or positive, but got sink_size {}.".
+                format(sink_size))
 
+        print("reached %s" % (src_location(__file__)))
         _device_number_check(self._parallel_mode, self._device_number)
-        _parameter_broadcast_check(self._parallel_mode, self._parameter_broadcast)
-
+        print("reached %s" % (src_location(__file__)))
+        _parameter_broadcast_check(self._parallel_mode,
+                                   self._parameter_broadcast)
+        print("reached %s" % (src_location(__file__)))
         self._train(epoch,
                     train_dataset,
                     callbacks=callbacks,
                     dataset_sink_mode=dataset_sink_mode,
                     sink_size=sink_size)
 
-    def _eval_dataset_sink_process(self, valid_dataset, list_callback=None, cb_params=None):
+    def _eval_dataset_sink_process(self,
+                                   valid_dataset,
+                                   list_callback=None,
+                                   cb_params=None):
         """
         Evaluation. The data would be passed to network through dataset channel.
 
@@ -578,11 +697,12 @@ class Model:
         """
         run_context = RunContext(cb_params)
 
-        dataset_helper, eval_network = self._exec_preprocess(self._eval_network,
-                                                             is_train=False,
-                                                             phase='eval',
-                                                             dataset=valid_dataset,
-                                                             dataset_sink_mode=True)
+        dataset_helper, eval_network = self._exec_preprocess(
+            self._eval_network,
+            is_train=False,
+            phase='eval',
+            dataset=valid_dataset,
+            dataset_sink_mode=True)
         self._eval_network = eval_network
         cb_params.eval_network = self._eval_network
         list_callback.begin(run_context)
@@ -682,12 +802,16 @@ class Model:
 
         if context.get_context("device_target") == "CPU":
             dataset_sink_mode = False
-            logger.warning("CPU cannot support dataset sink mode currently."
-                           "So the evaluating process will be performed with dataset non-sink mode.")
+            logger.warning(
+                "CPU cannot support dataset sink mode currently."
+                "So the evaluating process will be performed with dataset non-sink mode."
+            )
 
         with _CallbackManager(callbacks) as list_callback:
             if dataset_sink_mode:
-                return self._eval_dataset_sink_process(valid_dataset, list_callback, cb_params)
+                return self._eval_dataset_sink_process(valid_dataset,
+                                                       list_callback,
+                                                       cb_params)
             return self._eval_process(valid_dataset, list_callback, cb_params)
 
     def predict(self, *predict_data):

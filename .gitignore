@@ -106,3 +106,4 @@ mindspore/lite/test/do_test/
 
 
 /model_zoo/official/cv/resnet/scripts/train
+*.pyc
