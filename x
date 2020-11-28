@@ -38,4 +38,6 @@ main() {
     done
 }
 
-main
+# main
+#
+./lg-debug/resnet50/run.sh

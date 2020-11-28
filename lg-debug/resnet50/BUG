@@ -1,0 +1,9 @@
+/home/lg/Desktop/mindspore-clean/lg-debug/resnet50
+Traceback (most recent call last):
+  File "train.py", line 95, in <module>
+    save_graphs=False)
+  File "/home/lg/.local/lib/python3.7/site-packages/mindspore/_checkparam.py", line 714, in wrapper
+    return func(*args, **kwargs)
+  File "/home/lg/.local/lib/python3.7/site-packages/mindspore/context.py", line 598, in set_context
+    raise ValueError(f"Error, package type {__package_name__} support device type {__device_target__}, "
+ValueError: Error, package type mindspore-gpu support device type gpu-cpu, but got device target Ascend

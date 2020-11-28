@@ -12,9 +12,15 @@ train() {
     python3.7 train.py --net=$net --dataset=$dataset --dataset_path=$data_dir
 }
 
+mkdir -p bin
+echo "$(which python3.7) \$@" >bin/python
+chmod +x bin/python
+export PATH=$PWD/bin:$PATH
+
 cd model_zoo/official/cv/resnet
 # train
 
-alias python=python3.7
+# alias python=python3.7
+
 cd scripts
 ./run_standalone_train_gpu.sh resnet50 cifar10 $data_dir
