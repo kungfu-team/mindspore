@@ -1,0 +1,23 @@
+  File "<string>", line 1
+    import
+         ^
+SyntaxError: invalid syntax
+[ERROR] DEVICE(32229,python3.7):2020-11-29-15:05:11.256.780 [mindspore/ccsrc/backend/session/kernel_build_client.h:154] GetScriptFilePath] py file seems incorrect, result: {}
+Traceback (most recent call last):
+  File "train.py", line 293, in <module>
+    dataset_sink_mode=(not args_opt.parameter_server))
+  File "/home/lg/Desktop/mindspore-clean/mindspore/train/model.py", line 681, in train
+    sink_size=sink_size)
+  File "/home/lg/Desktop/mindspore-clean/mindspore/train/model.py", line 438, in _train
+    sink_size)
+  File "/home/lg/Desktop/mindspore-clean/mindspore/train/model.py", line 511, in _train_dataset_sink_process
+    outputs = self._train_network(*inputs)
+  File "/home/lg/Desktop/mindspore-clean/mindspore/nn/cell.py", line 280, in __call__
+    out = self.compile_and_run(*inputs)
+  File "/home/lg/Desktop/mindspore-clean/mindspore/nn/cell.py", line 535, in compile_and_run
+    self.compile(*inputs)
+  File "/home/lg/Desktop/mindspore-clean/mindspore/nn/cell.py", line 522, in compile
+    _executor.compile(self, *inputs, phase=self.phase, auto_parallel_mode=self._auto_parallel_mode)
+  File "/home/lg/Desktop/mindspore-clean/mindspore/common/api.py", line 412, in compile
+    result = self._executor.compile(obj, args_list, phase, use_vm)
+RuntimeError: mindspore/ccsrc/backend/session/kernel_build_client.h:154 GetScriptFilePath] py file seems incorrect, result: {}
