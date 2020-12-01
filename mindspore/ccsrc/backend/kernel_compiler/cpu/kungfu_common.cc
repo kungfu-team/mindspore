@@ -1,3 +1,5 @@
+#include <thread>
+
 #include "pybind_api/api_register.h"
 #include "backend/kernel_compiler/cpu/kungfu_common.h"
 
@@ -11,29 +13,35 @@ namespace mindspore {
 namespace kernel {
 void kungfu_init() {
   MS_LOG(ERROR) << "BEGIN " << __func__;
+  log_func_call(__func__);
   _kungfu_peer.reset(new kungfu::Peer);
   MS_LOG(ERROR) << "END " << __func__;
 }
 
 void kungfu_finalize() {
   MS_LOG(ERROR) << "BEGIN " << __func__;
+  log_func_call(__func__);
   _kungfu_peer.reset(nullptr);
   MS_LOG(ERROR) << "END " << __func__;
 }
 
 void LOG_InitKernel(const std::string &kernel_name) {
   if (_show_kungfu_debug_log) {
-    std::cerr << kernel_name << "::InitKernel called" << std::endl;
+    std::cerr << kernel_name << "::InitKernel called"        //
+              << "in thread " << std::this_thread::get_id()  //
+              << std::endl;
   }
 }
 
 void LOG_Kernel_Launch(const std::string &kernel_name, const std::vector<AddressPtr> &inputs,
                        const std::vector<AddressPtr> &workspace, const std::vector<AddressPtr> &outputs) {
   if (_show_kungfu_debug_log) {
-    std::cerr << kernel_name << "::Launch called with "  //
-              << inputs.size() << " inputs and "         //
-              << outputs.size() << " outputs and "       //
-              << workspace.size() << " workspaces" << std::endl;
+    std::cerr << kernel_name << "::Launch called with "      //
+              << inputs.size() << " inputs and "             //
+              << outputs.size() << " outputs and "           //
+              << workspace.size() << " workspaces"           //
+              << "in thread " << std::this_thread::get_id()  //
+              << std::endl;
   }
 }
 

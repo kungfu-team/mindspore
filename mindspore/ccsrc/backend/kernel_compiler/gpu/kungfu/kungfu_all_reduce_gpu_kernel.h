@@ -40,7 +40,7 @@ class KungFuAllReduceGpuKernel : public GpuKernel {
 
   bool Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
               const std::vector<AddressPtr> &outputs, void *stream_ptr) override {
-    // LOG_Kernel_Launch("KungFuAllReduceCPUKernel", inputs, workspace, outputs);
+    LOG_Kernel_Launch("KungFuAllReduceGpuKernel", inputs, workspace, outputs);
     KUNGFU_PROFILE_SITE(KungFuAllReduceGpuKernel::Launch);
 
     const T *input_addr = GetDeviceAddress<T>(inputs, 0);
@@ -59,6 +59,7 @@ class KungFuAllReduceGpuKernel : public GpuKernel {
   }
 
   bool Init(const CNodePtr &kernel_node) override {
+    LOG_InitKernel("KungFuAllReduceGpuKernel");
     KUNGFU_PROFILE_SITE(KungFuAllReduceGpuKernel::Init);
 
     LOG_InitKernel("KungFuAllReduceGpuKernel");

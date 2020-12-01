@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <iostream>
+#include <thread>
 
 #include <kungfu.h>
 
@@ -9,6 +10,12 @@
 
 extern std::unique_ptr<kungfu::Peer> _kungfu_peer;
 extern bool _show_kungfu_debug_log;
+
+inline void log_func_call(const char *name) {
+  std::cerr << name << " called "                          //
+            << "in thread " << std::this_thread::get_id()  //
+            << std::endl;
+}
 
 namespace mindspore {
 namespace kernel {

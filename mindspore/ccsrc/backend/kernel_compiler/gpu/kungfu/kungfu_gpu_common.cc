@@ -13,6 +13,8 @@ namespace mindspore {
 namespace kernel {
 void kungfu_nccl_init() {
   MS_LOG(ERROR) << "BEGIN " << __func__;
+  log_func_call(__func__);
+
   _kungfu_nccl_helper.reset(new kungfu::NCCLHelper);
 
   const auto nccl_scope = KungFu_NCCL_GLOBAL;
@@ -27,6 +29,7 @@ void kungfu_nccl_init() {
 
 void kungfu_nccl_finalize() {
   MS_LOG(ERROR) << "BEGIN " << __func__;
+  log_func_call(__func__);
   _kungfu_nccl_helper.reset(nullptr);
   MS_LOG(ERROR) << "END " << __func__;
 }
