@@ -30,19 +30,7 @@ class KungFuResizeGpuKernel : public GpuKernel {
   const std::vector<size_t> &GetWorkspaceSizeList() const override { return workspace_size_list_; }
 
   bool Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
-              const std::vector<AddressPtr> &outputs, void *stream_ptr) override {
-    LOG_Kernel_Launch("KungFuResizeGpuKernel", inputs, workspace, outputs);
-    uint32_t *p_new_size = reinterpret_cast<uint32_t *>(inputs.at(0)->addr);
-    bool *pChanged = reinterpret_cast<bool *>(outputs.at(0)->addr);
-    bool *pDetached = reinterpret_cast<bool *>(outputs.at(1)->addr);
-    // TODO: copy from GPU
-    std::cerr << "calling ResizeCluster with new size " << *p_new_size << " peer: " << _kungfu_peer.get() << std::endl;
-    _kungfu_peer->ResizeCluster(*p_new_size, pChanged, pDetached);
-    std::cerr << "resized" << std::endl;
-    nccl_controller_->ReInit(_kungfu_peer.get());
-    std::cerr << "nccl_controller_->ReInit done" << std::endl;
-    return true;
-  }
+              const std::vector<AddressPtr> &outputs, void *stream_ptr) override;
 
   bool Init(const CNodePtr &kernel_node) override {
     LOG_InitKernel("KungFuResizeGpuKernel");

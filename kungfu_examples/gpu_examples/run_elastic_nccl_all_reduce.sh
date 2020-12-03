@@ -9,7 +9,7 @@ KUNGFU_LIB_PATH=$ROOT/third_party/kungfu/lib
 export LD_LIBRARY_PATH=$KUNGFU_LIB_PATH:$ROOT/mindspore/lib:$ROOT/build/mindspore/_deps/ompi-src/ompi/.libs
 
 export KUNGFU_MINDSPORE_DEBUG=1
-export KUNGFU_CONFIG_LOG_LEVEL=1
+# export KUNGFU_CONFIG_LOG_LEVEL=1
 
 kungfu_run_flags() {
     local np=$1
@@ -22,7 +22,7 @@ kungfu_run_flags() {
     echo -w
     local config_port=9999
     echo -builtin-config-port $config_port
-    echo -config-server http://127.0.0.1:config_port/config
+    echo -config-server http://127.0.0.1:$config_port/config
 }
 
 kungfu_run() {
@@ -35,7 +35,7 @@ app_flags() {
     # echo --device CPU
     echo --device GPU
 
-    echo --steps 100
+    echo --steps 15
 
     # echo --model resnet50
     echo --model one

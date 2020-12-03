@@ -96,13 +96,13 @@ def main():
         for size in grad_sizes
     ]
 
-    step = ms.Tensor(0)
-    print(step)
-
     step = 0
+    need_sync = True
     while True:
-        step = sync_step(step, all_reduce_max)
-        print('step: %d' % (step))
+        if need_sync:
+            step = sync_step(step, all_reduce_max)
+            print('step: %d' % (step))
+            need_sync = False
         t0 = time.time()
         ys = [all_reduce(x) for x in xs]
         t1 = time.time()
@@ -112,8 +112,7 @@ def main():
             new_size = ms.Tensor(schedule[step], dtype=ms.uint32)
             print('step=%d, will resize to %d' % (step, schedule[step]))
             changed, detached = resize(new_size)
-            print(changed)
-            print(detached)
+            print('changed %s, detached: %s' % (changed, detached))
             if changed:
                 need_sync = True
             if detached:
@@ -122,6 +121,7 @@ def main():
         step += 1
         if step > args.steps:
             break
+    print('train loop finished')
     kungfu_nccl_finalize()
     kungfu_finalize()
 
