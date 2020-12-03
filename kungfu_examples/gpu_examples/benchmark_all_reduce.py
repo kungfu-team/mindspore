@@ -4,9 +4,8 @@ import time
 
 import mindspore as ms
 import numpy as np
-from mindspore._c_expression import (kungfu_finalize, kungfu_hello_world,
-                                     kungfu_init, kungfu_nccl_finalize,
-                                     kungfu_nccl_init)
+from mindspore._c_expression import (kungfu_finalize, kungfu_init,
+                                     kungfu_nccl_finalize, kungfu_nccl_init)
 from mindspore.communication.management import get_group_size, get_rank, init
 from mindspore.ops.operations.kungfu_comm_ops import KungFuAllReduce
 
@@ -36,7 +35,13 @@ vgg16 = [
     2359296, 512, 2359296, 512, 102760448, 4096, 16777216, 4096, 4096000, 1000
 ]
 
+x1024x1 = [
+    1024,
+]
+
 model_grad_sizes = {
+    'empty': [],
+    '1024x1': x1024x1,
     'resnet50': resnet50,
     'vgg16': vgg16,
 }
@@ -74,14 +79,13 @@ def parse_args():
     p.add_argument('--model',
                    type=str,
                    default='resnet50',
-                   choices=['resnet50', 'vgg16'])
+                   choices=['resnet50', 'vgg16', '1024x1', 'empty'])
     args = p.parse_args()
     args.collective = 'kungfu' if using_kungfu() else 'mindspore'
     return args
 
 
 def main():
-    kungfu_hello_world()
     args = parse_args()
     grad_sizes = model_grad_sizes[args.model]
 

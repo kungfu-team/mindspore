@@ -12,17 +12,13 @@ bool _show_kungfu_debug_log = show_kungfu_debug_log();
 namespace mindspore {
 namespace kernel {
 void kungfu_init() {
-  MS_LOG(ERROR) << "BEGIN " << __func__;
   log_func_call(__func__);
   _kungfu_peer.reset(new kungfu::Peer);
-  MS_LOG(ERROR) << "END " << __func__;
 }
 
 void kungfu_finalize() {
-  MS_LOG(ERROR) << "BEGIN " << __func__;
   log_func_call(__func__);
   _kungfu_peer.reset(nullptr);
-  MS_LOG(ERROR) << "END " << __func__;
 }
 
 void LOG_InitKernel(const std::string &kernel_name) {
@@ -45,16 +41,9 @@ void LOG_Kernel_Launch(const std::string &kernel_name, const std::vector<Address
   }
 }
 
-void kungfu_hello_world() {
-  printf("hello world from %s@%s:%d\n", __FUNCTION__, __FILE__, __LINE__);  //
-}
-
 REGISTER_PYBIND_DEFINE(KungFu_, ([](py::module *m) {
                          m->def("kungfu_init", &kungfu_init);
                          m->def("kungfu_finalize", &kungfu_finalize);
-
-                         // for debug
-                         m->def("kungfu_hello_world", &kungfu_hello_world);
                        }));
 }  // namespace kernel
 }  // namespace mindspore

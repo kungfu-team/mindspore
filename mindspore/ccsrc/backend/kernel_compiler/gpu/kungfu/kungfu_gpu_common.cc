@@ -12,26 +12,17 @@ std::unique_ptr<kungfu::NCCLHelper> _kungfu_nccl_helper;
 namespace mindspore {
 namespace kernel {
 void kungfu_nccl_init() {
-  MS_LOG(ERROR) << "BEGIN " << __func__;
-  log_func_call(__func__);
-
-  _kungfu_nccl_helper.reset(new kungfu::NCCLHelper);
-
   const auto nccl_scope = KungFu_NCCL_GLOBAL;
-  // auto nccl_scheduler =
+  _kungfu_nccl_helper.reset(new kungfu::NCCLHelper);
   _kungfu_nccl_helper->EnsureScheduler(nccl_scope);
   auto nccl_controller = _kungfu_nccl_helper->EnsureController(nccl_scope);
-
   kungfu::Peer *peer = _kungfu_peer.get();
   nccl_controller->InitOnce(peer);
-  MS_LOG(ERROR) << "END " << __func__;
 }
 
 void kungfu_nccl_finalize() {
-  MS_LOG(ERROR) << "BEGIN " << __func__;
   log_func_call(__func__);
   _kungfu_nccl_helper.reset(nullptr);
-  MS_LOG(ERROR) << "END " << __func__;
 }
 
 REGISTER_PYBIND_DEFINE(KungFuNccl, ([](py::module *m) {

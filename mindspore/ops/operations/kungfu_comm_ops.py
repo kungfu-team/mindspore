@@ -1,5 +1,5 @@
 """kungfu comm_ops"""
-from ..._c_expression import (kungfu_finalize, kungfu_hello_world, kungfu_init,
+from ..._c_expression import (kungfu_finalize, kungfu_init,
                               kungfu_nccl_finalize, kungfu_nccl_init)
 from ..primitive import PrimitiveWithInfer, prim_attr_register
 

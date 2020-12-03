@@ -25,6 +25,6 @@ main() {
         ./build.sh $(build_flags)
 }
 
-notify "start building mindspore at $(datatime)"
+#notify "start building mindspore at $(datatime)"
 main
-notify "finish building mindspore at $(datatime)"
+#notify "finish building mindspore at $(datatime)"

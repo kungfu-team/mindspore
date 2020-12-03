@@ -13,9 +13,12 @@ export LD_LIBRARY_PATH=$KUNGFU_LIB_PATH:$ROOT/mindspore/lib:$ROOT/build/mindspor
 
 # export PATH=$PATH:$CUDA_HOME/bin
 
+# export KUNGFU_MINDSPORE_DEBUG=1
+
 kungfu_run_flags() {
     echo -q
     echo -logdir logs
+    echo -logfile kungfu-run.log
     echo -np $np
 }
 
@@ -40,6 +43,7 @@ app_flags() {
     echo --warmup-steps 1
     echo --steps 8
 
+    # echo --model empty
     # echo --model vgg16
     echo --model resnet50
     # echo --collective mindspore
@@ -54,13 +58,26 @@ trace() {
     echo
 }
 
+check_leak() {
+    # echo valgrind
+    # echo -v
+    # echo --leak-check=full
+    # echo --show-leak-kinds=all
+    # echo --track-origins=yes
+    # echo --xml=yes --xml-fd=1
+    true
+}
+
 main() {
     # kungfu_run python3.7 ./hello_world.py $(app_flags)
     # for np in $(seq  4); do
     np=4
-    trace kungfu_run python3.7 ./benchmark_all_reduce.py $(app_flags)
+    trace kungfu_run $(check_leak) python3.7 ./benchmark_all_reduce.py $(app_flags)
     # mpi_run python3.7 ./benchmark_all_reduce.py $(app_flags)
 }
 
+# ulimit -c unlimited
+
+rm -fr logs
 # export GLOG_v=0
 main

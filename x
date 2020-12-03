@@ -4,7 +4,7 @@ set -e
 # ./b
 # ./U
 
-# export KUNGFU_MINDSPORE_DEBUG=1
+export KUNGFU_MINDSPORE_DEBUG=1
 export LD_LIBRARY_PATH=$PWD/third_party/kungfu/lib
 
 kungfu_run_flags() {
@@ -65,5 +65,6 @@ main() {
     trace ./kungfu_examples/gpu_examples/run.sh
 }
 
-export GLOG_v=2
+# export GLOG_v=2
+# export GLOG_v=1
 main
