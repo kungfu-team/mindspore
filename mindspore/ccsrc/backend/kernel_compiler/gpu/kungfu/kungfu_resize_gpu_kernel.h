@@ -7,25 +7,21 @@
 #include "backend/kernel_compiler/gpu/gpu_kernel.h"
 #include "backend/kernel_compiler/gpu/gpu_kernel_factory.h"
 #include "backend/kernel_compiler/gpu/kernel_constants.h"
-#include "backend/kernel_compiler/gpu/nccl/nccl_gpu_kernel.h"
 
 namespace mindspore {
 namespace kernel {
-template <typename T>
-class KungFuAllReduceGpuKernel : public GpuKernel {
+class KungFuResizeGpuKernel : public GpuKernel {
  public:
-  KungFuAllReduceGpuKernel()
+  KungFuResizeGpuKernel()
       : nccl_controller_(nullptr),
         nccl_scheduler_(nullptr),
-        reduce_op_(KungFu_SUM),
-        comm_stream_(nullptr),
         input_count_(0),
         output_count_(0),
         input_size_(0),
         output_size_(0),
         workspace_size_(0) {}
 
-  ~KungFuAllReduceGpuKernel() override { DestroyResource(); }
+  ~KungFuResizeGpuKernel() override { DestroyResource(); }
 
   const std::vector<size_t> &GetInputSizeList() const override { return input_size_list_; }
 
@@ -35,38 +31,31 @@ class KungFuAllReduceGpuKernel : public GpuKernel {
 
   bool Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
               const std::vector<AddressPtr> &outputs, void *stream_ptr) override {
-    LOG_Kernel_Launch("KungFuAllReduceGpuKernel", inputs, workspace, outputs);
-    KUNGFU_PROFILE_SITE(KungFuAllReduceGpuKernel::Launch);
-
-    const T *input_addr = GetDeviceAddress<T>(inputs, 0);
-    T *output_addr = GetDeviceAddress<T>(outputs, 0);
-
-    cudaStream_t stream = comm_stream_ ? comm_stream_ : reinterpret_cast<cudaStream_t>(stream_ptr);
-    // MS_LOG(WARNING) << "using stream " << stream;
-
-    auto w = make_kungfu_workspace(input_addr, output_addr, input_count_);
-
-    // TODO: support async
-    // nccl_scheduler_->Do([=] { nccl_controller_->AllReduce(w, op, stream); });
-    nccl_controller_->AllReduce(w, reduce_op_, stream);
+    LOG_Kernel_Launch("KungFuResizeGpuKernel", inputs, workspace, outputs);
+    uint32_t *p_new_size = reinterpret_cast<uint32_t *>(inputs.at(0)->addr);
+    bool *pChanged = reinterpret_cast<bool *>(outputs.at(0)->addr);
+    bool *pDetached = reinterpret_cast<bool *>(outputs.at(1)->addr);
+    // TODO: copy from GPU
+    std::cerr << "calling ResizeCluster with new size " << *p_new_size << " peer: " << _kungfu_peer.get() << std::endl;
+    _kungfu_peer->ResizeCluster(*p_new_size, pChanged, pDetached);
+    std::cerr << "resized" << std::endl;
+    nccl_controller_->ReInit(_kungfu_peer.get());
+    std::cerr << "nccl_controller_->ReInit done" << std::endl;
     return true;
   }
 
   bool Init(const CNodePtr &kernel_node) override {
-    LOG_InitKernel("KungFuAllReduceGpuKernel");
-    KUNGFU_PROFILE_SITE(KungFuAllReduceGpuKernel::Init);
+    LOG_InitKernel("KungFuResizeGpuKernel");
 
-    InitOp(kernel_node);
     InitResource();
-    data_type_ = GetCudnnDataType(TypeIdLabel(AnfAlgo::GetInputDeviceDataType(kernel_node, 0)));
     size_t input_num = AnfAlgo::GetInputTensorNum(kernel_node);
     if (input_num != 1) {
       MS_LOG(ERROR) << "Input number is " << input_num << ", but requires 1 input.";
       return false;
     }
     size_t output_num = AnfAlgo::GetOutputTensorNum(kernel_node);
-    if (output_num != 1) {
-      MS_LOG(ERROR) << "Output number is " << output_num << ", but requires needs 1 output.";
+    if (output_num != 2) {
+      MS_LOG(ERROR) << "Output number is " << output_num << ", but requires needs 2 output.";
       return false;
     }
 
@@ -76,13 +65,6 @@ class KungFuAllReduceGpuKernel : public GpuKernel {
     InferInAndOutDesc(inputA_shape, outputC_shape);
 
     InitSizeLists();
-
-    auto comm_stream_attr = AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr("stream_id");
-    if (comm_stream_attr) {
-      comm_stream_ = reinterpret_cast<cudaStream_t>(GetValue<uintptr_t>(comm_stream_attr));
-      MS_EXCEPTION_IF_NULL(comm_stream_);
-      MS_LOG(WARNING) << "got kernel_node stream_id: " << comm_stream_;
-    }
 
     return true;
   }
@@ -97,45 +79,22 @@ class KungFuAllReduceGpuKernel : public GpuKernel {
   void InitSizeLists() override {
     input_size_list_.push_back(input_size_);
     output_size_list_.push_back(output_size_);
+    output_size_list_.push_back(output_size_);
     return;
   }
 
  private:
-  void InitOp(const CNodePtr &kernel_node) {
-    auto reduce_op = AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr(kAttrOp);
-    if (reduce_op) {
-      std::string op_name = GetValue<std::string>(reduce_op);
-      static std::map<std::string, KungFu_Op> _name_to_op({
-        {"sum", KungFu_SUM},
-        {"min", KungFu_MIN},
-        {"max", KungFu_MAX},
-        {"prod", KungFu_PROD},
-      });
-      auto it = _name_to_op.find(op_name);
-      if (it == _name_to_op.end()) {
-        MS_LOG(EXCEPTION) << "reduce op " << op_name << " is not supported.";
-      } else {
-        reduce_op_ = it->second;
-      }
-    }
-  }
-
   void DestroyResource() noexcept {}
 
   void InferInAndOutDesc(const std::vector<size_t> &input_shape, const std::vector<size_t> &output_shape) {
     input_count_ = std::accumulate(input_shape.begin(), input_shape.end(), 1, std::multiplies<size_t>());
     output_count_ = std::accumulate(output_shape.begin(), output_shape.end(), 1, std::multiplies<size_t>());
-    input_size_ = input_count_ * sizeof(T);
-    output_size_ = output_count_ * sizeof(T);
+    input_size_ = input_count_ * sizeof(uint32_t);
+    output_size_ = output_count_ * sizeof(bool);
   }
 
   kungfu::NCCLController *nccl_controller_;
   kungfu::NCCLScheduler *nccl_scheduler_;
-
-  KungFu_Op reduce_op_;
-  cudaStream_t comm_stream_;
-  cudnnDataType_t data_type_;
-  std::string group_name_;
 
   size_t input_count_;
   size_t output_count_;

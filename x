@@ -4,7 +4,7 @@ set -e
 # ./b
 # ./U
 
-export KUNGFU_MINDSPORE_DEBUG=1
+# export KUNGFU_MINDSPORE_DEBUG=1
 export LD_LIBRARY_PATH=$PWD/third_party/kungfu/lib
 
 kungfu_run_flags() {
@@ -62,7 +62,8 @@ main() {
     # trace run_train_mnist_slp
     # trace run_train_mnist_lenet
     # trace run_train_mnist_lenet_elastic
-    trace ./kungfu_examples/gpu_examples/run.sh
+    # trace ./kungfu_examples/gpu_examples/run.sh
+    trace ./kungfu_examples/gpu_examples/run_elastic_nccl_all_reduce.sh
 }
 
 # export GLOG_v=2

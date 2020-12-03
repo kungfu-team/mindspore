@@ -41,9 +41,15 @@ void LOG_Kernel_Launch(const std::string &kernel_name, const std::vector<Address
   }
 }
 
+int kungfu_current_rank() { return _kungfu_peer->Rank(); }
+
+int kungfu_current_cluster_size() { return _kungfu_peer->Size(); }
+
 REGISTER_PYBIND_DEFINE(KungFu_, ([](py::module *m) {
                          m->def("kungfu_init", &kungfu_init);
                          m->def("kungfu_finalize", &kungfu_finalize);
+                         m->def("kungfu_current_rank", &kungfu_current_rank);
+                         m->def("kungfu_current_cluster_size", &kungfu_current_cluster_size);
                        }));
 }  // namespace kernel
 }  // namespace mindspore

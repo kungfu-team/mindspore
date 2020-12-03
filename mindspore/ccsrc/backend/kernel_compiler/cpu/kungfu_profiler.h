@@ -128,6 +128,11 @@ class site_profiler {
 };
 }  // namespace kungfu
 
+#define KUNGFU_ENABLE_PROFILE 0
+#if KUNGFU_ENABLE_PROFILE
 #define KUNGFU_PROFILE_SITE(e)          \
   static kungfu::site_profiler ctx(#e); \
   kungfu::site_profiler::scope __profile_site(ctx);
+#else
+#define KUNGFU_PROFILE_SITE(e)
+#endif

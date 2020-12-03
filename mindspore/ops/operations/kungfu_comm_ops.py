@@ -1,12 +1,16 @@
 """kungfu comm_ops"""
-from ..._c_expression import (kungfu_finalize, kungfu_init,
+from ..._c_expression import (kungfu_current_cluster_size, kungfu_current_rank,
+                              kungfu_finalize, kungfu_init,
                               kungfu_nccl_finalize, kungfu_nccl_init)
+from ...common import dtype as mstype
 from ..primitive import PrimitiveWithInfer, prim_attr_register
+from .comm_ops import ReduceOp
 
 
 class KungFuAllReduce(PrimitiveWithInfer):
     @prim_attr_register
-    def __init__(self):
+    def __init__(self, op=ReduceOp.SUM):
+        self.op = op
         self.init_prim_io_names(inputs=['x'], outputs=['y'])
 
     def __infer__(self, x):
@@ -31,4 +35,4 @@ class KungFuResize(PrimitiveWithInfer):
         return ([], [])
 
     def infer_dtype(self, *args):
-        return (ms.bool_, ms.bool_)
+        return (mstype.bool_, mstype.bool_)
