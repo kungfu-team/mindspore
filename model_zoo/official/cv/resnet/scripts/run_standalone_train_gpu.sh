@@ -15,25 +15,25 @@
 # ============================================================================
 
 if [ $# != 3 ] && [ $# != 4 ]
-then 
+then
     echo "Usage: sh run_standalone_train_gpu.sh [resnet50|resnet101] [cifar10|imagenet2012] [DATASET_PATH] [PRETRAINED_CKPT_PATH](optional)"
 exit 1
 fi
 
 if [ $1 != "resnet50" ] && [ $1 != "resnet101" ]
-then 
+then
     echo "error: the selected net is neither resnet50 nor resnet101"
 exit 1
 fi
 
 if [ $2 != "cifar10" ] && [ $2 != "imagenet2012" ]
-then 
+then
     echo "error: the selected dataset is neither cifar10 nor imagenet2012"
 exit 1
 fi
 
 if [ $1 == "resnet101" ] && [ $2 == "cifar10" ]
-then 
+then
     echo "error: training resnet101 with cifar10 dataset is unsupported now!"
 exit 1
 fi
@@ -55,7 +55,7 @@ then
 fi
 
 if [ ! -d $PATH1 ]
-then 
+then
     echo "error: DATASET_PATH=$PATH1 is not a directory"
 exit 1
 fi
@@ -66,7 +66,7 @@ then
 exit 1
 fi
 
-ulimit -u unlimited
+#ulimit -u unlimited
 export DEVICE_NUM=1
 export DEVICE_ID=0
 export RANK_ID=0
@@ -85,11 +85,11 @@ echo "start training for device $DEVICE_ID"
 env > env.log
 if [ $# == 3 ]
 then
-    python train.py --net=$1 --dataset=$2 --device_target="GPU" --dataset_path=$PATH1 &> log &
+    /usr/bin/python3.7 train.py --net=$1 --dataset=$2 --device_target="GPU" --dataset_path=$PATH1
 fi
 
 if [ $# == 4 ]
 then
-    python train.py --net=$1 --dataset=$2 --device_target="GPU" --dataset_path=$PATH1 --pre_trained=$PATH2 &> log &
+    /usr/bin/python3.7 train.py --net=$1 --dataset=$2 --device_target="GPU" --dataset_path=$PATH1 --pre_trained=$PATH2
 fi
 cd ..

@@ -11,7 +11,7 @@ fi
 cd KungFu
 git checkout master
 git pull
-git checkout lg-libkungfu_nccl
+git checkout lg-nccl-2
 git pull
 
 config_flags() {

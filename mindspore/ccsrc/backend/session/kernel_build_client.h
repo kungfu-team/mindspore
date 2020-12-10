@@ -229,7 +229,7 @@ class AscendKernelBuildClient : public KernelBuildClient {
 class GpuKernelBuildClient : public KernelBuildClient {
  public:
   // Server configure
-  constexpr inline static auto kEnv = "python";
+  constexpr inline static auto kEnv = "/usr/bin/python3.7";
   constexpr inline static auto kGetPathScript =
     "-c "
     "\""
