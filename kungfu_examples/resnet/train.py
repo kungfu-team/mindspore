@@ -56,6 +56,10 @@ parser.add_argument('--run_kungfu',
                     type=ast.literal_eval,
                     default=False,
                     help='Run kungfu')
+parser.add_argument('--elastic',
+                    type=ast.literal_eval,
+                    default=False,
+                    help='elastic')
 parser.add_argument('--device_num', type=int, default=1, help='Device num.')
 
 parser.add_argument('--dataset_path',
@@ -282,6 +286,22 @@ if __name__ == '__main__':
                                   directory=ckpt_save_dir,
                                   config=config_ck)
         cb += [ckpt_cb]
+
+    if args_opt.elastic:
+        from src.kungfu_mindspore_callbacks import KungFuElasticCallback
+        schedule = {
+            10: 2,
+            20: 3,
+            30: 4,
+            40: 1,
+            50: 2,
+            60: 3,
+            70: 4,
+            80: 1,
+        }
+        kungfu_elastic_callback = KungFuElasticCallback(schedule)
+        cb += [kungfu_elastic_callback]
+        print('enabled elastic')
 
     # train model
     if args_opt.net == "se-resnet50":

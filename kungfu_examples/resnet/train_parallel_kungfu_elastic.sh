@@ -11,7 +11,14 @@ export LD_LIBRARY_PATH=$KUNGFU_LIB_PATH:$ROOT/mindspore/lib:$ROOT/build/mindspor
 kungfu_run_flags() {
     echo -q
     echo -logdir logs
-    echo -np 4
+    echo -np 1
+
+    local enable_elastic=1
+    if [ $enable_elastic -eq 1 ]; then
+        echo -w
+        echo -builtin-config-port 9100
+        echo -config-server http://127.0.0.1:9100/config
+    fi
 }
 
 kungfu_run() {
@@ -25,6 +32,7 @@ all_flags() {
     echo --device_num=4
     echo --device_target="GPU"
     echo --run_kungfu=True
+    echo --elastic=True
 }
 
 train() {
