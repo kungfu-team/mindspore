@@ -36,6 +36,7 @@ from mindspore.train.model import Model
 from mindspore.train.serialization import load_checkpoint, load_param_into_net
 
 from src.CrossEntropySmooth import CrossEntropySmooth
+from src.kungfu_mindspore_optimizer import KungFuMomentum
 from src.lr_generator import get_lr, warmup_cosine_annealing_lr
 
 parser = argparse.ArgumentParser(description='Image classification')
@@ -204,10 +205,17 @@ if __name__ == '__main__':
     }, {
         'order_params': net.trainable_params()
     }]
-    opt = Momentum(group_params,
-                   lr,
-                   config.momentum,
-                   loss_scale=config.loss_scale)
+    if args_opt.run_kungfu:
+        opt = KungFuMomentum(group_params,
+                             lr,
+                             config.momentum,
+                             loss_scale=config.loss_scale)
+    else:
+        opt = Momentum(group_params,
+                       lr,
+                       config.momentum,
+                       loss_scale=config.loss_scale)
+
     # define loss, model
     if target == "Ascend":
         if args_opt.dataset == "imagenet2012":
