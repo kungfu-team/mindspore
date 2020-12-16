@@ -36,6 +36,7 @@ all_flags() {
 }
 
 train() {
+    rm -fr logs
     rm -fr resnet-graph.meta
     rm -fr ckpt_*
     rm -fr cuda_meta_*

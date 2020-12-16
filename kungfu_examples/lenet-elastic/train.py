@@ -19,6 +19,7 @@ import argparse
 import os
 
 import mindspore as ms
+from mindspore._c_expression import kungfu_finalize, kungfu_init
 from mindspore.common.initializer import Normal
 from mindspore.nn.loss import SoftmaxCrossEntropyWithLogits
 from mindspore.nn.metrics import Accuracy
@@ -78,6 +79,12 @@ class LeNet5(ms.nn.Cell):
         return x
 
 
+def log_callbacks(cb):
+    print('%d callbacks' % (len(cb)))
+    for c in cb:
+        print('%s' % (c))
+
+
 def train_net(network, model, args, ckpoint_cb, sink_mode):
     """Define the training method."""
     print("============== Starting Training ==============")
@@ -106,6 +113,8 @@ def train_net(network, model, args, ckpoint_cb, sink_mode):
             kungfu_elastic_callback = KungFuElasticCallback(schedule)
             callbacks.append(kungfu_elastic_callback)
 
+    log_callbacks(callbacks)
+    print('sink_mode: %s' % (sink_mode))
     model.train(args.epoch_size,
                 ds_train,
                 callbacks=callbacks,
@@ -127,6 +136,7 @@ def test_net(network, model, args):
 
 def main():
     args = parse_args()
+    kungfu_init()
 
     ms.context.set_context(mode=ms.context.GRAPH_MODE,
                            device_target=args.device)
@@ -151,6 +161,7 @@ def main():
     train_net(network, model, args, ckpoint_cb, dataset_sink_mode)
     if args.run_test:
         test_net(network, model, args.data_dir)
+    kungfu_finalize()
 
 
 if __name__ == "__main__":

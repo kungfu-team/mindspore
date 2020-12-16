@@ -43,10 +43,6 @@ run_train_mnist_lenet() {
     ./kungfu_examples/lenet/run.sh
 }
 
-run_train_mnist_lenet_elastic() {
-    ./kungfu_examples/lenet-elastic/run.sh
-}
-
 trace() {
     echo "BEGIN $@"
     $@
@@ -62,6 +58,7 @@ main() {
     # trace run_train_mnist_slp
     # trace run_train_mnist_lenet
     # trace run_train_mnist_lenet_elastic
+    # trace ./kungfu_examples/lenet-elastic/run.sh
     # trace ./kungfu_examples/gpu_examples/run.sh
     # trace ./kungfu_examples/gpu_examples/run_elastic_nccl_all_reduce.sh
     # trace kungfu_examples/resnet/train_single.sh
@@ -70,6 +67,6 @@ main() {
     trace kungfu_examples/resnet/train_parallel_kungfu_elastic.sh
 }
 
-# export GLOG_v=2
-# export GLOG_v=1
+export GLOG_v=3 # ERROR
+# export GLOG_v=2 # WARNING
 main

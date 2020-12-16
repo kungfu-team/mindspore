@@ -72,7 +72,9 @@ class KungFuElasticCallback(ms.train.callback.Callback):
             if changed:
                 self.need_sync = True
             if detached:
+                print('detached, requesting stop')
                 run_context.request_stop()
+                print('requested stop')
 
     def end(self, run_context):
         print('stopped')

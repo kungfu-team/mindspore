@@ -101,6 +101,8 @@ else:
 
 if __name__ == '__main__':
     target = args_opt.device_target
+    dataset_sink_mode = not args_opt.parameter_server
+
     ckpt_save_dir = config.save_checkpoint_path
 
     # init context
@@ -144,7 +146,13 @@ if __name__ == '__main__':
         rank = kungfu_current_rank()
         size = kungfu_current_cluster_size()
         print('kungfu rank=%d, size=%d' % (rank, size))
-        ckpt_save_dir = config.save_checkpoint_path + "ckpt_" + str(rank) + "/"
+        if args_opt.elastic:
+            version = os.getenv('KUNGFU_INIT_CLUSTER_VERSION')
+            ckpt_save_dir = config.save_checkpoint_path + "ckpt_" + str(
+                rank) + '@' + version + "/"
+        else:
+            ckpt_save_dir = config.save_checkpoint_path + "ckpt_" + str(
+                rank) + "/"
 
     # create dataset
     dataset = create_dataset(dataset_path=args_opt.dataset_path,
@@ -288,31 +296,33 @@ if __name__ == '__main__':
         cb += [ckpt_cb]
 
     if args_opt.elastic:
+        from elastic_schedule import schedule
         from src.kungfu_mindspore_callbacks import KungFuElasticCallback
-        schedule = {
-            10: 2,
-            20: 3,
-            30: 4,
-            40: 1,
-            50: 2,
-            60: 3,
-            70: 4,
-            80: 1,
-        }
         kungfu_elastic_callback = KungFuElasticCallback(schedule)
         cb += [kungfu_elastic_callback]
+        dataset_sink_mode = False
         print('enabled elastic')
+
+        # from src.debug_stop_hook import DebugStopHook
+        # cb += [DebugStopHook()]
 
     # train model
     if args_opt.net == "se-resnet50":
         config.epoch_size = config.train_epoch_size
     print('training...')
     print('dataset.get_dataset_size(): %d' % (dataset.get_dataset_size()))
-    model.train(config.epoch_size - config.pretrain_epoch_size,
+    print('%d callbacks' % (len(cb)))
+    print('epoch_size: %d, pretrain_epoch_size: %d' %
+          (config.epoch_size, config.pretrain_epoch_size))
+    for c in cb:
+        print('%s' % (c))
+    train_epoch = config.epoch_size - config.pretrain_epoch_size
+    print('dataset_sink_mode: %s' % (dataset_sink_mode))
+    model.train(train_epoch,
                 dataset,
                 callbacks=cb,
                 sink_size=dataset.get_dataset_size(),
-                dataset_sink_mode=(not args_opt.parameter_server))
+                dataset_sink_mode=dataset_sink_mode)
     print('train finished.')
     if args_opt.run_kungfu:
         kungfu_nccl_finalize()
