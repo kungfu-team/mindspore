@@ -16,6 +16,7 @@ export LD_LIBRARY_PATH=$KUNGFU_LIB_PATH:$ROOT/mindspore/lib:$ROOT/build/mindspor
 # export KUNGFU_MINDSPORE_DEBUG=1
 
 kungfu_run_flags() {
+    local np=4
     echo -q
     echo -logdir logs
     echo -logfile kungfu-run.log
@@ -69,9 +70,8 @@ check_leak() {
 }
 
 main() {
-    # kungfu_run python3.7 ./hello_world.py $(app_flags)
+    kungfu_run python3.7 ./hello_world.py --device GPU
     # for np in $(seq  4); do
-    np=4
     trace kungfu_run $(check_leak) python3.7 ./benchmark_all_reduce.py $(app_flags)
     # mpi_run python3.7 ./benchmark_all_reduce.py $(app_flags)
 }
