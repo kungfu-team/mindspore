@@ -2,15 +2,6 @@ import mindspore as ms
 import mindspore.ops.operations.kungfu_comm_ops as kfops
 
 
-class Resize(ms.nn.Cell):
-    def __init__(self):
-        super(Resize, self).__init__()
-        self.resize = kfops.KungFuResize()
-
-    def construct(self, n):
-        return self.resize(n)
-
-
 def sync_net_parameters(network: ms.nn.Cell):
     print('BEGIN sync_net_parameters')
     broadcast = kfops.KungFuBroadcast()
@@ -32,7 +23,7 @@ class KungFuElasticCallback(ms.train.callback.Callback):
         # TODO: use integer
         self._kungfu_global_step = ms.Tensor(0.0, dtype=ms.float32)
 
-        self.resize = Resize()
+        self.resize = kfops.KungFuResize()
 
     def _advance_step(self):
         old_step = int(self._kungfu_global_step.asnumpy())
