@@ -41,6 +41,28 @@ class KungFuElasticCallback(ms.train.callback.Callback):
         # TODO: use integer
         self._kungfu_global_step = ms.Tensor(0.0, dtype=ms.float32)
 
+        # self.resize = kfops.KungFuResize()()
+        """
+    FIXME:
+    kungfu_init called in thread 139876087523136
+    [ERROR] PYNATIVE(16185,python3.7):2020-12-23-11:40:43.645.165 [mindspore/ccsrc/pipeline/pynative/pynative_execute.cc:660] RunOpInMs] Device target [CPU] is not supported in Pynative mode
+    Traceback (most recent call last):
+    File "train.py", line 168, in <module>
+        main()
+    File "train.py", line 161, in main
+        train_net(network, model, args, ckpoint_cb, dataset_sink_mode)
+    File "train.py", line 113, in train_net
+        kungfu_elastic_callback = KungFuElasticCallback(schedule)
+    File "/home/lg/code/repos/github.com/lgarithm/mindspore-dev/kungfu_examples/lenet-elastic/kungfu_mindspore_callbacks.py", line 45, in __init__
+        self.resize = kfops.KungFuResize()()
+    File "/home/lg/.local/lib/python3.7/site-packages/mindspore/ops/primitive.py", line 173, in __call__
+        return _run_op(self, self.name, args)
+    File "/home/lg/.local/lib/python3.7/site-packages/mindspore/common/api.py", line 69, in wrapper
+        results = fn(*arg, **kwargs)
+    File "/home/lg/.local/lib/python3.7/site-packages/mindspore/ops/primitive.py", line 512, in _run_op
+        output = real_run_op(obj, op_name, args)
+    RuntimeError: mindspore/ccsrc/pipeline/pynative/pynative_execute.cc:660 RunOpInMs] ArgumentError Device target [CPU] is not supported in Pynative mode
+        """
         self.resize = Resize()
 
     def _advance_step(self):

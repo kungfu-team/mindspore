@@ -44,6 +44,7 @@ kungfu_train() {
 
 main() {
     rm -f *.meta
+    rm -fr logs
     kungfu_run python3.7 train.py $(train_flags) --use-kungfu --use-kungfu-elastic
 }
 
