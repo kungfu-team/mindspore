@@ -1,11 +1,11 @@
 import mindspore as ms
 from mindspore.ops import composite as C
+from mindspore.ops.operations.kungfu_comm_ops import KungFuAllReduce
 
 
 class KungFuMomentum(ms.nn.Momentum):
     def __init__(self, *args, **kwargs):
         super(KungFuMomentum, self).__init__(*args, **kwargs)
-        from kungfu_mindspore_ops import KungFuAllReduce
         self.map_ = C.Map()
         self.all_reduce = KungFuAllReduce()
 
