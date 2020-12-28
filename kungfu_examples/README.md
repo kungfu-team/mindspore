@@ -1,4 +1,4 @@
-KungFu Mindspore
+KungFu MindSpore
 ======
 
 KungFu is a communication library designed for machine learning.
