@@ -10,6 +10,11 @@ User should implement customized optimizer and callback (extending the standard 
 
 We also provide some commonly used optimizers as part of mindspore extension.
 
+## Build
+
+Currently we build and install kungfu in the source tree of mindspore.
+User can use the script <../install-kungfu.sh> to download and build kungfu.
+
 ## Implementing Customized Optimizer and Callback
 
 1. Implement distributed optimizer
@@ -111,7 +116,12 @@ To enable elastic training in mindspore, user need to
 
 1. replace their original optimizer by the KungFu distributed optimizer.
 
-TODO: example
+```python
+opt = KungFuMomentum(group_params,
+                     lr,
+                     config.momentum,
+                     loss_scale=config.loss_scale)
+```
 
 2. append KungFuElasticCallback to the original callback list
 
@@ -127,4 +137,26 @@ model.train(train_epoch,
 
 3. launch the training program with `kungfu-run`
 
-TODO:
+```bash
+KUNGFU_LIB_PATH=$ROOT/third_party/kungfu/lib
+
+export LD_LIBRARY_PATH=$KUNGFU_LIB_PATH:$ROOT/mindspore/lib:$ROOT/build/mindspore/_deps/ompi-src/ompi/.libs
+
+kungfu_run_flags() {
+    echo -q
+    echo -logdir logs
+    echo -np 1
+
+    echo -w  # enable elastic mode
+    echo -builtin-config-port 9100
+    echo -config-server http://127.0.0.1:9100/config
+}
+
+kungfu_run() {
+    kungfu-run $(kungfu_run_flags) $@
+}
+
+kungfu_run /usr/bin/python3.7 train.py
+```
+
+See <./lenet-elastic/run-elastic.sh> for a full example.
