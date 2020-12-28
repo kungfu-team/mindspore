@@ -5,14 +5,14 @@ KungFu is a communication library designed for machine learning.
 It provides low level collective communicative APIs (such as `AllReduce`) which can be used by different ML frameworks,
 e.g. Tensorflow, PyTorch and Mindspore.
 
-To enable KungFu elastic training in mindspore, we provided kungfu operator as part of mindspore extension.
+To enable KungFu elastic training in MindSpore, we provided kungfu operator as part of MindSpore extension.
 User should implement customized optimizer and callback (extending the standard mindspore `Optimizer` and `Callback`).
 
-We also provide some commonly used optimizers as part of mindspore extension.
+We also provide some commonly used optimizers as part of MindSpore extension.
 
 ## Build
 
-Currently we build and install kungfu in the source tree of mindspore.
+Currently we build and install kungfu in the source tree of MindSpore.
 User can use the script <../install-kungfu.sh> to download and build kungfu.
 
 ## Implementing Customized Optimizer and Callback
@@ -112,7 +112,7 @@ class KungFuElasticCallback(ms.train.callback.Callback):
 
 ## Enabling Elastic Training
 
-To enable elastic training in mindspore, user need to
+To enable elastic training in MindSpore, user need to
 
 1. replace their original optimizer by the KungFu distributed optimizer.
 
