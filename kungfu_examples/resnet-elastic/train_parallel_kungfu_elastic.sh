@@ -6,7 +6,7 @@ ROOT=$PWD/../..
 
 KUNGFU_LIB_PATH=$ROOT/third_party/kungfu/lib
 
-export LD_LIBRARY_PATH=$KUNGFU_LIB_PATH:$ROOT/mindspore/lib:$ROOT/build/mindspore/_deps/ompi-src/ompi/.libs
+export LD_LIBRARY_PATH=$KUNGFU_LIB_PATH:$ROOT/mindspore/lib:$ROOT/build/mindspore/_deps/ompi-src/ompi/.libs:$ROOT/build/mindspore/_deps/nccl-src/build/lib
 
 kungfu_run_flags() {
     echo -q

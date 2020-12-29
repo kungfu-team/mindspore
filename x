@@ -16,11 +16,11 @@ trace() {
 }
 
 main() {
-    trace ./kungfu_examples/lenet-elastic/run-elastic.sh
+    # trace ./kungfu_examples/lenet-elastic/run-elastic.sh
     # trace ./kungfu_examples/resnet-elastic/train_single.sh
     # trace ./kungfu_examples/resnet-elastic/train_parallel_mpi.sh
     # trace ./kungfu_examples/resnet-elastic/train_parallel_kungfu.sh
-    # trace ./kungfu_examples/resnet-elastic/train_parallel_kungfu_elastic.sh
+    trace ./kungfu_examples/resnet-elastic/train_parallel_kungfu_elastic.sh
 }
 
 export GLOG_v=3 # ERROR
