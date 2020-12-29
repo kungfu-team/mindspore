@@ -17,43 +17,28 @@
 #include "tools/converter/parser/tflite/tflite_gather_nd_parser.h"
 #include <vector>
 #include <memory>
-#include <map>
 
 namespace mindspore {
 namespace lite {
-STATUS TfliteGatherNdParser::Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                   const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TfliteGatherNdParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
+PrimitiveC *TfliteGatherNdParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                     const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
     MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   std::unique_ptr<schema::GatherNdT> attr = std::make_unique<schema::GatherNdT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
-  attr->batchDims = 0;
-
-  op->primitive->value.type = schema::PrimitiveType_GatherNd;
-  op->primitive->value.value = attr.release();
-
-  for (size_t i = 0; i < tflite_op->inputs.size(); i++) {
-    AddOpInput(op, tensors_info, tflite_op->inputs[i], tflite_model->subgraphs[0]->tensors.size(),
-               schema::Format::Format_NHWC);
-  }
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  primitive->value.type = schema::PrimitiveType_GatherNd;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteGatherNdParser("GatherND", new TfliteGatherNdParser());
+TfliteNodeRegister g_tfliteGatherNdParser(tflite::BuiltinOperator_GATHER_ND, new TfliteGatherNdParser());
 }  // namespace lite
 }  // namespace mindspore

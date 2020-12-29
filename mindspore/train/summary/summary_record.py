@@ -17,13 +17,15 @@ import atexit
 import os
 import re
 import threading
+from collections import defaultdict
 
 from mindspore import log as logger
 
 from ..._c_expression import Tensor
-from ..._checkparam import _check_str_by_regular
+from ..._checkparam import Validator
 from .._utils import _check_lineage_value, _check_to_numpy, _make_directory
 from ._summary_adapter import get_event_file_name, package_graph_event
+from ._explain_adapter import check_explain_proto
 from ._writer_pool import WriterPool
 
 # for the moment, this lock is for caution's sake,
@@ -55,7 +57,6 @@ def _get_summary_tensor_data():
 
 
 def _dictlist():
-    from collections import defaultdict
     return defaultdict(list)
 
 
@@ -88,14 +89,15 @@ class SummaryRecord:
 
     Examples:
         >>> # use in with statement to auto close
+        >>> from mindspore.train.summary import SummaryRecord
         >>> with SummaryRecord(log_dir="./summary_dir") as summary_record:
-        >>>     pass
+        ...     pass
         >>>
         >>> # use in try .. finally .. to ensure closing
         >>> try:
-        >>>     summary_record = SummaryRecord(log_dir="./summary_dir")
-        >>> finally:
-        >>>     summary_record.close()
+        ...     summary_record = SummaryRecord(log_dir="./summary_dir")
+        ... finally:
+        ...     summary_record.close()
     """
 
     def __init__(self, log_dir, file_prefix="events", file_suffix="_MS", network=None, max_file_size=None):
@@ -103,8 +105,8 @@ class SummaryRecord:
         self._closed, self._event_writer = False, None
         self._mode, self._data_pool = 'train', _dictlist()
 
-        _check_str_by_regular(file_prefix)
-        _check_str_by_regular(file_suffix)
+        Validator.check_str_by_regular(file_prefix)
+        Validator.check_str_by_regular(file_suffix)
 
         self.log_path = _make_directory(log_dir)
 
@@ -133,7 +135,8 @@ class SummaryRecord:
         self._event_writer = WriterPool(log_dir,
                                         max_file_size,
                                         summary=self.full_file_name,
-                                        lineage=get_event_file_name(self.prefix, '_lineage'))
+                                        lineage=get_event_file_name(self.prefix, '_lineage'),
+                                        explainer=get_event_file_name(self.prefix, '_explain'))
         _get_summary_tensor_data()
         atexit.register(self.close)
 
@@ -149,17 +152,18 @@ class SummaryRecord:
 
     def set_mode(self, mode):
         """
-        Set the mode for the recorder to be aware. The mode is set to 'train' by default.
+        Sets the training phase. Different training phases affect data recording.
 
         Args:
-            mode (str): The mode to be set, which should be 'train' or 'eval'.
+            mode (str): The mode to be set, which should be 'train' or 'eval'. When the mode is 'eval',
+                summary_record will not record the data of summary operators.
 
         Raises:
             ValueError: When the mode is not recognized.
 
         Examples:
             >>> with SummaryRecord(log_dir="./summary_dir", file_prefix="xxx_", file_suffix="_yyy") as summary_record:
-            >>>     summary_record.set_mode('eval')
+            ...     summary_record.set_mode('eval')
         """
         mode_spec = 'train', 'eval'
         if mode not in mode_spec:
@@ -170,36 +174,33 @@ class SummaryRecord:
         """
         Add value to be recorded later.
 
-        When the plugin is 'tensor', 'scalar', 'image' or 'histogram',
-        the name should be the tag name, and the value should be a Tensor.
-
-        When the plugin is 'graph', the value should be a GraphProto.
-
-        When the plugin is 'dataset_graph', 'train_lineage', 'eval_lineage',
-        or 'custom_lineage_data', the value should be a proto message.
-
-
         Args:
             plugin (str): The value of the plugin.
             name (str): The value of the name.
             value (Union[Tensor, GraphProto, TrainLineage, EvaluationLineage, DatasetGraph, UserDefinedInfo]): \
                 The value to store.
 
-                - The data type of value should be 'GraphProto' when the plugin is 'graph'.
-                - The data type of value should be 'Tensor' when the plugin is 'scalar', 'image', 'tensor'
+                - The data type of value should be 'GraphProto' (see mindspore/ccsrc/anf_ir.proto) object
+                  when the plugin is 'graph'.
+                - The data type of value should be 'Tensor' object when the plugin is 'scalar', 'image', 'tensor'
                   or 'histogram'.
-                - The data type of value should be 'TrainLineage' when the plugin is 'train_lineage'.
-                - The data type of value should be 'EvaluationLineage' when the plugin is 'eval_lineage'.
-                - The data type of value should be 'DatasetGraph' when the plugin is 'dataset_graph'.
-                - The data type of value should be  'UserDefinedInfo' when the plugin is 'custom_lineage_data'.
-
+                - The data type of value should be a 'TrainLineage' object when the plugin is 'train_lineage',
+                  see mindspore/ccsrc/lineage.proto.
+                - The data type of value should be a 'EvaluationLineage' object when the plugin is 'eval_lineage',
+                  see mindspore/ccsrc/lineage.proto.
+                - The data type of value should be a 'DatasetGraph' object when the plugin is 'dataset_graph',
+                  see mindspore/ccsrc/lineage.proto.
+                - The data type of value should be a 'UserDefinedInfo' object when the plugin is 'custom_lineage_data',
+                  see mindspore/ccsrc/lineage.proto.
+                - The data type of value should be a 'Explain' object when the plugin is 'explainer',
+                  see mindspore/ccsrc/summary.proto.
         Raises:
             ValueError: When the name is not valid.
             TypeError: When the value is not a Tensor.
 
         Examples:
             >>> with SummaryRecord(log_dir="./summary_dir", file_prefix="xxx_", file_suffix="_yyy") as summary_record:
-            >>>     summary_record.add_value('scalar', 'loss', Tensor(0.1))
+            ...     summary_record.add_value('scalar', 'loss', Tensor(0.1))
         """
         if plugin in ('tensor', 'scalar', 'image', 'histogram'):
             if not name or not isinstance(name, str):
@@ -218,6 +219,9 @@ class SummaryRecord:
         elif plugin == 'graph':
             package_graph_event(value)
             self._data_pool[plugin].append(dict(value=value))
+        elif plugin == 'explainer':
+            check_explain_proto(value)
+            self._data_pool[plugin].append(dict(value=value.SerializeToString()))
         else:
             raise ValueError(f'No such plugin of {repr(plugin)}')
 
@@ -236,7 +240,9 @@ class SummaryRecord:
 
         Examples:
             >>> with SummaryRecord(log_dir="./summary_dir", file_prefix="xxx_", file_suffix="_yyy") as summary_record:
-            >>>     summary_record.record(step=2)
+            ...     summary_record.record(step=2)
+            ...
+            True
         """
         logger.debug("SummaryRecord step is %r.", step)
         if self._closed:
@@ -300,7 +306,7 @@ class SummaryRecord:
 
         Examples:
             >>> with SummaryRecord(log_dir="./summary_dir", file_prefix="xxx_", file_suffix="_yyy") as summary_record:
-            >>>     print(summary_record.log_dir)
+            ...     log_dir = summary_record.log_dir
         """
         return self.full_file_name
 
@@ -312,7 +318,7 @@ class SummaryRecord:
 
         Examples:
             >>> with SummaryRecord(log_dir="./summary_dir", file_prefix="xxx_", file_suffix="_yyy") as summary_record:
-            >>>     summary_record.flush()
+            ...     summary_record.flush()
         """
         if self._closed:
             logger.error("The record writer is closed and can not flush.")
@@ -325,9 +331,9 @@ class SummaryRecord:
 
         Examples:
             >>> try:
-            >>>     summary_record = SummaryRecord(log_dir="./summary_dir")
-            >>> finally:
-            >>>     summary_record.close()
+            ...     summary_record = SummaryRecord(log_dir="./summary_dir")
+            ... finally:
+            ...     summary_record.close()
         """
         if not self._closed and self._event_writer:
             # event writer flush and close

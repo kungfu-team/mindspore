@@ -37,9 +37,9 @@ class Rel(Enum):
     GE = 6  # >=
     # scalar range check
     INC_NEITHER = 7  # (), include neither
-    INC_LEFT = 8     # [), include left
-    INC_RIGHT = 9    # (], include right
-    INC_BOTH = 10    # [], include both
+    INC_LEFT = 8  # [), include left
+    INC_RIGHT = 9  # (], include right
+    INC_BOTH = 10  # [], include both
     # collection in, not in
     IN = 11
     NOT_IN = 12
@@ -75,12 +75,12 @@ rel_fns = {
 
 rel_strs = {
     # scalar compare
-    Rel.EQ: "equal to {}",
-    Rel.NE: "not equal to {}",
-    Rel.LT: "less than {}",
-    Rel.LE: "less or equal to {}",
-    Rel.GT: "greater than {}",
-    Rel.GE: "greater or equal to {}",
+    Rel.EQ: "== {}",
+    Rel.NE: "!= {}",
+    Rel.LT: "< {}",
+    Rel.LE: "<= {}",
+    Rel.GT: "> {}",
+    Rel.GE: ">= {}",
     # scalar range check
     Rel.INC_NEITHER: "({}, {})",
     Rel.INC_LEFT: "[{}, {})",
@@ -92,22 +92,61 @@ rel_strs = {
 }
 
 
+def _check_3d_int_or_tuple(arg_name, arg_value, prim_name, allow_five=False,
+                           ret_five=False, greater_zero=True):
+    """
+    Checks whether an argument is a positive int or tuple with 3 or 5(when allow_five is True) positive int elements.
+    """
+
+    def _raise_message():
+        raise ValueError(f"For '{prim_name}' attr '{arg_name}' should be an positive int number or a tuple of three "
+                         f"{'or five ' if allow_five else ''}positive int numbers, but got {arg_value}")
+
+    def _get_return_value():
+        if isinstance(arg_value, int):
+            ret = (1, 1, arg_value, arg_value, arg_value) if ret_five else (arg_value, arg_value, arg_value)
+        elif len(arg_value) == 3:
+            ret = (1, 1, arg_value[0], arg_value[1], arg_value[2]) if ret_five else arg_value
+        elif len(arg_value) == 5:
+            if not allow_five:
+                _raise_message()
+            ret = arg_value if ret_five else (arg_value[1], arg_value[2], arg_value[3])
+        else:
+            _raise_message()
+        return ret
+
+    Validator.check_value_type(arg_name, arg_value, (int, tuple), prim_name)
+    ret_value = _get_return_value()
+    for item in ret_value:
+        if isinstance(item, int) and not isinstance(item, bool):
+            if greater_zero and item > 0:
+                continue
+            if not greater_zero and item >= 0:
+                continue
+        _raise_message()
+    return tuple(ret_value)
+
+
 def check_number(arg_value, value, rel, arg_type=int, arg_name=None, prim_name=None):
     """
-        Check argument integer.
+    Check argument integer.
 
-        Usage:
-        - number = check_integer(number, 0, Rel.GE, "number", None) # number >= 0
+    Example:
+    - number = check_int(number, 0, Rel.GE, "number", None) # number >= 0
     """
     rel_fn = Rel.get_fns(rel)
     type_mismatch = not isinstance(arg_value, arg_type) or isinstance(arg_value, bool)
     type_except = TypeError if type_mismatch else ValueError
+
+    prim_name = f'in `{prim_name}`' if prim_name else ''
+    arg_name = f'`{arg_name}`' if arg_name else ''
+    if math.isinf(arg_value) or math.isnan(arg_value) or np.isinf(arg_value) or np.isnan(arg_value):
+        raise ValueError(f'{arg_name} {prim_name} must be legal value, but got `{arg_value}`.')
     if type_mismatch or not rel_fn(arg_value, value):
         rel_str = Rel.get_strs(rel).format(value)
-        arg_name = arg_name if arg_name else "parameter"
-        msg_prefix = f'For \'{prim_name}\' the' if prim_name else "The"
-        raise type_except(f'{msg_prefix} `{arg_name}` should be an {arg_type} and must {rel_str}, but got `{arg_value}`'
-                          f' with type `{type(arg_value).__name__}`.')
+        raise type_except(f'{arg_name} {prim_name} should be an {arg_type.__name__} and must {rel_str}, '
+                          f'but got `{arg_value}` with type `{type(arg_value).__name__}`.')
+
     return arg_value
 
 
@@ -121,12 +160,34 @@ def check_is_number(arg_value, arg_type, arg_name=None, prim_name=None):
     - number = check_is_number(number, int, "bias", "bias_class")
     """
     prim_name = f'in \'{prim_name}\'' if prim_name else ''
-    arg_name = f'\'{prim_name}\'' if arg_name else 'Input value'
-    if isinstance(arg_value, arg_type):
-        if math.isinf(arg_value) or math.isnan(arg_value):
+    arg_name = f'\'{arg_name}\'' if arg_name else 'Input value'
+    if isinstance(arg_value, arg_type) and not isinstance(arg_value, bool):
+        if math.isinf(arg_value) or math.isnan(arg_value) or np.isinf(arg_value) or np.isnan(arg_value):
             raise ValueError(f'{arg_name} {prim_name} must be legal float, but got `{arg_value}`.')
         return arg_value
-    raise TypeError(f'{arg_name} {prim_name} must be float, but got `{type(arg_value).__name__}`')
+    raise TypeError(f'{arg_name} {prim_name} must be {arg_type.__name__}, but got `{type(arg_value).__name__}`')
+
+
+def check_number_range(arg_value, lower_limit, upper_limit, rel, value_type, arg_name=None, prim_name=None):
+    """
+    Method for checking whether an int value is in some range.
+
+    Usage:
+    - number = check_number_range(number, 0.0, 1.0, Rel.INC_NEITHER, "number", float) # number in [0.0, 1.0]
+    - number = check_number_range(number, 0, 1, Rel.INC_NEITHER, "number", int) # number in [0, 1]
+    """
+    rel_fn = Rel.get_fns(rel)
+    prim_name = f'in `{prim_name}`' if prim_name else ''
+    arg_name = f'`{arg_name}`' if arg_name else ''
+    type_mismatch = not isinstance(arg_value, (np.ndarray, np.generic, value_type)) or isinstance(arg_value, bool)
+    if type_mismatch:
+        raise TypeError("{} {} must be `{}`,  but got `{}`.".format(
+            arg_name, prim_name, value_type.__name__, type(arg_value).__name__))
+    if not rel_fn(arg_value, lower_limit, upper_limit):
+        rel_str = Rel.get_strs(rel).format(lower_limit, upper_limit)
+        raise ValueError("{} {} should be in range of {}, but got {:.3e} with type `{}`.".format(
+            arg_name, prim_name, rel_str, arg_value, type(arg_value).__name__))
+    return arg_value
 
 
 class Validator:
@@ -146,17 +207,14 @@ class Validator:
         return arg_value
 
     @staticmethod
-    def check_integer(arg_name, arg_value, value, rel, prim_name=None):
-        """Check argument is integer"""
-        rel_fn = Rel.get_fns(rel)
-        type_mismatch = not isinstance(arg_value, int) or isinstance(arg_value, bool)
-        excp_cls = TypeError if type_mismatch else ValueError
-        if type_mismatch or not rel_fn(arg_value, value):
-            rel_str = Rel.get_strs(rel).format(value)
-            msg_prefix = f'For \'{prim_name}\' the' if prim_name else "The"
-            raise excp_cls(f'{msg_prefix} `{arg_name}` should be an int and must {rel_str}, but got `{arg_value}`'
-                           f' with type `{type(arg_value).__name__}`.')
-        return arg_value
+    def check_int(arg_value, value, rel, arg_name=None, prim_name=None):
+        """
+        Checks input integer value `arg_value` compare to `value`.
+
+        Usage:
+        - number = check_int(number, 0, Rel.GE, "number", None) # number >= 0
+        """
+        return check_number(arg_value, value, rel, int, arg_name, prim_name)
 
     @staticmethod
     def check_is_int(arg_value, arg_name=None, prim_name=None):
@@ -168,7 +226,17 @@ class Validator:
         - number = check_is_int(number, int, "bias")
         - number = check_is_int(number, int, "bias", "bias_class")
         """
-        check_is_number(arg_value, int, arg_name, prim_name)
+        return check_is_number(arg_value, int, arg_name, prim_name)
+
+    @staticmethod
+    def check_equal_int(arg_value, value, arg_name=None, prim_name=None):
+        """
+        Checks input integer value `arg_value` compare to `value`.
+
+        Usage:
+        - number = check_int(number, 0, Rel.GE, "number", None) # number >= 0
+        """
+        return check_number(arg_value, value, Rel.EQ, int, arg_name, prim_name)
 
     @staticmethod
     def check_positive_int(arg_value, arg_name=None, prim_name=None):
@@ -215,6 +283,16 @@ class Validator:
         return check_number(arg_value, 0, Rel.GE, int, arg_name, prim_name)
 
     @staticmethod
+    def check_float(arg_value, value, rel, arg_name=None, prim_name=None):
+        """
+        Checks input float value `arg_value` compare to `value`.
+
+        Usage:
+        - number = check_float(number, 0.0, Rel.GE, "number", None) # number >= 0
+        """
+        return check_number(arg_value, value, rel, float, arg_name, prim_name)
+
+    @staticmethod
     def check_is_float(arg_value, arg_name=None, prim_name=None):
         """
         Checks input value is float type or not.
@@ -224,7 +302,7 @@ class Validator:
         - number = check_is_float(number, int, "bias")
         - number = check_is_float(number, int, "bias", "bias_class")
         """
-        check_is_number(arg_value, float, arg_name, prim_name)
+        return check_is_number(arg_value, float, arg_name, prim_name)
 
     @staticmethod
     def check_positive_float(arg_value, arg_name=None, prim_name=None):
@@ -302,25 +380,26 @@ class Validator:
         return arg_value
 
     @staticmethod
-    def check_int_range(arg_name, arg_value, lower_limit, upper_limit, rel, prim_name):
-        """Method for checking whether an int value is in some range."""
-        rel_fn = Rel.get_fns(rel)
-        type_mismatch = not isinstance(arg_value, int) or isinstance(arg_value, bool)
-        excp_cls = TypeError if type_mismatch else ValueError
-        if type_mismatch or not rel_fn(arg_value, lower_limit, upper_limit):
-            rel_str = Rel.get_strs(rel).format(lower_limit, upper_limit)
-            raise excp_cls(f'For \'{prim_name}\' the `{arg_name}` should be an int in range {rel_str},'
-                           f' but got `{arg_value}` with type `{type(arg_value).__name__}`.')
-        return arg_value
+    def check_int_range(arg_value, lower_limit, upper_limit, rel, arg_name=None, prim_name=None):
+        """
+        Method for checking whether input value is in int range.
+
+        Usage:
+        - number = check_int_range(number, 0, 1, Rel.INC_NEITHER) # number in [0, 1]
+        - number = check_int_range(number, 0, 1, Rel.INC_NEITHER, "number") # number in [0, 1]
+        """
+        return check_number_range(arg_value, lower_limit, upper_limit, rel, int, arg_name, prim_name)
 
     @staticmethod
-    def check_number_range(arg_name, arg_value, lower_limit, upper_limit, rel, prim_name):
-        """Method for checking whether a numeric value is in some range."""
-        rel_fn = Rel.get_fns(rel)
-        if not rel_fn(arg_value, lower_limit, upper_limit):
-            rel_str = Rel.get_strs(rel).format(lower_limit, upper_limit)
-            raise ValueError(f'For \'{prim_name}\' the `{arg_name}` should be in range {rel_str}, but got {arg_value}.')
-        return arg_value
+    def check_float_range(arg_value, lower_limit, upper_limit, rel, arg_name=None, prim_name=None):
+        """
+        Method for checking whether input value is in float range.
+
+        Usage:
+        - number = check_float_range(number, 0.0, 1.0, Rel.INC_NEITHER) # number in [0.0, 1.0]
+        - number = check_float_range(number, 0.0, 1.0, Rel.INC_NEITHER, "number") # number in [0.0, 1.0]
+        """
+        return check_number_range(arg_value, lower_limit, upper_limit, rel, float, arg_name, prim_name)
 
     @staticmethod
     def check_string(arg_value, valid_values, arg_name=None, prim_name=None):
@@ -336,6 +415,28 @@ class Validator:
         msg_prefix = f'For \'{prim_name}\' the' if prim_name else "The"
         raise ValueError(f'{msg_prefix} `{arg_name}` should be str and must be in `{valid_values}`,'
                          f' but got `{arg_value}`.')
+
+    @staticmethod
+    def check_str_by_regular(target, reg=None, flag=re.ASCII, prim_name=None):
+        if reg is None:
+            # Named string regular expression
+            reg = r"^\w+[0-9a-zA-Z\_\.]*$"
+        if re.match(reg, target, flag) is None:
+            prim_name = f'in `{prim_name}`' if prim_name else ""
+            raise ValueError("'{}' {} is illegal, it should be match regular'{}' by flags'{}'".format(
+                target, prim_name, reg, flag))
+        return True
+
+    @staticmethod
+    def check_file_name_by_regular(target, reg=None, flag=re.ASCII, prim_name=None):
+        """Check whether file name is legitimate."""
+        if reg is None:
+            reg = r"^[0-9a-zA-Z\_\-\.\/\\]+$"
+        if re.match(reg, target, flag) is None:
+            prim_name = f'in `{prim_name}`' if prim_name else ""
+            raise ValueError("'{}' {} is illegal, it should be match regular'{}' by flags'{}'".format(
+                target, prim_name, reg, flag))
+        return True
 
     @staticmethod
     def check_pad_value_by_mode(pad_mode, padding, prim_name):
@@ -360,40 +461,21 @@ class Validator:
                 break
         if not hit:
             type_str = (type(type_).__name__ if isinstance(type_, (tuple, list)) else "") + str(type_)
-            raise TypeError(f'For \'{prim_name}\' the type of `{arg_name}` should be subclass'
-                            f' of {",".join((str(x) for x in template_types))}, but got {type_str}.')
+            raise TypeError(f'For \'{prim_name}\', the type of `{arg_name}` should be subclass'
+                            f' of {", ".join((str(x) for x in template_types))}, but got {type_str}.')
 
     @staticmethod
     def check_const_input(arg_name, arg_value, prim_name):
         """Checks valid value."""
         if arg_value is None:
-            raise ValueError(f'For \'{prim_name}\' the `{arg_name}` must be a const input, but got {arg_value}.')
+            raise ValueError(f'For \'{prim_name}\', the `{arg_name}` must be a const input, but got {arg_value}.')
         return arg_value
 
     @staticmethod
-    def check_type(arg_name, arg_value, valid_types):
-        """Type checking."""
-        def raise_error_msg():
-            """func for raising error message when check failed"""
-            type_names = [t.__name__ for t in valid_types]
-            num_types = len(valid_types)
-            raise TypeError(f'The type of `{arg_name}` should be {"one of " if num_types > 1 else ""}'
-                            f'{type_names if num_types > 1 else type_names[0]}, but got {type(arg_value).__name__}.')
+    def check_types_same_and_valid(args, valid_values, prim_name):
+        """Checks whether the types of inputs are the same and valid."""
 
-        if isinstance(arg_value, type(mstype.tensor)):
-            arg_value = arg_value.element_type()
-        # Notice: bool is subclass of int, so `check_type('x', True, [int])` will check fail, and
-        #         `check_type('x', True, [bool, int])` will check pass
-        if isinstance(arg_value, bool) and bool not in tuple(valid_types):
-            raise_error_msg()
-        if isinstance(arg_value, tuple(valid_types)):
-            return arg_value
-        raise_error_msg()
-
-    @staticmethod
-    def check_type_same(args, valid_values, prim_name):
-        """Checks whether the types of inputs are the same."""
-        def _check_tensor_type(arg):
+        def _check_type_valid(arg):
             arg_key, arg_val = arg
             elem_type = arg_val
             Validator.check_subclass(arg_key, elem_type, valid_values, prim_name)
@@ -403,21 +485,29 @@ class Validator:
             arg1_name, arg1_type = arg1
             arg2_name, arg2_type = arg2
             if arg1_type != arg2_type:
-                raise TypeError(f'For \'{prim_name}\' type of `{arg2_name}` should be same as `{arg1_name}`,'
+                raise TypeError(f'For \'{prim_name}\', type of `{arg2_name}` should be same as `{arg1_name}`,'
                                 f' but `{arg1_name}` with type {arg1_type} and `{arg2_name}` with type {arg2_type}.')
             return arg1
 
-        elem_types = map(_check_tensor_type, args.items())
+        elem_types = map(_check_type_valid, args.items())
         reduce(_check_types_same, elem_types)
 
     @staticmethod
-    def check_tensor_type_same(args, valid_values, prim_name):
-        """Checks whether the element types of input tensors are the same."""
-        tensor_types = [mstype.tensor_type(t) for t in valid_values]
-        Validator.check_type_same(args, tensor_types, prim_name)
+    def check_tensors_dtypes_same_and_valid(args, valid_dtypes, prim_name):
+        """Checks whether the element types of input tensors are the same and valid."""
+        valid_dtypes = valid_dtypes if isinstance(valid_dtypes, Iterable) else [valid_dtypes]
+        tensor_types = [mstype.tensor_type(t) for t in valid_dtypes]
+        Validator.check_types_same_and_valid(args, tensor_types, prim_name)
 
     @staticmethod
-    def check_scalar_or_tensor_type_same(args, valid_values, prim_name, allow_mix=False):
+    def check_tensor_dtype_valid(arg_name, arg_type, valid_dtypes, prim_name):
+        """Checks whether the element types of input tensors are valid."""
+        valid_dtypes = valid_dtypes if isinstance(valid_dtypes, Iterable) else [valid_dtypes]
+        tensor_types = [mstype.tensor_type(t) for t in valid_dtypes]
+        Validator.check_subclass(arg_name, arg_type, tensor_types, prim_name)
+
+    @staticmethod
+    def check_scalar_or_tensor_types_same(args, valid_values, prim_name, allow_mix=False):
         """
         Checks whether the types of inputs are the same. If the input args are tensors, checks their element types.
         If `allow_mix` is True, Tensor(float32) and float32 are type compatible, otherwise an exception will be raised.
@@ -428,7 +518,7 @@ class Validator:
             if isinstance(arg_val, type(mstype.tensor)):
                 arg_val = arg_val.element_type()
             if not arg_val in valid_values:
-                raise TypeError(f'For \'{prim_name}\' the `{arg_key}` should be in {valid_values},'
+                raise TypeError(f'For \'{prim_name}\', the `{arg_key}` should be in {valid_values},'
                                 f' but `{arg_key}` is {arg_val}.')
             return arg
 
@@ -451,49 +541,50 @@ class Validator:
                 raise TypeError(f'For \'{prim_name}\' type of `{arg2_name}` should be same as `{arg1_name}`,'
                                 f' but `{arg1_name}` is {arg1_type} and `{arg2_name}` is {arg2_type}.')
             return arg1
+
         reduce(_check_types_same, map(_check_argument_type, args.items()))
 
     @staticmethod
-    def check_value_type(arg_name, arg_value, valid_types, prim_name):
+    def check_value_type(arg_name, arg_value, valid_types, prim_name=None):
         """Checks whether a value is instance of some types."""
         valid_types = valid_types if isinstance(valid_types, Iterable) else (valid_types,)
 
         def raise_error_msg():
             """func for raising error message when check failed"""
-            type_names = [t.__name__ for t in valid_types]
+            type_names = [t.__name__ if hasattr(t, '__name__') else str(t) for t in valid_types]
             num_types = len(valid_types)
-            msg_prefix = f'For \'{prim_name}\' the' if prim_name else 'The'
+            msg_prefix = f"For '{prim_name}', the" if prim_name else "The"
             raise TypeError(f'{msg_prefix} type of `{arg_name}` should be {"one of " if num_types > 1 else ""}'
-                            f'{type_names if num_types > 1 else type_names[0]}, but got {type(arg_value).__name__}.')
+                            f'{type_names if num_types > 1 else type_names[0]}, '
+                            f'but got {arg_value} with type {type(arg_value).__name__}.')
 
         # Notice: bool is subclass of int, so `check_value_type('x', True, [int])` will check fail, and
         #         `check_value_type('x', True, [bool, int])` will check pass
         if isinstance(arg_value, bool) and bool not in tuple(valid_types):
             raise_error_msg()
-        if isinstance(arg_value, tuple(valid_types)):
-            return arg_value
-        raise_error_msg()
+        if not isinstance(arg_value, tuple(valid_types)):
+            raise_error_msg()
+        return arg_value
 
     @staticmethod
     def check_type_name(arg_name, arg_type, valid_types, prim_name):
         """Checks whether a type in some specified types"""
         valid_types = valid_types if isinstance(valid_types, Iterable) else (valid_types,)
 
-        def get_typename(t):
-            return t.__name__ if hasattr(t, '__name__') else str(t)
+        def raise_error_msg():
+            """func for raising error message when check failed"""
+            type_names = [t.__name__ if hasattr(t, '__name__') else t for t in valid_types]
+            num_types = len(valid_types)
+            msg_prefix = f"For '{prim_name}', the" if prim_name else "The"
+            raise TypeError(f"{msg_prefix} '{arg_name}' should be {'one of ' if num_types > 1 else ''}"
+                            f"{type_names if num_types > 1 else type_names[0]}, "
+                            f"but got {arg_type.__name__ if hasattr(arg_type, '__name__') else repr(arg_type)}.")
 
         if isinstance(arg_type, type(mstype.tensor)):
             arg_type = arg_type.element_type()
-
-        if arg_type in valid_types:
-            return arg_type
-        type_names = [get_typename(t) for t in valid_types]
-        msg_prefix = f'For \'{prim_name}\' the' if prim_name else 'The'
-        if len(valid_types) == 1:
-            raise TypeError(f'{msg_prefix} type of `{arg_name}` should be {type_names[0]},'
-                            f' but got {get_typename(arg_type)}.')
-        raise TypeError(f'{msg_prefix} type of `{arg_name}` should be one of {type_names},'
-                        f' but got {get_typename(arg_type)}.')
+        if arg_type not in valid_types:
+            raise_error_msg()
+        return arg_type
 
     @staticmethod
     def check_reduce_shape(ori_shape, shape, axis, prim_name):
@@ -505,20 +596,6 @@ class Validator:
                              f'{tuple(exp_shape)}, but got {shape}.')
 
 
-def check_int(input_param):
-    """Int type judgment."""
-    if isinstance(input_param, int) and not isinstance(input_param, bool):
-        return input_param
-    raise TypeError("Input type must be int!")
-
-
-def check_int_zero_one(input_param):
-    """Judge whether it is 0 or 1."""
-    if input_param in (0, 1):
-        return input_param
-    raise ValueError("The data must be 0 or 1.")
-
-
 def check_input_format(input_param):
     """Judge input format."""
     if input_param == "NCHW":
@@ -526,45 +603,37 @@ def check_input_format(input_param):
     raise ValueError("The data format must be NCHW.")
 
 
-def check_padding(padding):
-    """Check padding."""
-    if padding >= 0:
-        return padding
-    raise ValueError("The padding must be at least 0,"" but got padding {}.".format(padding))
-
-
-def check_padmode(mode):
-    """Check padmode."""
-    if mode in ("same", "valid", "pad"):
-        return mode
-    raise ValueError("The pad mode must be same or valid or pad,"" but got mode {}.".format(mode))
-
-
-def check_tensor_supported_type(dtype):
-    """Check tensor dtype."""
-    if dtype in (mstype.int32, mstype.float32):
-        return dtype
-    raise ValueError("The dtype must be mstype.int32 or mstype.float32, but got mstype {}.".format(dtype))
-
-
 def _expand_tuple(n_dimensions):
-    """To expand a number to tuple."""
+    """To expand a int number to tuple."""
 
     def convert(m):
         if not isinstance(m, tuple):
-            if isinstance(m, int):
+            if isinstance(m, int) and not isinstance(m, bool):
                 return tuple(repeat(m, n_dimensions))
-            raise TypeError("Input type must be int or tuple.")
+            raise TypeError("Input type must be int or tuple[int].")
 
         if not len(m) is n_dimensions:
-            raise TypeError("Input dimension is incorrect.")
+            raise TypeError("Input tuple dimension is incorrect.")
 
         for i in m:
-            if not isinstance(i, int):
-                raise TypeError("Incorrect type inside of a tuple!")
+            if not isinstance(i, int) or isinstance(i, bool):
+                raise TypeError("Incorrect type inside of a tuple, must be int!")
         return m
 
     return convert
+
+
+def _check_data_type_valid(data, valid_type):
+    """Check data type valid."""
+    if valid_type is None:
+        return data is None
+    if isinstance(data, valid_type):
+        if hasattr(data, 'size') and data.size == 0:
+            msg = "Please provide non-empty data."
+            logger.error(msg)
+            raise ValueError(msg)
+        return True
+    return False
 
 
 def check_input_data(*data, data_class):
@@ -573,16 +642,21 @@ def check_input_data(*data, data_class):
         if isinstance(item, (list, tuple)):
             for v in item:
                 check_input_data(v, data_class=data_class)
+        elif isinstance(item, dict):
+            for v in item.values():
+                check_input_data(v, data_class=data_class)
         else:
-            if not isinstance(item, data_class):
-                raise ValueError(f'Please provide as model inputs'
-                                 f' either a single'
-                                 f' or a list of {data_class.__name__},'
-                                 f' but got part data type is {str(type(item))}.')
-            if item.size() == 0:
-                msg = "Please provide non-empty data."
-                logger.error(msg)
-                raise ValueError(msg)
+            if isinstance(data_class, (tuple, list)):
+                ret = True in tuple(_check_data_type_valid(item, data_type) for data_type in data_class)
+            else:
+                ret = _check_data_type_valid(item, data_class)
+            if not ret:
+                data_class_str = tuple(i.__name__ if hasattr(i, '__name__') else i for i in data_class) \
+                                 if isinstance(data_class, (tuple, list)) else \
+                                 (data_class if data_class is None else data_class.__name__)
+                raise ValueError(f'Please provide as model inputs either a single or '
+                                 f'a tuple or a list or a dict of {data_class_str}, '
+                                 f'but got part data type is {item if item is None else type(item).__name__}.')
 
 
 def check_output_data(data):
@@ -594,101 +668,6 @@ def check_output_data(data):
 once = _expand_tuple(1)
 twice = _expand_tuple(2)
 triple = _expand_tuple(3)
-valid_data_types = (int, float, np.int8, np.int16, np.int32, np.int64,
-                    np.uint8, np.uint16, np.uint32, np.uint64, np.float16,
-                    np.float32, np.float64, bool, np.bool_)
-
-
-def check_type(arg_name, arg_value, valid_types):
-    """Check value type."""
-    # if input type is Tensor ,get element type
-    if isinstance(arg_value, type(mstype.tensor)):
-        arg_value = arg_value.element_type()
-
-    # First, check if arg_value has argvalid_types
-    if isinstance(arg_value, tuple(valid_types)):
-        return type(arg_value).__name__
-
-    # Second, wrap arg_value with numpy array so that it can be checked through numpy api
-    if isinstance(arg_value, (list, tuple)):
-        arg_value = np.array(arg_value)
-
-    # Thirdly, check the data type by numpy's dtype api
-    valid = False
-    if isinstance(arg_value, np.ndarray):
-        valid = arg_value.dtype in valid_data_types
-
-    # Notice: bool is subclass of int, so `check_type('x', True, [int])` will check fail, and
-    #         `check_type('x', True, [bool, int])` will check pass
-    if isinstance(arg_value, bool) and bool not in tuple(valid_types):
-        valid = False
-
-    if not valid:
-        type_names = [t.__name__ for t in valid_types]
-        if len(valid_types) == 1:
-            raise TypeError(f'The type of `{arg_name}` should be {type_names[0]},'
-                            f' but got {type(arg_value).__name__}.')
-        raise TypeError(f'The type of `{arg_name}` should be one of {type_names},'
-                        f' but got {type(arg_value).__name__}.')
-
-    return type(arg_value).__name__
-
-
-def check_typename(arg_name, arg_type, valid_types):
-    """Check type name."""
-
-    def get_typename(t):
-        return t.__name__ if hasattr(t, '__name__') else str(t)
-
-    if isinstance(arg_type, type(mstype.tensor)):
-        arg_type = arg_type.element_type()
-
-    if arg_type in valid_types:
-        return arg_type
-    if isinstance(arg_type, tuple(valid_types)):
-        return arg_type
-    type_names = [get_typename(t) for t in valid_types]
-    if len(valid_types) == 1:
-        raise TypeError(f'The type of `{arg_name}` should be {type_names[0]},'
-                        f' but got {get_typename(arg_type)}.')
-    raise TypeError(f'The type of `{arg_name}` should be one of {type_names},'
-                    f' but got {get_typename(arg_type)}.')
-
-
-def check_shape(arg_name, arg_value):
-    """Check shape."""
-    # First, check if shape is a tuple
-    if not isinstance(arg_value, tuple):
-        raise TypeError(f'The type of `{arg_name}` should be one of {tuple.__name__},'
-                        f' but got {type(arg_value).__name__}.')
-
-    # Second, wrap arg_value with numpy array so that it can be checked through numpy api
-    arg_value = np.array(arg_value)
-
-    # shape can not be ()
-    if arg_value.size == 0:
-        raise ValueError('Shape can not be empty.')
-
-    # shape's dimension should be 1
-    if arg_value.ndim != 1:
-        raise ValueError('Shape of tensor should be 1-dim vector, but got {}-dim.'.format(arg_value.ndim))
-
-    # Thirdly, check each element's type of the shape
-    valid_types = (int, np.int8, np.int16, np.int32, np.int64,
-                   np.uint8, np.uint16, np.uint32, np.uint64)
-    for dim_size in arg_value:
-        if not isinstance(dim_size, valid_types) or dim_size <= 0:
-            raise ValueError('Every dimension size of the tensor shape should be a positive integer,'
-                             ' but got {}.'.format(dim_size))
-
-
-def _check_str_by_regular(target, reg=None, flag=re.ASCII):
-    if reg is None:
-        # Named string regular expression
-        reg = r"^\w+[0-9a-zA-Z\_\.]*$"
-    if re.match(reg, target, flag) is None:
-        raise ValueError("'{}' is illegal, it should be match regular'{}' by flags'{}'".format(target, reg, flag))
-    return True
 
 
 def args_type_check(*type_args, **type_kwargs):
@@ -712,6 +691,7 @@ def args_type_check(*type_args, **type_kwargs):
                     if value is not None and not isinstance(value, bound_types[name]):
                         raise TypeError('Argument {} must be {}'.format(name, bound_types[name]))
             return func(*args, **kwargs)
+
         return wrapper
 
     return type_check

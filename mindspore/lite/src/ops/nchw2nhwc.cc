@@ -17,6 +17,10 @@
 #include "src/ops/nchw2nhwc.h"
 #include "src/common/common.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -29,6 +33,10 @@ int Nchw2Nhwc::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffe
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+PrimitiveC *Nchw2NhwcCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<Nchw2Nhwc>(primitive);
+}
+Registry Nchw2NhwcRegistry(schema::PrimitiveType_Nchw2Nhwc, Nchw2NhwcCreator);
 #endif
 
 int Nchw2Nhwc::InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) {
@@ -37,10 +45,10 @@ int Nchw2Nhwc::InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite:
   MS_ASSERT(input != nullptr);
   auto output = outputs_.front();
   MS_ASSERT(output != nullptr);
-  output->SetFormat(schema::Format::Format_NHWC);
+  output->set_format(schema::Format::Format_NHWC);
   output->set_data_type(input->data_type());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   std::vector<int> nchw_shape = input->shape();
   if (nchw_shape.size() != 4) {

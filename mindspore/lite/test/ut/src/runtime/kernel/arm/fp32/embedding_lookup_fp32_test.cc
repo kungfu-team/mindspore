@@ -15,8 +15,8 @@
  */
 
 #include <iostream>
-#include "src/runtime/kernel/arm/fp32/embedding_lookup.h"
-#include "nnacl/fp32/embedding_lookup.h"
+#include "src/runtime/kernel/arm/fp32/embedding_lookup_fp32.h"
+#include "nnacl/fp32/embedding_lookup_fp32.h"
 #include "src/common/file_utils.h"
 #include "common/common_test.h"
 #include "src/common/log_adapter.h"
@@ -31,25 +31,28 @@ class TestEmbeddingLookupFp32 : public mindspore::CommonTest {
 
 void ElTestInit(std::vector<Tensor *> *inputs_, std::vector<Tensor *> *outputs_,
                 EmbeddingLookupParameter *embedding_lookup_param) {
-  Tensor *in_t_first = new Tensor(kNumberTypeFloat32, {6, 2}, schema::Format_NHWC, lite::Tensor::Category::CONST);
+  Tensor *in_t_first =
+    new Tensor(kNumberTypeFloat32, {6, 2}, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   in_t_first->MallocData();
   float in_first[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
   memcpy(in_t_first->MutableData(), in_first, sizeof(float) * in_t_first->ElementsNum());
   inputs_->push_back(in_t_first);
 
-  Tensor *in_t_second = new Tensor(kNumberTypeFloat32, {4, 2}, schema::Format_NHWC, lite::Tensor::Category::CONST);
+  Tensor *in_t_second =
+    new Tensor(kNumberTypeFloat32, {4, 2}, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   in_t_second->MallocData();
   float in_second[] = {1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8};
   memcpy(in_t_second->MutableData(), in_second, sizeof(float) * in_t_second->ElementsNum());
   inputs_->push_back(in_t_second);
 
-  Tensor *ids_t = new Tensor(kNumberTypeFloat32, {2, 3}, schema::Format_NHWC, lite::Tensor::Category::CONST);
+  Tensor *ids_t = new Tensor(kNumberTypeFloat32, {2, 3}, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   ids_t->MallocData();
   int ids[] = {1, 9, 2, 4, 6, 7};
   memcpy(ids_t->MutableData(), ids, sizeof(int) * ids_t->ElementsNum());
   inputs_->push_back(ids_t);
 
-  Tensor *outputs_t = new Tensor(kNumberTypeInt32, {2, 3, 2}, schema::Format_NHWC, lite::Tensor::Category::CONST);
+  Tensor *outputs_t =
+    new Tensor(kNumberTypeInt32, {2, 3, 2}, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   outputs_t->MallocData();
   outputs_->push_back(outputs_t);
 
@@ -72,7 +75,7 @@ TEST_F(TestEmbeddingLookupFp32, ElTest) {
   el->Run();
 
   std::cout << "output shape:" << std::endl;
-  for (int i = 0; i < outputs_.front()->shape().size(); ++i) {
+  for (unsigned int i = 0; i < outputs_.front()->shape().size(); ++i) {
     std::cout << outputs_.front()->shape()[i] << ' ';
   }
   std::cout << std::endl;

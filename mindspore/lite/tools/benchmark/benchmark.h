@@ -19,6 +19,7 @@
 
 #include <getopt.h>
 #include <signal.h>
+#include <random>
 #include <unordered_map>
 #include <fstream>
 #include <iostream>
@@ -42,12 +43,15 @@ constexpr float relativeTolerance = 1e-5;
 constexpr float absoluteTolerance = 1e-8;
 
 struct MS_API CheckTensor {
-  CheckTensor(const std::vector<size_t> &shape, const std::vector<float> &data) {
+  CheckTensor(const std::vector<size_t> &shape, const std::vector<float> &data,
+              const std::vector<std::string> &strings_data = {""}) {
     this->shape = shape;
     this->data = data;
+    this->strings_data = strings_data;
   }
   std::vector<size_t> shape;
   std::vector<float> data;
+  std::vector<std::string> strings_data;
 };
 
 class MS_API BenchmarkFlags : public virtual FlagParser {
@@ -56,7 +60,7 @@ class MS_API BenchmarkFlags : public virtual FlagParser {
     // common
     AddFlag(&BenchmarkFlags::model_file_, "modelFile", "Input model file", "");
     AddFlag(&BenchmarkFlags::in_data_file_, "inDataFile", "Input data file, if not set, use random input", "");
-    AddFlag(&BenchmarkFlags::device_, "device", "CPU | GPU", "CPU");
+    AddFlag(&BenchmarkFlags::device_, "device", "CPU | GPU | NPU", "CPU");
     AddFlag(&BenchmarkFlags::cpu_bind_mode_, "cpuBindMode",
             "Input 0 for NO_BIND, 1 for HIGHER_CPU, 2 for MID_CPU, defalut value: 1", 1);
     // MarkPerformance
@@ -70,6 +74,8 @@ class MS_API BenchmarkFlags : public virtual FlagParser {
     AddFlag(&BenchmarkFlags::benchmark_data_type_, "benchmarkDataType",
             "Benchmark data type. FLOAT | INT32 | INT8 | UINT8", "FLOAT");
     AddFlag(&BenchmarkFlags::accuracy_threshold_, "accuracyThreshold", "Threshold of accuracy", 0.5);
+    AddFlag(&BenchmarkFlags::resize_dims_in_, "inputShapes",
+            "Shape of input data, the format should be NHWC. e.g. 1,32,32,32:1,1,32,32,1", "");
   }
 
   ~BenchmarkFlags() override = default;
@@ -83,24 +89,24 @@ class MS_API BenchmarkFlags : public virtual FlagParser {
   std::string model_file_;
   std::string in_data_file_;
   std::vector<std::string> input_data_list_;
-  InDataType in_data_type_;
+  InDataType in_data_type_ = kBinary;
   std::string in_data_type_in_ = "bin";
   int cpu_bind_mode_ = 1;
   // MarkPerformance
-  int loop_count_;
-  int num_threads_;
-  bool enable_fp16_;
-  int warm_up_loop_count_;
-  bool time_profiling_;
+  int loop_count_ = 10;
+  int num_threads_ = 2;
+  bool enable_fp16_ = false;
+  int warm_up_loop_count_ = 3;
+  bool time_profiling_ = false;
   // MarkAccuracy
   std::string benchmark_data_file_;
-  std::string benchmark_data_type_;
-  float accuracy_threshold_;
+  std::string benchmark_data_type_ = "FLOAT";
+  float accuracy_threshold_ = 0.5;
   // Resize
-  std::string resize_dims_in_ = "";
-  std::vector<std::vector<int64_t>> resize_dims_;
+  std::string resize_dims_in_;
+  std::vector<std::vector<int>> resize_dims_;
 
-  std::string device_;
+  std::string device_ = "CPU";
 };
 
 class MS_API Benchmark {
@@ -119,33 +125,33 @@ class MS_API Benchmark {
   // call GenerateRandomData to fill inputTensors
   int GenerateInputData();
 
-  int GenerateRandomData(size_t size, void *data);
+  int GenerateRandomData(size_t size, void *data, TypeId data_type);
 
   int ReadInputFile();
 
   int ReadCalibData();
 
+  int ReadTensorData(std::ifstream &in_file_stream, const std::string &tensor_name, const std::vector<size_t> &dims);
+
   int CompareOutput();
+
+  tensor::MSTensor *GetTensorByNodeOrTensorName(const std::string &node_or_tensor_name);
+
+  int CompareStringData(const std::string &name, tensor::MSTensor *tensor);
+
+  int CompareDataGetTotalBiasAndSize(const std::string &name, tensor::MSTensor *tensor, float *total_bias,
+                                     int *total_size);
 
   int InitCallbackParameter();
 
   int PrintResult(const std::vector<std::string> &title, const std::map<std::string, std::pair<int, float>> &result);
 
-  template <typename T>
-  void PrintInputData(tensor::MSTensor *input) {
-    MS_ASSERT(input != nullptr);
-    static int i = 0;
-    auto inData = reinterpret_cast<T *>(input->MutableData());
-    std::cout << "InData" << i++ << ": ";
-    for (size_t j = 0; j < 20; j++) {
-      std::cout << static_cast<float>(inData[j]) << " ";
-    }
-    std::cout << std::endl;
-  }
+  int PrintInputData();
 
   // tensorData need to be converter first
   template <typename T>
-  float CompareData(const std::string &nodeName, std::vector<int> msShape, T *msTensorData) {
+  float CompareData(const std::string &nodeName, const std::vector<int> &msShape, const void *tensor_data) {
+    const T *msTensorData = static_cast<const T *>(tensor_data);
     auto iter = this->benchmark_data_.find(nodeName);
     if (iter != this->benchmark_data_.end()) {
       std::vector<size_t> castedMSShape;
@@ -188,7 +194,7 @@ class MS_API Benchmark {
         auto tolerance = absoluteTolerance + relativeTolerance * fabs(calibTensor->data.at(j));
         auto absoluteError = std::fabs(msTensorData[j] - calibTensor->data.at(j));
         if (absoluteError > tolerance) {
-          if (fabs(calibTensor->data.at(j)) == 0) {
+          if (fabs(calibTensor->data.at(j) - 0.0f) < FLT_EPSILON) {
             if (absoluteError > 1e-5) {
               meanError += absoluteError;
               errorCount++;
@@ -219,13 +225,21 @@ class MS_API Benchmark {
     }
   }
 
+  template <typename T, typename Distribution>
+  void FillInputData(int size, void *data, Distribution distribution) {
+    MS_ASSERT(data != nullptr);
+    int elements_num = size / sizeof(T);
+    (void)std::generate_n(static_cast<T *>(data), elements_num,
+                          [&]() { return static_cast<T>(distribution(random_engine_)); });
+  }
+
   int MarkPerformance();
 
   int MarkAccuracy();
 
  private:
   BenchmarkFlags *flags_;
-  session::LiteSession *session_;
+  session::LiteSession *session_{nullptr};
   std::vector<mindspore::tensor::MSTensor *> ms_inputs_;
   std::unordered_map<std::string, std::vector<mindspore::tensor::MSTensor *>> ms_outputs_;
   std::unordered_map<std::string, CheckTensor *> benchmark_data_;
@@ -242,8 +256,9 @@ class MS_API Benchmark {
   std::map<std::string, std::pair<int, float>> op_times_by_type_;
   std::map<std::string, std::pair<int, float>> op_times_by_name_;
 
-  session::KernelCallBack before_call_back_;
-  session::KernelCallBack after_call_back_;
+  KernelCallBack before_call_back_;
+  KernelCallBack after_call_back_;
+  std::mt19937 random_engine_;
 };
 
 int MS_API RunBenchmark(int argc, const char **argv);

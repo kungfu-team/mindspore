@@ -16,6 +16,10 @@
 
 #include "src/ops/scale.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -43,6 +47,10 @@ int Scale::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *ScaleCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Scale>(primitive); }
+Registry ScaleRegistry(schema::PrimitiveType_Scale, ScaleCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

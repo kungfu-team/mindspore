@@ -19,8 +19,12 @@
 #include "minddata/dataset/core/constants.h"
 #include "minddata/dataset/core/global_context.h"
 #include "minddata/dataset/engine/execution_tree.h"
+#ifndef ENABLE_ANDROID
 #include "utils/log_adapter.h"
 #include "utils/system/crc32c.h"
+#else
+#include "mindspore/lite/src/common/log_adapter.h"
+#endif
 
 namespace mindspore {
 namespace dataset {
@@ -83,8 +87,16 @@ Status CacheLookupOp::HandshakeRandomAccessOp(const RandomAccessOp *op) {
   leaf_op_wp_.Set();
   return Status::OK();
 }
-Status CacheLookupOp::InitSampler() { return Sampler::InitSampler(); }
+Status CacheLookupOp::InitSampler() { return SamplerRT::InitSampler(); }
 void CacheLookupOp::Print(std::ostream &out, bool show_all) const { CacheBase::Print(out, show_all); }
+void CacheLookupOp::SamplerPrint(std::ostream &out, bool show_all) const {
+  out << "\nSampler: CacheLookupOp";
+  if (show_all) {
+    // Call the super class for displaying any common detailed info
+    SamplerRT::SamplerPrint(out, show_all);
+    // Then add our own info if any
+  }
+}
 Status CacheLookupOp::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) {
   std::vector<row_id_type> cache_miss;
   RETURN_IF_NOT_OK(keys_miss_->Pop(0, &cache_miss));

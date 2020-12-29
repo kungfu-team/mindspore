@@ -15,12 +15,12 @@
  */
 #include "src/runtime/kernel/arm/base/pooling_base.h"
 #include <vector>
-#include "src/runtime/kernel/arm/int8/pooling_int8.h"
-#include "src/runtime/kernel/arm/fp32/pooling.h"
+#include "src/runtime/kernel/arm/fp32/pooling_fp32.h"
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
 #include "include/context.h"
+#include "src/ops/pooling.h"
 
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
@@ -38,18 +38,25 @@ int PoolingBaseCPUKernel::SetQuantParam() {
   }
   pooling_quant_arg_[0] = reinterpret_cast<QuantArg *>(malloc(sizeof(QuantArg)));
   if (pooling_quant_arg_[0] == nullptr) {
+    pooling_quant_arg_[1] = nullptr;
     MS_LOG(ERROR) << "malloc pooling_quant_arg[0] failed.";
+    free(pooling_quant_arg_);
+    pooling_quant_arg_ = nullptr;
     return RET_MEMORY_FAILED;
   }
   pooling_quant_arg_[1] = reinterpret_cast<QuantArg *>(malloc(sizeof(QuantArg)));
   if (pooling_quant_arg_[1] == nullptr) {
     MS_LOG(ERROR) << "malloc pooling_quant_arg[1] failed.";
+    free(pooling_quant_arg_[0]);
+    pooling_quant_arg_[0] = nullptr;
+    free(pooling_quant_arg_);
+    pooling_quant_arg_ = nullptr;
     return RET_MEMORY_FAILED;
   }
   auto *input_tensor = in_tensors_.at(kInputIndex);
-  auto in_quant_arg = input_tensor->GetQuantParams();
+  auto in_quant_arg = input_tensor->quant_params();
   auto *out_tensor = out_tensors_.at(kOutputIndex);
-  auto out_quant_arg = out_tensor->GetQuantParams();
+  auto out_quant_arg = out_tensor->quant_params();
   pooling_quant_arg_[0][0].scale_ = in_quant_arg.front().scale;
   pooling_quant_arg_[0][0].zp_ = in_quant_arg.front().zeroPoint;
   pooling_quant_arg_[1][0].scale_ = out_quant_arg.front().scale;
@@ -72,6 +79,7 @@ void PoolingBaseCPUKernel::FreeQuantParam() {
       }
     }
     free(pooling_quant_arg_);
+    pooling_quant_arg_ = nullptr;
   }
 }
 
@@ -88,6 +96,11 @@ int PoolingBaseCPUKernel::ReSize() {
   auto out_tensor = this->out_tensors_.front();
   MS_ASSERT(in_tensor != nullptr);
   MS_ASSERT(out_tensor != nullptr);
+  auto pooling_lite_primitive = (lite::Pooling *)primitive_;
+  pooling_param_->pad_u_ = pooling_lite_primitive->PadUp();
+  pooling_param_->pad_d_ = pooling_lite_primitive->PadDown();
+  pooling_param_->pad_l_ = pooling_lite_primitive->PadLeft();
+  pooling_param_->pad_r_ = pooling_lite_primitive->PadRight();
   pooling_param_->input_batch_ = in_tensor->Batch();
   pooling_param_->input_channel_ = in_tensor->Channel();
   pooling_param_->input_h_ = in_tensor->Height();
@@ -102,55 +115,4 @@ int PoolingBaseCPUKernel::ReSize() {
   }
   return RET_OK;
 }
-
-kernel::LiteKernel *CpuPoolingInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                const InnerContext *ctx, const kernel::KernelKey &desc,
-                                                const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Pooling);
-  auto *kernel = new (std::nothrow) PoolingInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new PoolingInt8CPUKernel fail!";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    delete kernel;
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    return nullptr;
-  }
-  return kernel;
-}
-
-kernel::LiteKernel *CpuPoolingFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                const InnerContext *ctx, const kernel::KernelKey &desc,
-                                                const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Pooling);
-  auto *kernel = new (std::nothrow) PoolingCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new PoolingCPUKernel fail!";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    delete kernel;
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Pooling, CpuPoolingInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Pooling, CpuPoolingFp32KernelCreator)
 }  // namespace mindspore::kernel

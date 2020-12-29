@@ -46,15 +46,23 @@ kernel::KernelBuildInfoPtr GenerateKernelBuildInfo(const CommunicationOpInfo &co
   kernel::KernelBuildInfo::KernelBuildInfoBuilder builder;
   for (size_t idx = start_index; idx <= end_index; ++idx) {
     auto cnode = communication_op_info.communication_op_nodes[idx];
+    int64_t rank_size = 1;
+    if (AnfAlgo::HasNodeAttr(kAttrRankSize, cnode) && AnfAlgo::GetCNodeName(cnode) == kAllGatherOpName) {
+      rank_size = AnfAlgo::GetNodeAttr<int64_t>(cnode, kAttrRankSize);
+    }
     MS_EXCEPTION_IF_NULL(cnode);
     for (size_t input_index = 0; input_index < AnfAlgo::GetInputTensorNum(cnode); ++input_index) {
       inputs_device_format.push_back(AnfAlgo::GetInputFormat(cnode, input_index));
       inputs_device_type.push_back(AnfAlgo::GetInputDeviceDataType(cnode, input_index));
     }
-    for (size_t output_index = 0; output_index < AnfAlgo::GetOutputTensorNum(cnode); ++output_index) {
-      outputs_device_format.push_back(AnfAlgo::GetOutputFormat(cnode, output_index));
-      outputs_device_type.push_back(AnfAlgo::GetOutputDeviceDataType(cnode, output_index));
-      outputs_shape.push_back(AnfAlgo::GetOutputInferShape(cnode, output_index));
+    for (size_t rank_index = 0; rank_index < IntToSize(rank_size); ++rank_index) {
+      for (size_t output_index = 0; output_index < AnfAlgo::GetOutputTensorNum(cnode); ++output_index) {
+        outputs_device_format.push_back(AnfAlgo::GetOutputFormat(cnode, output_index));
+        outputs_device_type.push_back(AnfAlgo::GetOutputDeviceDataType(cnode, output_index));
+        std::vector<size_t> shape = AnfAlgo::GetOutputInferShape(cnode, output_index);
+        shape[0] /= rank_size;
+        outputs_shape.push_back(AnfAlgo::GetOutputInferShape(cnode, output_index));
+      }
     }
     builder.SetFusionType(AnfAlgo::GetFusionType(cnode));
     builder.SetProcessor(AnfAlgo::GetProcessor(cnode));
@@ -74,7 +82,7 @@ std::string GetFusionGroupKey(const AnfNodePtr &node) {
   if (attr_fusion == nullptr) {
     return "";
   }
-  int fusion = GetValue<int>(attr_fusion);
+  int64_t fusion = GetValue<int64_t>(attr_fusion);
   if (fusion == 0) {
     return "";
   }
@@ -182,18 +190,27 @@ AnfNodePtr CommunicationOpFusion::CreateFusedCommunicationOp(const FuncGraphPtr 
   auto kernel_info = std::make_shared<device::KernelInfo>();
   MS_EXCEPTION_IF_NULL(kernel_info);
   fused_node->set_kernel_info(kernel_info);
-  AbstractBasePtrList abstract_list;
-  for (size_t idx = start_index; idx <= end_index; ++idx) {
-    auto cnode = communication_op_info.communication_op_nodes[idx];
-    MS_EXCEPTION_IF_NULL(cnode);
-    abstract_list.push_back(cnode->abstract());
+  auto final_node = communication_op_info.communication_op_nodes[end_index];
+  size_t node_num = end_index - start_index + 1;
+  int64_t rank_size = 1;
+  if (AnfAlgo::HasNodeAttr(kAttrRankSize, final_node) && AnfAlgo::GetCNodeName(final_node) == kAllGatherOpName) {
+    rank_size = AnfAlgo::GetNodeAttr<int64_t>(final_node, kAttrRankSize);
   }
+  size_t output_num = node_num * rank_size;
+  std::vector<TypeId> dtypes(output_num, AnfAlgo::GetOutputInferDataType(final_node, 0));
+  std::vector<std::vector<size_t>> shapes;
+  for (size_t i = 0; i < IntToSize(rank_size); ++i) {
+    for (size_t idx = start_index; idx <= end_index; ++idx) {
+      auto cnode = communication_op_info.communication_op_nodes[idx];
+      MS_EXCEPTION_IF_NULL(cnode);
+      std::vector<size_t> shape = AnfAlgo::GetOutputInferShape(cnode, 0);
+      shape[0] /= rank_size;
+      shapes.push_back(shape);
+    }
+  }
+  AnfAlgo::SetOutputInferTypeAndShape(dtypes, shapes, fused_node.get());
   auto kernel_build_info = GenerateKernelBuildInfo(communication_op_info, start_index, end_index);
   AnfAlgo::SetSelectKernelBuildInfo(kernel_build_info, fused_node.get());
-  auto abstract_tuple = std::make_shared<abstract::AbstractTuple>(abstract_list);
-  MS_EXCEPTION_IF_NULL(abstract_tuple);
-  fused_node->set_abstract(abstract_tuple);
-  auto final_node = communication_op_info.communication_op_nodes[end_index];
   AnfAlgo::CopyNodeAttr(kAttrFusion, final_node, fused_node);
   AnfAlgo::CopyNodeAttr(kAttrOp, final_node, fused_node);
   AnfAlgo::CopyNodeAttr(kAttrGroup, final_node, fused_node);
@@ -226,9 +243,9 @@ bool CommunicationOpFusion::DoFusion(const FuncGraphPtr &func_graph, const Commu
       std::vector<AnfNodePtr> tuple_getitem_input;
       tuple_getitem_input.push_back(NewValueNode(prim::kPrimTupleGetItem));
       tuple_getitem_input.push_back(new_communication_op);
-      auto index = NewValueNode(SizeToInt(idx - start_index));
+      auto index = NewValueNode(SizeToLong(idx - start_index));
       MS_EXCEPTION_IF_NULL(index);
-      auto imm = std::make_shared<Int32Imm>(idx - start_index);
+      auto imm = std::make_shared<Int64Imm>(idx - start_index);
       MS_EXCEPTION_IF_NULL(imm);
       auto abstract_scalar = std::make_shared<abstract::AbstractScalar>();
       MS_EXCEPTION_IF_NULL(abstract_scalar);
@@ -278,10 +295,12 @@ bool CommunicationOpFusion::Run(const FuncGraphPtr &func_graph) {
       continue;
     }
     auto first_node = it.second.communication_op_nodes[0];
-    if (AnfAlgo::HasNodeAttr(kAttrIndex, first_node) && AnfAlgo::GetNodeAttr<int>(first_node, kAttrIndex) > 0) {
+    TraceGuard guard(std::make_shared<TraceOpt>(first_node->debug_info()));
+    if (AnfAlgo::HasNodeAttr(kAttrIndex, first_node) && AnfAlgo::GetNodeAttr<int64_t>(first_node, kAttrIndex) > 0) {
       std::stable_sort(it.second.communication_op_nodes.begin(), it.second.communication_op_nodes.end(),
                        [](const CNodePtr &a, const CNodePtr &b) {
-                         return AnfAlgo::GetNodeAttr<int>(a, kAttrIndex) < AnfAlgo::GetNodeAttr<int>(b, kAttrIndex);
+                         return AnfAlgo::GetNodeAttr<int64_t>(a, kAttrIndex) <
+                                AnfAlgo::GetNodeAttr<int64_t>(b, kAttrIndex);
                        });
     }
     size_t segment_num = 0;

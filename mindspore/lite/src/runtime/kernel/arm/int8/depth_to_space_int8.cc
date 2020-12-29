@@ -14,32 +14,27 @@
  * limitations under the License.
  */
 #include "src/runtime/kernel/arm/int8/depth_to_space_int8.h"
-#include <vector>
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
-#include "nnacl/depth_to_space.h"
-#include "nnacl/int8/depth_to_space_int8.h"
-#include "include/errorcode.h"
 
+using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
+using mindspore::lite::RET_FORMAT_ERR;
 using mindspore::lite::RET_OK;
+using mindspore::lite::RET_PARAM_INVALID;
+using mindspore::schema::PrimitiveType_DepthToSpace;
 
 namespace mindspore::kernel {
 int DepthToSpaceInt8CPUKernel::Init() {
-  auto ret = DepthToSpaceBaseCPUKernel::Init();
-  if (ret != RET_OK) {
-    return ret;
-  }
-  DepthToSpaceParameter *param = reinterpret_cast<DepthToSpaceParameter *>(op_parameter_);
-  param->data_type_size_ = sizeof(int8_t);
+  param_->data_type_size_ = sizeof(int8_t);
 
   auto *input_tensor = in_tensors_.at(kInputIndex);
-  auto in_quant_args = input_tensor->GetQuantParams();
+  auto in_quant_args = input_tensor->quant_params();
   in_quant_arg_.scale_ = in_quant_args.front().scale;
   in_quant_arg_.zp_ = in_quant_args.front().zeroPoint;
 
   auto *out_tensor = out_tensors_.at(kOutputIndex);
-  auto out_quant_args = out_tensor->GetQuantParams();
+  auto out_quant_args = out_tensor->quant_params();
   out_quant_arg_.scale_ = out_quant_args.front().scale;
   out_quant_arg_.zp_ = out_quant_args.front().zeroPoint;
   if (!InferShapeDone()) {
@@ -51,22 +46,19 @@ int DepthToSpaceInt8CPUKernel::Init() {
 int DepthToSpaceInt8CPUKernel::ReSize() { return DepthToSpaceBaseCPUKernel::ReSize(); }
 
 int DepthToSpaceInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << ret;
-    return ret;
-  }
   auto input = in_tensors_[0];
   auto output = out_tensors_[0];
-  const int8_t *input_data = reinterpret_cast<const int8_t *>(input->MutableData());
-  int8_t *output_data = reinterpret_cast<int8_t *>(output->MutableData());
+  const int8_t *input_data = reinterpret_cast<const int8_t *>(input->data_c());
+  int8_t *output_data = reinterpret_cast<int8_t *>(output->data_c());
   auto in_shape = input->shape();
-  DepthToSpaceParameter *param = reinterpret_cast<DepthToSpaceParameter *>(op_parameter_);
   if (in_quant_arg_.scale_ == out_quant_arg_.scale_ && in_quant_arg_.zp_ == out_quant_arg_.zp_) {
-    DepthToSpaceForNHWC(input_data, output_data, in_shape.data(), param);
+    DepthToSpaceForNHWC(input_data, output_data, in_shape.data(), param_);
   } else {
-    DepthToSpaceForNHWCInt8(input_data, output_data, in_shape.data(), param, &in_quant_arg_, &out_quant_arg_);
+    DepthToSpaceForNHWCInt8(input_data, output_data, in_shape.data(), param_, &in_quant_arg_, &out_quant_arg_);
   }
   return RET_OK;
 }
+
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_DepthToSpace, LiteKernelCreator<DepthToSpaceInt8CPUKernel>)
+
 }  // namespace mindspore::kernel

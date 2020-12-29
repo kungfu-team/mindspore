@@ -39,7 +39,7 @@ def test_deepfm():
     rank_size = None
     rank_id = None
 
-    dataset_path = "/home/workspace/mindspore_dataset/criteo_data/criteo_h5/"
+    dataset_path = "/home/workspace/mindspore_dataset/criteo_data/mindrecord/"
     print("dataset_path:", dataset_path)
     ds_train = create_dataset(dataset_path,
                               train_mode=True,
@@ -71,10 +71,10 @@ def test_deepfm():
     print("train_config.train_epochs:", train_config.train_epochs)
     model.train(train_config.train_epochs, ds_train, callbacks=callback_list)
 
-    export_loss_value = 0.51
+    export_loss_value = 0.52
     print("loss_callback.loss:", loss_callback.loss)
     assert loss_callback.loss < export_loss_value
-    export_per_step_time = 10.4
+    export_per_step_time = 30.0
     print("time_callback:", time_callback.per_step_time)
     assert time_callback.per_step_time < export_per_step_time
     print("*******test case pass!********")

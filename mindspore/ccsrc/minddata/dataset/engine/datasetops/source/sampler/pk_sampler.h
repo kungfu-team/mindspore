@@ -26,21 +26,21 @@
 
 namespace mindspore {
 namespace dataset {
-class PKSampler : public Sampler {  // NOT YET FINISHED
+class PKSamplerRT : public SamplerRT {  // NOT YET FINISHED
  public:
   // @param num_samples - the number of samples to draw.  value of 0 means to take the full amount
   // @param int64_t val
   // @param bool shuffle - shuffle all classIds or not, if true, classes may be 5,1,4,3,2
   // @param int64_t samplesPerBuffer - Num of Sampler Ids to fetch via 1 GetNextBuffer call
-  explicit PKSampler(int64_t num_samples, int64_t val, bool shuffle,
-                     int64_t samples_per_buffer = std::numeric_limits<int64_t>::max());
+  PKSamplerRT(int64_t num_samples, int64_t val, bool shuffle,
+              int64_t samples_per_buffer = std::numeric_limits<int64_t>::max());
 
   // default destructor
-  ~PKSampler() = default;
+  ~PKSamplerRT() = default;
 
   // @param std::unique_ptr<DataBuffer pBuffer
   // @param int32_t workerId
-  // @return - The error code return
+  // @return Status The status code returned
   Status GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) override;
 
   // first handshake between leaf source op and Sampler. This func will determine the amount of data
@@ -53,13 +53,13 @@ class PKSampler : public Sampler {  // NOT YET FINISHED
   Status InitSampler() override;
 
   // for next epoch of sampleIds
-  // @return - The error code return
+  // @return Status The status code returned
   Status ResetSampler() override;
 
   // Printer for debugging purposes.
   // @param out - output stream to write to
   // @param show_all - bool to show detailed vs summary
-  void Print(std::ostream &out, bool show_all) const override;
+  void SamplerPrint(std::ostream &out, bool show_all) const override;
 
  private:
   bool shuffle_;

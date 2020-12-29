@@ -28,7 +28,7 @@ using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_Conv2D;
 
 namespace mindspore::kernel {
-void ProcessFilterUint8(int8_t *origin_weight, int16_t *dst_weight, ConvParameter *conv_param) {
+int ProcessFilterUint8(int8_t *origin_weight, int16_t *dst_weight, ConvParameter *conv_param) {
   auto input_channel = conv_param->input_channel_;
   auto output_channel = conv_param->output_channel_;
   auto kernel_plane = conv_param->kernel_w_ * conv_param->kernel_h_;
@@ -36,11 +36,15 @@ void ProcessFilterUint8(int8_t *origin_weight, int16_t *dst_weight, ConvParamete
 
   size_t tmp_size = output_channel * iC8 * C8NUM * kernel_plane * sizeof(int16_t);
   auto tmp_addr = reinterpret_cast<int16_t *>(malloc(tmp_size));
+  if (tmp_addr == nullptr) {
+    return RET_ERROR;
+  }
   memset(tmp_addr, 0, tmp_size);
   PackWeightToC8Int8(origin_weight, tmp_addr, conv_param);
   Conv3x3Int8FilterTransform(tmp_addr, dst_weight, iC8, output_channel, kernel_plane);
 
   free(tmp_addr);
+  return RET_OK;
 }
 
 void Convolution3x3Int8CPUKernel::FreeTmpBuffer() {
@@ -91,7 +95,11 @@ int Convolution3x3Int8CPUKernel::InitWeightBias() {
   }
   memset(transformed_filter_addr_, 0, transformed_size);
   auto weight_data = reinterpret_cast<int8_t *>(in_tensors_.at(kWeightIndex)->MutableData());
-  ProcessFilterUint8(weight_data, transformed_filter_addr_, conv_param_);
+  auto ret = ProcessFilterUint8(weight_data, transformed_filter_addr_, conv_param_);
+  if (ret != RET_OK) {
+    MS_LOG(ERROR) << "ProcessFilterUint8 failed.";
+    return ret;
+  }
 
   // init bias
   size_t new_bias_size = oC4 * C4NUM * sizeof(int32_t);
@@ -156,14 +164,7 @@ int Convolution3x3Int8CPUKernel::InitTmpBuffer() {
   return RET_OK;
 }
 
-void Convolution3x3Int8CPUKernel::ConfigInputOutput() {
-  auto output_tensor = out_tensors_.at(kOutputIndex);
-  output_tensor->SetFormat(schema::Format::Format_NHWC);
-}
-
 int Convolution3x3Int8CPUKernel::Init() {
-  // config input output
-  ConfigInputOutput();
   auto ret = SetQuantParam();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Set quant param failed.";
@@ -213,15 +214,11 @@ int Convolution3x3Int8Impl(void *cdata, int task_id) {
 }
 
 int Convolution3x3Int8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare failed.";
-    return RET_ERROR;
-  }
   // malloc tmp buffer
-  ret = InitTmpBuffer();
+  auto ret = InitTmpBuffer();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Init tmp buffer failed.";
+    FreeTmpBuffer();
     return RET_ERROR;
   }
   auto input_addr = reinterpret_cast<int8_t *>(in_tensors_.at(kInputIndex)->MutableData());

@@ -17,52 +17,33 @@
 #include "tools/converter/parser/tflite/tflite_scatter_nd_parser.h"
 #include <vector>
 #include <memory>
-#include <utility>
-#include <map>
 
 namespace mindspore {
 namespace lite {
-STATUS TfliteScatterNdParser::Parse(TfliteTensorsInfo *tensors_info,
-                                    const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                    const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TfliteScatterNdParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
+PrimitiveC *TfliteScatterNdParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                      const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "primitive is null";
+    return nullptr;
   }
 
   std::unique_ptr<schema::ScatterNDT> attr = std::make_unique<schema::ScatterNDT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   const auto &tflite_attr = tflite_op->builtin_options.AsScatterNdOptions();
   if (tflite_attr == nullptr) {
-    MS_LOG(ERROR) << "get op: " << op->name << " attr failed";
-    return RET_NULL_PTR;
+    MS_LOG(ERROR) << "get op ScatterNd attr failed";
+    return nullptr;
   }
-  op->primitive->value.type = schema::PrimitiveType_ScatterND;
-  op->primitive->value.value = attr.release();
-
-  // in tflite, kIndices = 0, kUpdates = 1, kShape = 2
-  // in mslite, kScatterShapeIndex = 0, kScatterIndicesIndex = 1, kScatterUpdateIndex = 2;
-  AddOpInput(op, tensors_info, tflite_op->inputs[2], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpInput(op, tensors_info, tflite_op->inputs[1], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  primitive->value.type = schema::PrimitiveType_ScatterND;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_TfliteScatterNdParser("ScatterNd", new TfliteScatterNdParser());
+TfliteNodeRegister g_tfliteScatterNdParser(tflite::BuiltinOperator_SCATTER_ND, new TfliteScatterNdParser());
 }  // namespace lite
 }  // namespace mindspore

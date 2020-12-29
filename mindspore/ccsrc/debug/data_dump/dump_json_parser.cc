@@ -59,9 +59,9 @@ std::string GetIfstreamString(const std::ifstream &ifstream) {
 bool DumpJsonParser::IsDumpEnabled() {
   auto config_path = std::getenv(kMindsporeDumpConfig);
   if (config_path == nullptr) {
-    MS_LOG(INFO) << "Dump config path is null";
     return false;
   }
+  MS_LOG(INFO) << "Dump config path is " << config_path;
 
   auto context = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(context);
@@ -218,6 +218,9 @@ void DumpJsonParser::ParseDumpPath(const nlohmann::json &content) {
   if (path_.empty()) {
     MS_LOG(EXCEPTION) << "Dump path is empty";
   }
+  if (path_[0] != '/') {
+    MS_LOG(EXCEPTION) << "Dump path only support absolute path and should start with '/'";
+  }
 }
 
 void DumpJsonParser::ParseNetName(const nlohmann::json &content) {
@@ -307,11 +310,6 @@ void DumpJsonParser::JudgeDumpEnabled() {
   MS_EXCEPTION_IF_NULL(context);
   if (context->get_param<std::string>(MS_CTX_DEVICE_TARGET) == kGPUDevice) {
     async_dump_enabled_ = false;
-    // GPU not support dump kernel inputs
-    if (input_output_ != kDumpOutputOnly) {
-      MS_LOG(WARNING) << "Data dump only support dump kernel output when device target is GPU";
-      input_output_ = kDumpOutputOnly;
-    }
   }
 
   if (context->get_param<std::string>(MS_CTX_DEVICE_TARGET) == kAscendDevice) {
@@ -366,11 +364,12 @@ void DumpJsonParser::PrintUnusedKernel() {
 std::string DumpJsonParser::GetOpOverflowBinPath(uint32_t graph_id, uint32_t device_id) const {
   std::string bin_path;
   bin_path.append(path_);
-  bin_path.append("_");
+  bin_path.append("/");
+  bin_path.append("device_");
   bin_path.append(std::to_string(device_id));
   bin_path.append("/");
   bin_path.append(net_name_);
-  bin_path.append("_");
+  bin_path.append("_graph_");
   bin_path.append(std::to_string(graph_id));
   bin_path.append("/");
   bin_path.append(std::to_string(dump_mode_));
@@ -391,9 +390,9 @@ bool DumpJsonParser::OutputNeedDump() const {
 
 void DumpJsonParser::UpdateNeedDumpKernels(NotNull<const session::KernelGraph *> kernel_graph) {
   if (!async_dump_enabled_) {
-    MS_LOG(INFO) << "E2e dump no need to update dump kernel list";
     return;
   }
+  MS_LOG(INFO) << "Update async dump kernel list for hccl";
   std::map<std::string, uint32_t> update_kernels;
   for (const auto &kernel : kernel_graph->execution_order()) {
     MS_EXCEPTION_IF_NULL(kernel);

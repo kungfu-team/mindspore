@@ -23,6 +23,7 @@ import mindspore.dataset.vision.c_transforms as c_vision
 import mindspore.dataset.vision.py_transforms as py_vision
 import mindspore.dataset.vision.utils as mode
 import mindspore.dataset as ds
+from mindspore.dataset.vision.utils import Inter
 from mindspore import log as logger
 from util import diff_mse, save_and_check_md5, visualize_list, \
     config_get_set_seed, config_get_set_num_parallel_workers
@@ -111,6 +112,25 @@ def test_random_crop_and_resize_op_py(plot=False):
     if plot:
         visualize_list(original_images, crop_and_resize_images)
 
+def test_random_crop_and_resize_op_py_ANTIALIAS():
+    """
+    Test RandomCropAndResize op in py transforms
+    """
+    logger.info("test_random_crop_and_resize_op_py_ANTIALIAS")
+    # First dataset
+    data1 = ds.TFRecordDataset(DATA_DIR, SCHEMA_DIR, columns_list=["image"], shuffle=False)
+    # With these inputs we expect the code to crop the whole image
+    transforms1 = [
+        py_vision.Decode(),
+        py_vision.RandomResizedCrop((256, 512), (2, 2), (1, 3), Inter.ANTIALIAS),
+        py_vision.ToTensor()
+    ]
+    transform1 = mindspore.dataset.transforms.py_transforms.Compose(transforms1)
+    data1 = data1.map(operations=transform1, input_columns=["image"])
+    num_iter = 0
+    for _ in data1.create_dict_iterator(num_epochs=1, output_numpy=True):
+        num_iter += 1
+    logger.info("use RandomResizedCrop by Inter.ANTIALIAS process {} images.".format(num_iter))
 
 def test_random_crop_and_resize_01():
     """
@@ -235,7 +255,7 @@ def test_random_crop_and_resize_04_c():
         data = data.map(operations=random_crop_and_resize_op, input_columns=["image"])
     except ValueError as e:
         logger.info("Got an exception in DE: {}".format(str(e)))
-        assert "Input is not within the required interval of (0 to 16777216)." in str(e)
+        assert "scale should be in (min,max) format. Got (max,min)." in str(e)
 
 
 def test_random_crop_and_resize_04_py():
@@ -258,7 +278,7 @@ def test_random_crop_and_resize_04_py():
         data = data.map(operations=transform, input_columns=["image"])
     except ValueError as e:
         logger.info("Got an exception in DE: {}".format(str(e)))
-        assert "Input is not within the required interval of (0 to 16777216)." in str(e)
+        assert "scale should be in (min,max) format. Got (max,min)." in str(e)
 
 
 def test_random_crop_and_resize_05_c():
@@ -278,7 +298,7 @@ def test_random_crop_and_resize_05_c():
         data = data.map(operations=random_crop_and_resize_op, input_columns=["image"])
     except ValueError as e:
         logger.info("Got an exception in DE: {}".format(str(e)))
-        assert "Input is not within the required interval of (0 to 16777216)." in str(e)
+        assert "ratio should be in (min,max) format. Got (max,min)." in str(e)
 
 
 def test_random_crop_and_resize_05_py():
@@ -301,7 +321,7 @@ def test_random_crop_and_resize_05_py():
         data = data.map(operations=transform, input_columns=["image"])
     except ValueError as e:
         logger.info("Got an exception in DE: {}".format(str(e)))
-        assert "Input is not within the required interval of (0 to 16777216)." in str(e)
+        assert "ratio should be in (min,max) format. Got (max,min)." in str(e)
 
 
 def test_random_crop_and_resize_comp(plot=False):
@@ -371,6 +391,7 @@ def test_random_crop_and_resize_06():
 if __name__ == "__main__":
     test_random_crop_and_resize_op_c(True)
     test_random_crop_and_resize_op_py(True)
+    test_random_crop_and_resize_op_py_ANTIALIAS()
     test_random_crop_and_resize_01()
     test_random_crop_and_resize_02()
     test_random_crop_and_resize_03()

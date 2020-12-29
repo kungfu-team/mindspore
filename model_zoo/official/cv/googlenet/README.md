@@ -36,11 +36,12 @@ GoogleNet, a 22 layers deep network, was proposed in 2014 and won the first plac
 
 # [Model Architecture](#contents)
 
-Specifically, the GoogleNet contains numerous inception modules, which are connected together to go deeper.  In general, an inception module with dimensionality reduction consists of **1×1 conv**, **3×3 conv**, **5×5 conv**, and **3×3 max pooling**, which are done altogether for the previous input, and stack together again at output.
+Specifically, the GoogleNet contains numerous inception modules, which are connected together to go deeper.  In general, an inception module with dimensionality reduction consists of **1×1 conv**, **3×3 conv**, **5×5 conv**, and **3×3 max pooling**, which are done altogether for the previous input, and stack together again at output. In our model architecture, the kernel size used in inception module is 3×3 instead of 5×5.
 
 
 
 # [Dataset](#contents)
+Note that you can run the scripts based on the dataset mentioned in original paper or widely used in relevant domain/network architecture. In the following sections, we will introduce how to run the scripts using the related dataset below.
 
 Dataset used: [CIFAR-10](<http://www.cs.toronto.edu/~kriz/cifar.html>) 
 
@@ -157,7 +158,7 @@ Parameters for both training and evaluation can be set in config.py
 
   ```python
   'pre_trained': 'False'    # whether training based on the pre-trained model
-  'nump_classes': 10        # the number of classes in the dataset
+  'num_classes': 10        # the number of classes in the dataset
   'lr_init': 0.1            # initial learning rate
   'batch_size': 128         # training batch size
   'epoch_size': 125         # total training epochs
@@ -167,12 +168,45 @@ Parameters for both training and evaluation can be set in config.py
   'image_width': 224        # image width used as input to the model
   'data_path': './cifar10'  # absolute full path to the train and evaluation datasets
   'device_target': 'Ascend' # device running the program
-  'device_id': 4            # device ID used to train or evaluate the dataset. Ignore it when you use run_train.sh for distributed training
+  'device_id': 0            # device ID used to train or evaluate the dataset. Ignore it when you use run_train.sh for distributed training
   'keep_checkpoint_max': 10 # only keep the last keep_checkpoint_max checkpoint
   'checkpoint_path': './train_googlenet_cifar10-125_390.ckpt'  # the absolute full path to save the checkpoint file
   'onnx_filename': 'googlenet.onnx' # file name of the onnx model used in export.py
-  'geir_filename': 'googlenet.geir' # file name of the geir model used in export.py
+  'air_filename': 'googlenet.air' # file name of the air model used in export.py
   ```
+
+- config for GoogleNet, ImageNet dataset
+
+  ```python
+  'pre_trained': 'False'    # whether training based on the pre-trained model
+  'num_classes': 1000       # the number of classes in the dataset
+  'lr_init': 0.1            # initial learning rate
+  'batch_size': 256         # training batch size
+  'epoch_size': 300         # total training epochs
+  'momentum': 0.9           # momentum
+  'weight_decay': 1e-4      # weight decay value
+  'image_height': 224       # image height used as input to the model
+  'image_width': 224        # image width used as input to the model
+  'data_path': './ImageNet_Original/train/'  # absolute full path to the train datasets
+  'val_data_path': './ImageNet_Original/val/'  # absolute full path to the evaluation datasets
+  'device_target': 'Ascend' # device running the program
+  'device_id': 0            # device ID used to train or evaluate the dataset. Ignore it when you use run_train.sh for distributed training
+  'keep_checkpoint_max': 10 # only keep the last keep_checkpoint_max checkpoint
+  'checkpoint_path': './train_googlenet_cifar10-125_390.ckpt'  # the absolute full path to save the checkpoint file
+  'onnx_filename': 'googlenet.onnx' # file name of the onnx model used in export.py
+  'air_filename': 'googlenet.air'   # file name of the air model used in export.py
+  'lr_scheduler': 'exponential'     # learning rate scheduler
+  'lr_epochs': [70, 140, 210, 280]  # epoch of lr changing
+  'lr_gamma': 0.3            # decrease lr by a factor of exponential lr_scheduler
+  'eta_min': 0.0             # eta_min in cosine_annealing scheduler
+  'T_max': 150               # T-max in cosine_annealing scheduler
+  'warmup_epochs': 0         # warmup epoch
+  'is_dynamic_loss_scale': 0 # dynamic loss scale
+  'loss_scale': 1024         # loss scale
+  'label_smooth_factor': 0.1 # label_smooth_factor
+  'use_label_smooth': True   # label smooth
+  ```
+
 
 For more configuration details, please refer the script `config.py`.
 
@@ -265,7 +299,7 @@ For more configuration details, please refer the script `config.py`.
   Note that for evaluation after distributed training, please set the checkpoint_path to be the last saved checkpoint file such as "username/googlenet/train_parallel0/train_googlenet_cifar10-125_48.ckpt". The accuracy of the test dataset will be as follows:
   
   ```
-  # grep "accuracy: " dist.eval.log
+  # grep "accuracy: " eval.log
   accuracy: {'acc': 0.9217}
   ```
 
@@ -310,8 +344,8 @@ For more configuration details, please refer the script `config.py`.
 | -------------------------- | ----------------------------------------------------------- | ---------------------- |
 | Model Version              | Inception V1                                                | Inception V1           |
 | Resource                   | Ascend 910 ；CPU 2.60GHz，192cores；Memory，755G             | NV SMX2 V100-32G       |
-| uploaded Date              | 08/31/2020 (month/day/year)                                 | 08/20/2020 (month/day/year) |
-| MindSpore Version          | 0.7.0-alpha                                                 | 0.6.0-alpha            |
+| uploaded Date              | 10/28/2020 (month/day/year)                                 | 10/28/2020 (month/day/year) |
+| MindSpore Version          | 1.0.0                                                       | 1.0.0                  |
 | Dataset                    | CIFAR-10                                                    | CIFAR-10               |
 | Training Parameters        | epoch=125, steps=390, batch_size = 128, lr=0.1              | epoch=125, steps=390, batch_size=128, lr=0.1    |
 | Optimizer                  | Momentum                                                    | Momentum               |
@@ -323,15 +357,15 @@ For more configuration details, please refer the script `config.py`.
 | Parameters (M)             | 13.0                                                        | 13.0                   |
 | Checkpoint for Fine tuning | 43.07M (.ckpt file)                                         | 43.07M (.ckpt file)    |
 | Model for inference        | 21.50M (.onnx file),  21.60M(.air file)                     |      | 
-| Scripts                    | [googlenet script](https://gitee.com/mindspore/mindspore/tree/r0.7/model_zoo/official/cv/googlenet) | [googlenet script](https://gitee.com/mindspore/mindspore/tree/r0.6/model_zoo/official/cv/googlenet) |
+| Scripts                    | [googlenet script](https://gitee.com/mindspore/mindspore/tree/master/model_zoo/official/cv/googlenet) | [googlenet script](https://gitee.com/mindspore/mindspore/tree/master/model_zoo/official/cv/googlenet) |
 
 #### GoogleNet on 1200k images
 | Parameters                 | Ascend                                                      |
 | -------------------------- | ----------------------------------------------------------- |
 | Model Version              | Inception V1                                                |
 | Resource                   | Ascend 910, CPU 2.60GHz, 56cores, Memory 314G               |
-| uploaded Date              | 09/20/2020 (month/day/year)                                 |
-| MindSpore Version          | 0.7.0-alpha                                                 |
+| uploaded Date              | 10/28/2020 (month/day/year)                                 |
+| MindSpore Version          | 1.0.0                                                       |
 | Dataset                    | 1200k images                                                |
 | Training Parameters        | epoch=300, steps=5000, batch_size=256, lr=0.1               |
 | Optimizer                  | Momentum                                                    |
@@ -352,8 +386,8 @@ For more configuration details, please refer the script `config.py`.
 | ------------------- | --------------------------- | --------------------------- |
 | Model Version       | Inception V1                | Inception V1                |
 | Resource            | Ascend 910                  | GPU                         |
-| Uploaded Date       | 08/31/2020 (month/day/year) | 08/20/2020 (month/day/year) |
-| MindSpore Version   | 0.7.0-alpha                 | 0.6.0-alpha                 |
+| Uploaded Date       | 10/28/2020 (month/day/year) | 10/28/2020 (month/day/year) |
+| MindSpore Version   | 1.0.0                       | 1.0.0                       |
 | Dataset             | CIFAR-10, 10,000 images     | CIFAR-10, 10,000 images     |
 | batch_size          | 128                         | 128                         |
 | outputs             | probability                 | probability                 |
@@ -365,8 +399,8 @@ For more configuration details, please refer the script `config.py`.
 | ------------------- | --------------------------- |
 | Model Version       | Inception V1                |
 | Resource            | Ascend 910                  |
-| Uploaded Date       | 09/20/2020 (month/day/year) |
-| MindSpore Version   | 0.7.0-alpha                 |
+| Uploaded Date       | 10/28/2020 (month/day/year) |
+| MindSpore Version   | 1.0.0                       |
 | Dataset             | 1200k images                |
 | batch_size          | 256                         |
 | outputs             | probability                 |
@@ -391,8 +425,7 @@ If you need to use the trained model to perform inference on multiple hardware p
   net = GoogleNet(num_classes=cfg.num_classes)
   opt = Momentum(filter(lambda x: x.requires_grad, net.get_parameters()), 0.01,
                  cfg.momentum, weight_decay=cfg.weight_decay)
-  loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True, reduction='mean', 
-                                          is_grad=False)
+  loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True, reduction='mean')
   model = Model(net, loss_fn=loss, optimizer=opt, metrics={'acc'})
   
   # Load pre-trained model
@@ -418,8 +451,7 @@ If you need to use the trained model to perform inference on multiple hardware p
   net = GoogleNet(num_classes=cfg.num_classes)
   opt = Momentum(filter(lambda x: x.requires_grad, net.get_parameters()), 0.01,
                  cfg.momentum, weight_decay=cfg.weight_decay)
-  loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True, reduction='mean', 
-                                          is_grad=False)
+  loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True, reduction='mean')
   model = Model(net, loss_fn=loss, optimizer=opt, metrics={'acc'})
   
   # Load pre-trained model
@@ -452,7 +484,7 @@ If you need to use the trained model to perform inference on multiple hardware p
                 steps_per_epoch=batch_num)
   opt = Momentum(filter(lambda x: x.requires_grad, net.get_parameters()), 
                  Tensor(lr), cfg.momentum, weight_decay=cfg.weight_decay)
-  loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True, reduction='mean', is_grad=False)
+  loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True, reduction='mean')
   model = Model(net, loss_fn=loss, optimizer=opt, metrics={'acc'},
                 amp_level="O2", keep_batchnorm_fp32=False, loss_scale_manager=None)
   
@@ -486,7 +518,7 @@ If you need to use the trained model to perform inference on multiple hardware p
                 steps_per_epoch=batch_num)
   opt = Momentum(filter(lambda x: x.requires_grad, net.get_parameters()), 
                  Tensor(lr), cfg.momentum, weight_decay=cfg.weight_decay)
-  loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True, reduction='mean', is_grad=False)
+  loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True, reduction='mean')
   model = Model(net, loss_fn=loss, optimizer=opt, metrics={'acc'},
                 amp_level="O2", keep_batchnorm_fp32=False, loss_scale_manager=None)
   

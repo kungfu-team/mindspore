@@ -15,6 +15,7 @@
 */
 #include "minddata/dataset/engine/datasetops/source/celeba_op.h"
 
+#include <algorithm>
 #include <fstream>
 #include <iomanip>
 #include "minddata/dataset/core/config_manager.h"
@@ -23,7 +24,11 @@
 #include "minddata/dataset/engine/data_schema.h"
 #include "minddata/dataset/engine/execution_tree.h"
 #include "minddata/dataset/engine/opt/pass.h"
+#ifndef ENABLE_ANDROID
 #include "minddata/dataset/kernels/image/image_utils.h"
+#else
+#include "minddata/dataset/kernels/image/lite_image_utils.h"
+#endif
 
 namespace mindspore {
 namespace dataset {
@@ -41,7 +46,7 @@ Status CelebAOp::Builder::Build(std::shared_ptr<CelebAOp> *op) {
   if (builder_sampler_ == nullptr) {
     const int64_t num_samples = 0;
     const int64_t start_index = 0;
-    builder_sampler_ = std::make_shared<SequentialSampler>(start_index, num_samples);
+    builder_sampler_ = std::make_shared<SequentialSamplerRT>(start_index, num_samples);
   }
 
   builder_schema_ = std::make_unique<DataSchema>();
@@ -74,7 +79,7 @@ Status CelebAOp::Builder::SanityCheck() {
 
 CelebAOp::CelebAOp(int32_t num_workers, int32_t rows_per_buffer, const std::string &dir, int32_t queue_size,
                    bool decode, const std::string &usage, const std::set<std::string> &exts,
-                   std::unique_ptr<DataSchema> schema, std::shared_ptr<Sampler> sampler)
+                   std::unique_ptr<DataSchema> schema, std::shared_ptr<SamplerRT> sampler)
     : ParallelOp(num_workers, queue_size, std::move(sampler)),
       rows_per_buffer_(rows_per_buffer),
       folder_path_(dir),
@@ -417,7 +422,8 @@ void CelebAOp::Print(std::ostream &out, bool show_all) const {
     // Call the super class for displaying any common detailed info
     ParallelOp::Print(out, show_all);
     // Then show any custom derived-internal stuff
-    out << "\nNumber of rows:" << num_rows_ << "\nceleba dir: " << folder_path_ << "\n\n";
+    out << "\nNumber of rows:" << num_rows_ << "\nceleba dir: " << folder_path_
+        << "\nDecode: " << (decode_ ? "yes" : "no") << "\n\n";
   }
 }
 
@@ -445,5 +451,6 @@ Status CelebAOp::ComputeColMap() {
   }
   return Status::OK();
 }
+
 }  // namespace dataset
 }  // namespace mindspore

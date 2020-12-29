@@ -18,6 +18,7 @@
 #define MINDSPORE_CCSRC_KERNEL_GPU_SCATTER_ND_GPU_KERNEL_H
 
 #include <vector>
+#include <algorithm>
 #include "backend/kernel_compiler/gpu/cuda_impl/scatter_nd.cuh"
 #include "backend/kernel_compiler/gpu/gpu_kernel.h"
 #include "backend/kernel_compiler/gpu/gpu_kernel_factory.h"
@@ -60,16 +61,19 @@ class ScatterNdGpuFwdKernel : public GpuKernel {
     if (!memcpy_flag_) {
       const size_t indices_len = sizeof(S) * vec_indices_stride_.size();
       const size_t vec_work_len = sizeof(S) * vec_work_shape_.size();
-      CHECK_CUDA_RET_WITH_EXCEPT(cudaMemcpyAsync(indices_stride_, &vec_indices_stride_[0], indices_len,
+      CHECK_CUDA_RET_WITH_EXCEPT(kernel_node_,
+                                 cudaMemcpyAsync(indices_stride_, &vec_indices_stride_[0], indices_len,
                                                  cudaMemcpyHostToDevice, reinterpret_cast<cudaStream_t>(stream_ptr)),
                                  "cudaMemcpy failed in ScatterNdGpuFwdKernel::Launch.");
-      CHECK_CUDA_RET_WITH_EXCEPT(cudaMemcpyAsync(work_shape_, &vec_work_shape_[0], vec_work_len, cudaMemcpyHostToDevice,
+      CHECK_CUDA_RET_WITH_EXCEPT(kernel_node_,
+                                 cudaMemcpyAsync(work_shape_, &vec_work_shape_[0], vec_work_len, cudaMemcpyHostToDevice,
                                                  reinterpret_cast<cudaStream_t>(stream_ptr)),
                                  "cudaMemcpy failed in ScatterNdGpuFwdKernel::Launch.");
       memcpy_flag_ = true;
     }
 
     CHECK_CUDA_RET_WITH_EXCEPT(
+      kernel_node_,
       cudaMemsetAsync(output, static_cast<T>(0.0), output_size_, reinterpret_cast<cudaStream_t>(stream_ptr)),
       "cudaMemSet failed in ScatterNdGpuFwdKernel::Launch.");
 
@@ -82,6 +86,7 @@ class ScatterNdGpuFwdKernel : public GpuKernel {
   }
 
   bool Init(const CNodePtr &kernel_node) override {
+    kernel_node_ = kernel_node;
     memcpy_flag_ = false;
     size_t input_num = AnfAlgo::GetInputTensorNum(kernel_node);
     if (input_num != 2) {
@@ -98,7 +103,9 @@ class ScatterNdGpuFwdKernel : public GpuKernel {
     indices_shapes_ = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 0);
     output_shapes_ = AnfAlgo::GetOutputInferShape(kernel_node, 0);
 
-    vec_work_shape_ = GetAttr<std::vector<S>>(kernel_node, "shape");
+    std::vector<int64_t> shape_me = GetAttr<std::vector<int64_t>>(kernel_node, "shape");
+    (void)std::transform(shape_me.begin(), shape_me.end(), std::back_inserter(vec_work_shape_),
+                         [](const int64_t &value) { return static_cast<S>(value); });
 
     GetSize();
 

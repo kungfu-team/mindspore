@@ -14,14 +14,16 @@
  * limitations under the License.
  */
 
-#include <cxxabi.h>
-#include <cmath>
-#include <chrono>
 #include "profiler/device/gpu/gpu_profiling.h"
+
+#include <cxxabi.h>
+#include <chrono>
+#include <cmath>
 #include "profiler/device/gpu/cupti_interface.h"
 #include "profiler/device/gpu/data_saver.h"
-#include "utils/log_adapter.h"
 #include "pybind_api/api_register.h"
+#include "utils/log_adapter.h"
+#include "utils/utils.h"
 
 namespace mindspore {
 namespace profiler {
@@ -68,6 +70,10 @@ uint32_t GetStreamID(const CUcontext context, const void *stream) {
   uint32_t stream_id = 0;
   if (stream != nullptr) {
     CHECK_CUPTI_RET_WITH_ERROR(CuptiGetStreamId(context, (CUstream)stream, &stream_id), "CuptiGetStreamId");
+    if (CuptiGetStreamId(context, (CUstream)stream, &stream_id) != CUPTI_SUCCESS) {
+      MS_LOG(ERROR) << "Training process unexpectedly stopped, profiling data cannot be write to file"
+                    << "To obtain the profiling data, do not interrupt the training process.";
+    }
   }
   return stream_id;
 }
@@ -456,14 +462,23 @@ void GPUProfiler::Stop() {
   ClearInst();
 }
 
+void GPUProfiler::SaveExtraProfileData() {
+  for (auto op : profiling_op_) {
+    op.second->SaveProfilingData();
+  }
+  MS_LOG(INFO) << "Save extra profiling data end.";
+}
+
 void GPUProfiler::SaveProfileData() {
   if (profile_data_path_.empty()) {
     MS_LOG(WARNING) << "Profile data path is empty, skip save profile data.";
   } else {
     DataSaver dataSaver;
+    dataSaver.SetStepTraceOpName(step_trace_op_name);
     dataSaver.ParseOpInfo(op_info_map_);
     dataSaver.ParseEvent(events_);
     dataSaver.WriteFile(profile_data_path_);
+    SaveExtraProfileData();
   }
 }
 
@@ -638,6 +653,16 @@ void GPUProfiler::HandleActivityRecord(CUpti_Activity *record) {
   }
 
   AddEvent(std::move(profilingData));
+}
+
+void GPUProfiler::SetStepTraceOpName(ProfilingTraceInfo trace_op_name) { step_trace_op_name = trace_op_name; }
+
+void GPUProfiler::RegisterProfilingOp(std::shared_ptr<ProfilingOp> node) {
+  if (profiling_op_.find(node->Name()) != profiling_op_.end()) {
+    return;
+  }
+  node->Init();
+  profiling_op_[node->Name()] = node;
 }
 
 void CUPTIAPI GPUProfiler::AllocBuffer(uint8_t **buffer, size_t *size, size_t *maxNumRecords) {

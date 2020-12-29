@@ -21,7 +21,8 @@ import mindspore.log as logger
 
 from ._lineage_adapter import serialize_to_lineage_event
 from ._summary_adapter import package_graph_event, package_summary_event
-from ._summary_writer import LineageWriter, SummaryWriter
+from ._explain_adapter import package_explain_event
+from .writer import LineageWriter, SummaryWriter, ExplainWriter
 
 try:
     from multiprocessing import get_context
@@ -42,6 +43,8 @@ def _pack_data(datadict, wall_time):
             elif plugin in ('scalar', 'tensor', 'histogram', 'image'):
                 summaries.append({'_type': plugin.title(), 'name': data.get('tag'), 'data': data.get('value')})
                 step = data.get('step')
+            elif plugin == 'explainer':
+                result.append([plugin, package_explain_event(data.get('value'))])
     if summaries:
         result.append(['summary', package_summary_event(summaries, step, wall_time).SerializeToString()])
     return result
@@ -65,6 +68,15 @@ class WriterPool(ctx.Process):
         self.start()
 
     def run(self):
+        # Environment variables are used to specify a maximum number of OpenBLAS threads:
+        # In ubuntu(GPU) environment, numpy will use too many threads for computing,
+        # it may affect the start of the summary process.
+        # Notice: At present, the performance of setting the thread to 2 has been tested to be more suitable.
+        # If it is to be adjusted, it is recommended to test according to the scenario first
+        os.environ['OPENBLAS_NUM_THREADS'] = '2'
+        os.environ['GOTO_NUM_THREADS'] = '2'
+        os.environ['OMP_NUM_THREADS'] = '2'
+
         with ctx.Pool(min(ctx.cpu_count(), 32)) as pool:
             deq = deque()
             while True:
@@ -98,6 +110,8 @@ class WriterPool(ctx.Process):
                 self._writers_.append(SummaryWriter(filepath, self._max_file_size))
             elif plugin == 'lineage':
                 self._writers_.append(LineageWriter(filepath, self._max_file_size))
+            elif plugin == 'explainer':
+                self._writers_.append(ExplainWriter(filepath, self._max_file_size))
         return self._writers_
 
     def _write(self, plugin, data):
@@ -125,7 +139,6 @@ class WriterPool(ctx.Process):
         Write the event to file.
 
         Args:
-            name (str): The key of a specified file.
             data (Optional[str, Tuple[list, int]]): The data to write.
         """
         self._queue.put(('WRITE', data))

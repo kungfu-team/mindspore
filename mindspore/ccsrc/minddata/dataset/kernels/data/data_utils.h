@@ -19,8 +19,11 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include "minddata/dataset/core/constants.h"
+#ifndef ENABLE_ANDROID
 #include "minddata/dataset/core/cv_tensor.h"
+#endif
 #include "minddata/dataset/core/data_type.h"
 #include "minddata/dataset/core/tensor.h"
 #include "minddata/dataset/core/tensor_row.h"
@@ -74,7 +77,7 @@ Status TypeCast(const std::shared_ptr<Tensor> &input, std::shared_ptr<Tensor> *o
 // @param std::shared_ptr<Tensor> *dst - return tensor padded
 // @param std::vector<dsize_t> pad_shape - shape to pad to
 // @param std::shared_ptr<Tensor> pad_val - value to pad with in Tensor format,
-// @return - The error code return
+// @return Status The status code returned
 Status PadEnd(const std::shared_ptr<Tensor> &src, std::shared_ptr<Tensor> *dst, const std::vector<dsize_t> &pad_shape,
               const std::shared_ptr<Tensor> &pad_val);
 
@@ -83,7 +86,7 @@ Status PadEnd(const std::shared_ptr<Tensor> &src, std::shared_ptr<Tensor> *dst, 
 // @param std::shared_ptr<Tensor> *dst - return tensor padded
 // @param std::vector<dsize_t> pad_shape - shape to pad to
 // @param float pad_val - value to pad with
-// @return - The error code return
+// @return Status The status code returned
 Status PadEndNumeric(const std::shared_ptr<Tensor> &src, std::shared_ptr<Tensor> *dst,
                      const std::vector<dsize_t> &pad_shape, float pad_val);
 
@@ -95,7 +98,7 @@ Status PadEndNumeric(const std::shared_ptr<Tensor> &src, std::shared_ptr<Tensor>
 // @param std::vector<dsize_t> cur_ind - recursion helper
 // @param T pad_val - value to pad tensor with
 // @param size_t cur_dim - recursion helper
-// @return Status - The error code return
+// @return Status The status code returned
 Status PadEndNumericHelper(const std::shared_ptr<Tensor> &src, std::shared_ptr<Tensor> dst,
                            std::vector<dsize_t> cur_ind, size_t cur_dim = 0);
 
@@ -104,7 +107,7 @@ Status PadEndNumericHelper(const std::shared_ptr<Tensor> &src, std::shared_ptr<T
 // @param std::shared_ptr<Tensor> *dst - return tensor padded
 // @param std::vector<dsize_t> pad_shape - shape to pad to
 // @param std::string pad_val - value to pad with
-// @return - The error code return
+// @return Status The status code returned
 Status PadEndString(const std::shared_ptr<Tensor> &src, std::shared_ptr<Tensor> *dst,
                     const std::vector<dsize_t> &pad_shape, const std::string &pad_val);
 
@@ -116,7 +119,7 @@ Status PadEndString(const std::shared_ptr<Tensor> &src, std::shared_ptr<Tensor> 
 // @param std::vector<dsize_t> cur_ind - recursion helperas text
 // @param std::string pad_val - value to pad tensor with
 // @param size_t cur_dim - recursion helper
-// @return Status - The error code return
+// @return Status The status code returned
 Status PadEndStringHelper(const std::shared_ptr<Tensor> &src, std::vector<std::string> *dst,
                           const TensorShape &dst_shape, std::vector<dsize_t> cur_ind, size_t cur_dim,
                           const std::string &pad_value);
@@ -176,6 +179,26 @@ Status BatchTensorToTensorVector(const std::shared_ptr<Tensor> &input, std::vect
 /// \return Status ok/error
 Status TensorVectorToBatchTensor(const std::vector<std::shared_ptr<Tensor>> &input, std::shared_ptr<Tensor> *output);
 
+/// Helper method that uniques the input tensor
+/// @tparam T type of the tensor
+/// \param input[in] input 1d tensor
+/// \param output[out] output tensor
+/// \param output[out] output tensor of item index
+/// \param output[out] output tensor of item count
+/// \return Status ok/error
+template <typename T>
+Status UniqueHelper(const std::shared_ptr<Tensor> &input, std::shared_ptr<Tensor> *output,
+                    std::shared_ptr<Tensor> *output_idx, std::shared_ptr<Tensor> *output_cnt);
+
+/// Unique the input tensor
+/// @tparam T type of the tensor
+/// \param input[in] input 1d tensor
+/// \param output[out] output tensor
+/// \param output[out] output tensor of item index
+/// \param output[out] output tensor of item count
+/// \return Status ok/error
+Status Unique(const std::shared_ptr<Tensor> &input, std::shared_ptr<Tensor> *output,
+              std::shared_ptr<Tensor> *output_idx, std::shared_ptr<Tensor> *output_cnt);
 }  // namespace dataset
 }  // namespace mindspore
 

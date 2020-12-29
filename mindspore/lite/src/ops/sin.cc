@@ -16,6 +16,10 @@
 
 #include "src/ops/sin.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -29,6 +33,11 @@ int Sin::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::Fl
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *SinCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Sin>(primitive); }
+Registry SinRegistry(schema::PrimitiveType_Sin, SinCreator);
+
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

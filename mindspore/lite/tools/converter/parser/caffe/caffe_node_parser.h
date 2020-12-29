@@ -19,6 +19,8 @@
 
 #include <string>
 #include <vector>
+#include "src/ops/primitive_c.h"
+#include "c_ops/primitive_c.h"
 #include "google/protobuf/message.h"
 #include "schema/inner/model_generated.h"
 #include "proto/caffe.pb.h"
@@ -30,15 +32,17 @@ namespace mindspore {
 namespace lite {
 class CaffeNodeParser {
  public:
-  explicit CaffeNodeParser(const std::string &nodeName) : name(nodeName) {}
+  explicit CaffeNodeParser(const std::string nodeName) : name(nodeName) {}
 
   virtual ~CaffeNodeParser() {}
 
-  virtual int Parse(const caffe::LayerParameter &proto, const caffe::LayerParameter &weight, schema::CNodeT *op,
-                    std::vector<schema::TensorT *> *weightVec) = 0;
+  virtual lite::PrimitiveC *ParseLitePrimitive(const caffe::LayerParameter &proto,
+                                               const caffe::LayerParameter &weight) {
+    return nullptr;
+  }
 
  protected:
-  const std::string &name;
+  const std::string name;
 };
 
 schema::TensorT *ConvertWeight(const caffe::BlobProto &proto);

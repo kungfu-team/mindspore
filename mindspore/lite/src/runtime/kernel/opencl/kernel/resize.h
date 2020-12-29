@@ -26,21 +26,22 @@
 namespace mindspore::kernel {
 class ResizeOpenCLKernel : public OpenCLKernel {
  public:
-  explicit ResizeOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                              const std::vector<lite::Tensor *> &outputs)
+  ResizeOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
+                     const std::vector<lite::Tensor *> &outputs)
       : OpenCLKernel(parameter, inputs, outputs) {}
-  ~ResizeOpenCLKernel() override{};
+  ~ResizeOpenCLKernel() override = default;
 
-  int Init() override;
-  int ReSize() override;
   int Run() override;
-  int GetImageSize(size_t idx, std::vector<size_t> *img_size) override;
-  float getResizeScaleFactor(int input_size, int output_size);
+  int Prepare() override;
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
 
  private:
-  cl::Kernel kernel_;
-  bool alignCorner;
-  bool preserveAspectRatio;
+  float getResizeScaleFactor(int input_size, int output_size);
+
+  bool alignCorner{false};
+  bool preserveAspectRatio{false};
 };
 }  // namespace mindspore::kernel
 

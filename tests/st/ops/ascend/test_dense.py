@@ -31,10 +31,38 @@ class Net(nn.Cell):
     def construct(self, x):
         return self.dense(x)
 
+class MultiLayerDense(nn.Cell):
+    def __init__(self):
+        super(MultiLayerDense, self).__init__()
+        self.dense1 = nn.Dense(in_channels=256, out_channels=512)
+        self.dense2 = nn.Dense(in_channels=512, out_channels=1024)
+
+    @ms_function
+    def construct(self, x):
+        x = self.dense1(x)
+        x = self.dense2(x)
+        return x
+
 
 def test_net():
     x = np.random.randn(32, 2048).astype(np.float32)
     net = Net()
+    output = net(Tensor(x))
+    print(x)
+    print(output.asnumpy())
+
+
+def test_net_ND():
+    x = np.random.randn(2, 332, 2048).astype(np.float32)
+    net = Net()
+    output = net(Tensor(x))
+    print(x)
+    print(output.asnumpy())
+
+
+def test_net_multilayer():
+    x = np.random.randn(16, 32, 256).astype(np.float32)
+    net = MultiLayerDense()
     output = net(Tensor(x))
     print(x)
     print(output.asnumpy())

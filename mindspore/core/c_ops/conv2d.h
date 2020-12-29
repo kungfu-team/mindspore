@@ -21,38 +21,42 @@
 #include <string>
 #include <memory>
 
+#include "c_ops/op_utils.h"
 #include "c_ops/primitive_c.h"
 #include "abstract/abstract_value.h"
 #include "utils/check_convert_utils.h"
 namespace mindspore {
-class Conv2d : public PrimitiveC {
+constexpr auto kNameConv2D = "Conv2D";
+class Conv2D : public PrimitiveC {
  public:
-  Conv2d();
-  ~Conv2d() = default;
-  MS_DECLARE_PARENT(Conv2d, PrimitiveC);
-  void Init(int out_channel, const std::vector<int> &kernel_size, int mode = 1, const std::string &pad_mode = "valid",
-            const std::vector<int> &pad = {0, 0, 0, 0}, const std::vector<int> &stride = {1, 1, 1, 1},
-            const std::vector<int> &dilation = {1, 1, 1, 1}, int group = 1);
-  std::vector<int> GetKernelSize() const;
-  std::vector<int> GetStride() const;
-  std::vector<int> GetDilation() const;
-  std::string GetPadMode() const;
-  std::vector<int> GetPad() const;
-  int GetMode() const;
-  int GetGroup() const;
-  int GetOutputChannel() const;
-  void SetKernelSize(const std::vector<int> &kernel_size);
-  void SetStride(const std::vector<int> &stride);
-  void SetDilation(const std::vector<int> &dilation);
-  void SetPadMode(const std::string &pad_mode);
-  void SetPad(const std::vector<int> &pad);
-  void SetMode(int mode);
-  void SetGroup(int group);
-  void SetOutChannel(int output_channel);
-  void SetPadList(const std::vector<int> &pad_list);
+  Conv2D();
+  ~Conv2D() = default;
+  MS_DECLARE_PARENT(Conv2D, PrimitiveC);
+  void Init(int64_t out_channel, const std::vector<int64_t> &kernel_size, int64_t mode = 1,
+            const std::string &pad_mode = "valid", const std::vector<int64_t> &pad = {0, 0, 0, 0},
+            const std::vector<int64_t> &stride = {1, 1, 1, 1}, const std::vector<int64_t> &dilation = {1, 1, 1, 1},
+            int64_t group = 1);
+  std::vector<int64_t> get_kernel_size() const;
+  std::vector<int64_t> get_stride() const;
+  std::vector<int64_t> get_dilation() const;
+  std::string get_pad_mode() const;
+  std::vector<int64_t> get_pad() const;
+  std::vector<int64_t> get_pad_list() const;
+  int64_t get_mode() const;
+  int64_t get_group() const;
+  int64_t get_output_channel() const;
+  void set_kernel_size(const std::vector<int64_t> &kernel_size);
+  void set_stride(const std::vector<int64_t> &stride);
+  void set_dilation(const std::vector<int64_t> &dilation);
+  void set_pad_mode(const std::string &pad_mode);
+  void set_pad(const std::vector<int64_t> &pad);
+  void set_mode(int64_t mode);
+  void set_group(int64_t group);
+  void set_out_channel(int64_t output_channel);
+  void set_pad_list(const std::vector<int64_t> &pad_list);
 };
 AbstractBasePtr Conv2dInfer(const abstract::AnalysisEnginePtr &, const PrimitivePtr &primitive,
                             const std::vector<AbstractBasePtr> &input_args);
-using PrimConv2dPtr = std::shared_ptr<Conv2d>;
+using PrimConv2dPtr = std::shared_ptr<Conv2D>;
 }  // namespace mindspore
 #endif  // MINDSPORE_CORE_C_OPS_CONV2D_H_

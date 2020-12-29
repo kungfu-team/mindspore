@@ -18,10 +18,9 @@
 #include "src/common/log_adapter.h"
 #include "common/common_test.h"
 #include "src/common/file_utils.h"
-#include "src/common/file_utils_ext.h"
 #include "src/runtime/kernel/arm/fp32_grad/bn_grad.h"
 #include "nnacl/fp32_grad/batch_norm.h"
-#include "nnacl/fp32/batchnorm.h"
+#include "nnacl/fp32/batchnorm_fp32.h"
 #include "src/kernel_registry.h"
 
 namespace mindspore {
@@ -36,7 +35,11 @@ lite::Tensor *TestBNGradFp32::CreateInTensor(std::string file_name, std::vector<
   size_t input_size = 0;
   auto input_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(file_name.c_str(), &input_size));
   auto tensor = new lite::Tensor(TypeId::kNumberTypeFloat32, dim);
-  tensor->SetData(input_data);
+  if (tensor == nullptr) {
+    MS_LOG(ERROR) << "new tensor failed";
+    return nullptr;
+  }
+  tensor->set_data(input_data);
   EXPECT_EQ(input_size, tensor->Size());
   return tensor;
 }
@@ -44,7 +47,9 @@ lite::Tensor *TestBNGradFp32::CreateInTensor(std::string file_name, std::vector<
 TEST_F(TestBNGradFp32, BNGradFp32) {
   // prepare stage
   auto bn_param = static_cast<BNGradParameter *>(malloc(sizeof(BNGradParameter)));
-  bn_param->epsilon_ = 0.00001;
+  ASSERT_NE(bn_param, nullptr);
+
+  bn_param->epsilon_ = 1e-2;
   bn_param->momentum_ = 0.1;
   const int batch = 2;
   const int channels = 3;
@@ -52,10 +57,16 @@ TEST_F(TestBNGradFp32, BNGradFp32) {
   const int width = 5;
 
   auto dy_tensor = CreateInTensor("./test_data/bngrad/dy_2_4_5_3.bin", {batch, height, width, channels});
+  ASSERT_NE(dy_tensor, nullptr);
   auto x_tensor = CreateInTensor("./test_data/bngrad/input_x_2_4_5_3.bin", {batch, height, width, channels});
+  ASSERT_NE(x_tensor, nullptr);
   auto scale_tensor = CreateInTensor("./test_data/bngrad/scale_3.bin", {1, 1, 1, channels});
+  ASSERT_NE(scale_tensor, nullptr);
   auto mean_tensor = CreateInTensor("./test_data/bngrad/save_mean_3.bin", {1, 1, 1, channels});
+  ASSERT_NE(mean_tensor, nullptr);
   auto var_tensor = CreateInTensor("././test_data/bngrad/save_var_3.bin", {1, 1, 1, channels});
+  ASSERT_NE(var_tensor, nullptr);
+
   // prepare output tensors
   lite::Tensor dx_tensor(TypeId::kNumberTypeFloat32, {batch, height, width, channels});
   ASSERT_EQ(dx_tensor.MallocData(), 0);
@@ -68,48 +79,37 @@ TEST_F(TestBNGradFp32, BNGradFp32) {
   std::vector<lite::Tensor *> outputs = {&dx_tensor, &dscale_tensor, &dbias_tensor};
 
   lite::InnerContext ctx;
-  ctx.device_type_ = lite::DT_CPU;
   ctx.thread_num_ = 1;
   ASSERT_EQ(lite::RET_OK, ctx.Init());
 
   kernel::KernelKey desc = {kernel::kCPU, TypeId::kNumberTypeFloat32, schema::PrimitiveType_BNGrad};
   auto creator = lite::KernelRegistry::GetInstance()->GetCreator(desc);
+  ASSERT_NE(creator, nullptr);
   auto kernel_obj = creator(inputs, outputs, reinterpret_cast<OpParameter *>(bn_param), &ctx, desc, nullptr);
-  mindspore::kernel::LiteKernel::AllocWorkspace(kernel_obj->GetWorkspaceSize());
+  ASSERT_NE(kernel_obj, nullptr);
+  mindspore::kernel::LiteKernel::AllocWorkspace(kernel_obj->workspace_size());
 
-  for (int i = 0; i < 3; i++) {
-    kernel_obj->Run();
-  }
-
-  int loop_count = 100;
-  auto time_start = mindspore::lite::GetTimeUs();
-  for (int i = 0; i < loop_count; i++) {
-    kernel_obj->Run();
-  }
-  auto time_end = mindspore::lite::GetTimeUs();
-  auto cost = time_end - time_start;
-  auto time_avg = cost / loop_count;
-  std::cout << "single thread running time : " << time_avg << "us\n";
+  kernel_obj->Run();
   std::cout << "==========dx==========\n";
   auto dx = reinterpret_cast<float *>(outputs[0]->MutableData());
   for (int i = 0; i < 7; i++) std::cout << dx[i] << " ";
   std::cout << "\n";
-  auto res = mindspore::lite::CompareRelativeOutput(dx, "./test_data/bngrad/output_dx_2_4_5_3.bin");
+  auto res = CompareRelativeOutput(dx, "./test_data/bngrad/output_dx_2_4_5_3.bin");
+  EXPECT_EQ(res, 0);
   std::cout << "\n=======dscale=======\n";
   auto dscale = reinterpret_cast<float *>(outputs[1]->MutableData());
   for (int i = 0; i < channels; i++) std::cout << dscale[i] << " ";
   std::cout << "\n";
-  res = mindspore::lite::CompareRelativeOutput(dscale, "./test_data/bngrad/output_dscale_3.bin");
+  res = CompareRelativeOutput(dscale, "./test_data/bngrad/output_dscale_3.bin");
   EXPECT_EQ(res, 0);
   std::cout << "==========dbias==========\n";
   auto dbias = reinterpret_cast<float *>(outputs[2]->MutableData());
   for (int i = 0; i < 3; i++) std::cout << dbias[i] << " ";
   std::cout << "\n";
-  res = mindspore::lite::CompareRelativeOutput(dbias, "./test_data/bngrad/output_dbias_3.bin");
-  EXPECT_EQ(res, 0);
+  res = CompareRelativeOutput(dbias, "./test_data/bngrad/output_dbias_3.bin");
   for (auto v : inputs) {
     delete[] reinterpret_cast<float *>(v->MutableData());
-    v->SetData(nullptr);
+    v->set_data(nullptr);
     delete v;
   }
   mindspore::kernel::LiteKernel::FreeWorkspace();
@@ -119,8 +119,10 @@ TEST_F(TestBNGradFp32, BNGradFp32) {
 
 TEST_F(TestBNGradFp32, BNTtrainFp32) {
   auto bn_param = static_cast<BatchNormParameter *>(malloc(sizeof(BatchNormParameter)));
-  bn_param->epsilon_ = 0.00001;
-  bn_param->momentum_ = 0.;
+  ASSERT_NE(bn_param, nullptr);
+
+  bn_param->epsilon_ = 1e-2;
+  bn_param->momentum_ = 0.1;
   const int batch = 2;
   const int channels = 3;
   const int height = 4;
@@ -171,35 +173,40 @@ TEST_F(TestBNGradFp32, BNTtrainFp32) {
   kernel::KernelKey desc = {kernel::kCPU, TypeId::kNumberTypeFloat32, schema::PrimitiveType_FusedBatchNorm};
 
   mindspore::lite::InnerContext context;
-  context.device_type_ = lite::DT_CPU;
   context.thread_num_ = 1;
   ASSERT_EQ(lite::RET_OK, context.Init());
 
   auto creator = lite::KernelRegistry::GetInstance()->GetCreator(desc);
+  ASSERT_NE(creator, nullptr);
   auto kernel_obj = creator(inputs, outputs, reinterpret_cast<OpParameter *>(bn_param), &context, desc, nullptr);
-  mindspore::kernel::LiteKernel::AllocWorkspace(kernel_obj->GetWorkspaceSize());
-
+  ASSERT_NE(kernel_obj, nullptr);
+  mindspore::kernel::LiteKernel::AllocWorkspace(kernel_obj->workspace_size());
   float *save_mean = reinterpret_cast<float *>(save_mean_tensor.MutableData());
   float *save_var = reinterpret_cast<float *>(save_var_tensor.MutableData());
-  std::fill(save_mean, save_mean + channels, 0.f);
-  std::fill(save_var, save_var + channels, 0.f);
+  for (int i = 0; i < channels; i++) {
+    save_var[i] = 1.f;
+    save_mean[i] = 0.f;
+  }
+  float *curr_mean = reinterpret_cast<float *>(mean_tensor.MutableData());
+  float *curr_var = reinterpret_cast<float *>(var_tensor.MutableData());
 
-  kernel_obj->train();
+  kernel_obj->Train();
+  kernel_obj->set_trainable(true);
   kernel_obj->Run();
 
   std::cout << "================save_mean==============================\n";
-  for (int i = 0; i < channels; i++) std::cout << save_mean[i] << " ";
+  for (int i = 0; i < channels; i++) std::cout << curr_mean[i] << " ";
   std::cout << "\n";
   std::cout << "===============save_var==============================\n";
-  for (int i = 0; i < channels; i++) std::cout << save_var[i] << " ";
+  for (int i = 0; i < channels; i++) std::cout << curr_var[i] << " ";
   std::cout << "\n";
   delete[] reinterpret_cast<float *>(x_tensor->MutableData());
-  auto res = mindspore::lite::CompareRelativeOutput(save_mean, "./test_data/bngrad/running_mean_3.bin");
+  auto res = CompareRelativeOutput(curr_mean, "./test_data/bngrad/running_mean_3.bin");
   EXPECT_EQ(res, 0);
-  res = mindspore::lite::CompareRelativeOutput(save_var, "./test_data/bngrad/running_var_3.bin");
+  res = CompareRelativeOutput(curr_var, "./test_data/bngrad/running_var_3.bin");
   EXPECT_EQ(res, 0);
 
-  x_tensor->SetData(nullptr);
+  x_tensor->set_data(nullptr);
   delete x_tensor;
   mindspore::kernel::LiteKernel::FreeWorkspace();
   delete kernel_obj;

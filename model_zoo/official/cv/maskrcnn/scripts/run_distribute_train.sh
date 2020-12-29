@@ -16,7 +16,7 @@
 
 if [ $# != 2 ]
 then 
-    echo "Usage: sh run_train.sh [RANK_TABLE_FILE] [PRETRAINED_PATH]"
+    echo "Usage: bash run_train.sh [RANK_TABLE_FILE] [PRETRAINED_PATH]"
 exit 1
 fi
 
@@ -46,6 +46,7 @@ exit 1
 fi
 
 ulimit -u unlimited
+export HCCL_CONNECT_TIMEOUT=600
 export DEVICE_NUM=8
 export RANK_SIZE=8
 export RANK_TABLE_FILE=$PATH1
@@ -53,7 +54,7 @@ export RANK_TABLE_FILE=$PATH1
 echo 3 > /proc/sys/vm/drop_caches
 
 cpus=`cat /proc/cpuinfo| grep "processor"| wc -l`
-avg=`expr $cpus \/ $RANK_SIZE`
+avg=`expr $cpus \/ $DEVICE_NUM`
 gap=`expr $avg \- 1`
 
 for((i=0; i<${DEVICE_NUM}; i++))

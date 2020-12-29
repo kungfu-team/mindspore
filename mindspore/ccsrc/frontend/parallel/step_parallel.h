@@ -21,24 +21,26 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <utility>
-#include <set>
 
 #include "frontend/optimizer/opt.h"
 #include "frontend/parallel/strategy.h"
 #include "frontend/parallel/tensor_layout/tensor_redistribution.h"
+#include "pipeline/jit/pipeline.h"
 
 using OperatorInfoPtr = std::shared_ptr<mindspore::parallel::OperatorInfo>;
 
 namespace mindspore {
 namespace parallel {
 const uint64_t kUSecondInSecond = 1000000;
+const int32_t RECURSION_LIMIT = 3;
 
 struct LossNodeInfo {
   bool has_tuple_getitem = false;
-  int dout_index = 0;  // now don't support the sens is a tuple
+  int64_t dout_index = 0;  // now don't support the sens is a tuple
   CNodePtr loss_node = nullptr;
 };
 
@@ -47,15 +49,15 @@ std::string CreateInstanceName(const CNodePtr &node, size_t index);
 void ForwardCommunication(OperatorVector forward_op, const CNodePtr &node);
 
 void InsertRedistribution(const RedistributionOpListPtr &redistribution_oplist_ptr, const CNodePtr &node,
-                          const FuncGraphPtr &func_graph, int pos, const CNodePtr &pre_node);
+                          const FuncGraphPtr &func_graph, int64_t pos, const CNodePtr &pre_node);
 
 TensorLayout GetTensorInLayout(const CNodePtr &pre_node, const PrimitivePtr &pre_prim,
                                const OperatorInfoPtr &distribute_operator_pre);
 
 OperatorInfoPtr GetDistributeOperator(const CNodePtr &node);
 
-void Redistribution(const std::pair<AnfNodePtr, int> &node_pair, const OperatorInfoPtr &distribute_operator,
-                    const CNodePtr &middle_node, int index, TensorRedistribution tensor_redistribution,
+void Redistribution(const std::pair<AnfNodePtr, int64_t> &node_pair, const OperatorInfoPtr &distribute_operator,
+                    const CNodePtr &middle_node, int64_t index, TensorRedistribution tensor_redistribution,
                     const CNodePtr &pre_node);
 
 bool StrategyFound(std::unordered_map<std::string, ValuePtr> attrs);
@@ -98,18 +100,14 @@ StrategyPtr ExtractStrategy(std::unordered_map<std::string, ValuePtr> attrs);
 
 Shapes GetNodeShape(const AnfNodePtr &node);
 
-std::vector<AnfNodePtr> FindParameterByRefKeyNode(const AnfNodePtr &node, const FuncGraphPtr &func_graph);
-
 // Extract shape from anfnode
 std::vector<Shapes> ExtractShape(const CNodePtr &node);
 
-std::pair<AnfNodePtr, int> FindParallelCareNode(const AnfNodePtr &node);
-
 // Find finally sub graph
-std::pair<AnfNodePtr, int> FindSubGraph(const FuncGraphPtr &func_graph, const AnfNodePtr &parameter);
+std::pair<AnfNodePtr, int64_t> FindSubGraph(const FuncGraphPtr &func_graph, const AnfNodePtr &parameter);
 
 // Set distribute shape for parameters abstract
-void SetParallelShape(const AnfNodePtr &parameter, const std::pair<AnfNodePtr, int> &res);
+std::string SetParallelShape(const AnfNodePtr &parameter, const std::pair<AnfNodePtr, int64_t> &res);
 
 // change parameters'shape in resource
 void CoverSliceShape(const FuncGraphPtr &root);
@@ -117,9 +115,9 @@ void CoverSliceShape(const FuncGraphPtr &root);
 void SetVirtualDatasetStrategy(const CNodePtr &node);
 
 // Creat parallel operator for primitive node(has strategy)
-void ExtractInformation(const std::vector<AnfNodePtr> &all_nodes);
+void ExtractInformation(const std::vector<AnfNodePtr> &all_nodes, bool is_training = true);
 
-TensorLayout GetInputLayoutFromCNode(const std::pair<AnfNodePtr, int> &node_pair);
+TensorLayout GetInputLayoutFromCNode(const std::pair<AnfNodePtr, int64_t> &node_pair);
 
 std::shared_ptr<TensorLayout> FindNextLayout(const CNodePtr &node);
 
@@ -131,26 +129,28 @@ std::shared_ptr<TensorLayout> FindPrevLayout(const AnfNodePtr &node);
 
 void ReshapeInit(const std::vector<AnfNodePtr> &all_nodes);
 
+StrategyPtr GenerateBatchParallelStrategy(const OperatorInfoPtr operator_, const PrimitivePtr prim);
+
+bool IsLastStage();
+
 // Add node for whole graph
 void ParallelCommunication(const FuncGraphPtr &root, const std::vector<AnfNodePtr> &all_nodes,
                            const FuncGraphManagerPtr &manager);
 
-std::vector<std::pair<std::string, int>> NodeParameterName(const CNodePtr &node);
+std::vector<std::pair<std::string, int64_t>> NodeParameterName(const CNodePtr &node);
 
 void CheckpointStrategy(const std::vector<AnfNodePtr> &all_nodes);
 
 // main step of Parallel
 bool StepParallel(const FuncGraphPtr &func_graph, const opt::OptimizerPtr &optimizer);
 
-int32_t GetTupleGetItemIndex(const CNodePtr &cnode);
+int64_t GetTupleGetItemIndex(const CNodePtr &cnode);
 
 Status ParallelInit();
 
 std::set<FuncGraphPtr> ForwardGraph(const FuncGraphPtr &root);
 
 std::vector<std::string> ExtractInputsTensorName(const CNodePtr &node);
-
-bool AnfNodeIsPrimitive(const AnfNodePtr &anf_node, const std::string &prim_name);
 
 using RefKeyPair = std::pair<AnfNodePtr, std::vector<AnfNodePtr>>;
 using ParameterUsersInfo = std::pair<std::string, std::pair<AnfNodePtr, AnfNodeIndexSet>>;
@@ -161,8 +161,14 @@ std::shared_ptr<TensorLayout> FindParameterNextLayout(const AnfNodePtr &node);
 
 ParameterUsersInfo FindParameterUsers(const AnfNodePtr &node, bool (*IsCareNode)(const CNodePtr &));
 
+bool IsUsedParameter(const FuncGraphPtr &graph, const AnfNodePtr &parameter);
+
 void ApplyParallelOptOnParam(TensorLayout *tensor_layout, const OperatorInfoPtr &distribute_operator,
                              const CNodePtr &cnode, const AnfNodePtr &parameter, size_t index);
+
+void SetLastNodeStrategy(const StrategyPtr strategyPtr);
+
+void FindLastNodesUniqueId(const std::vector<AnfNodePtr> &all_nodes, std::vector<std::string> *unique_ids);
 }  // namespace parallel
 }  // namespace mindspore
 

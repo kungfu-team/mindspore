@@ -17,51 +17,39 @@
 #include "tools/converter/parser/tflite/tflite_stack_parser.h"
 #include <vector>
 #include <memory>
-#include <map>
 
 namespace mindspore {
 namespace lite {
-STATUS TfliteStackParser::Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TfliteStackParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
+PrimitiveC *TfliteStackParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                  const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  auto &tflite_subgraph = tflite_model->subgraphs.front();
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "primitive is null";
+    return nullptr;
   }
 
   std::unique_ptr<schema::StackT> attr = std::make_unique<schema::StackT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   const auto &tflite_attr = tflite_op->builtin_options.AsPackOptions();
   if (tflite_attr == nullptr) {
-    MS_LOG(ERROR) << "get op: " << op->name.c_str() << " attr failed";
-    return RET_NULL_PTR;
+    MS_LOG(ERROR) << "get op stack attr failed";
+    return nullptr;
   }
   attr->axis = tflite_attr->axis;
   attr->n = tflite_attr->values_count;
-  attr->isScale.assign(tflite_model->subgraphs[0]->tensors[tflite_op->inputs[0]]->shape.begin(),
-                       tflite_model->subgraphs[0]->tensors[tflite_op->inputs[0]]->shape.end());
+  attr->isScale.assign(tflite_subgraph->tensors[tflite_op->inputs[0]]->shape.begin(),
+                       tflite_subgraph->tensors[tflite_op->inputs[0]]->shape.end());
 
-  op->primitive->value.type = schema::PrimitiveType_Stack;
-  op->primitive->value.value = attr.release();
-
-  for (size_t i = 0; i < tflite_op->inputs.size(); i++) {
-    AddOpInput(op, tensors_info, tflite_op->inputs[i], tflite_model->subgraphs[0]->tensors.size(),
-               schema::Format::Format_NHWC);
-  }
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  primitive->value.type = schema::PrimitiveType_Stack;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteStackParser("Stack", new TfliteStackParser());
+TfliteNodeRegister g_tfliteStackParser(tflite::BuiltinOperator_PACK, new TfliteStackParser());
 }  // namespace lite
 }  // namespace mindspore

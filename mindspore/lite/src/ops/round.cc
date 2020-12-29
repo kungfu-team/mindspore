@@ -16,6 +16,10 @@
 
 #include "src/ops/round.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -28,6 +32,11 @@ int Round::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *RoundCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Round>(primitive); }
+Registry RoundRegistry(schema::PrimitiveType_Round, RoundCreator);
+
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

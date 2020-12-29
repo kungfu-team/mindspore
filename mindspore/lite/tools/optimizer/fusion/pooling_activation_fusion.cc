@@ -28,22 +28,22 @@ constexpr size_t kActivationInputsLength = 2;
 }
 const BaseRef PoolingActivationFusion::DefinePattern() const {
   auto pooling_var = std::make_shared<CondVar>(IsPoolingNode)();
-  auto prim = new schema::PrimitiveT();
+  auto prim = new (std::nothrow) schema::PrimitiveT();
   if (prim == nullptr) {
     MS_LOG(ERROR) << "new primitiveT failed";
     return nullptr;
   }
   prim->value.type = primitive_type;
   auto prim_value = std::make_shared<lite::PrimitiveC>(prim);
-
   return VectorRef({prim_value, pooling_var});
 }
 
 const AnfNodePtr PoolingActivationFusion::Process(const FuncGraphPtr &func_graph, const AnfNodePtr &node,
                                                   const EquivPtr &) const {
+  MS_ASSERT(func_graph != nullptr);
+  MS_ASSERT(node != nullptr);
   MS_LOG(DEBUG) << "pooling activation pass process:" << schema::EnumNamesPrimitiveType()[primitive_type];
   CheckIfFuncGraphIsNull(func_graph);
-
   CheckIfAnfNodeIsNull(node);
   auto act_node = node->cast<CNodePtr>();
   CheckIfCNodeIsNull(act_node);

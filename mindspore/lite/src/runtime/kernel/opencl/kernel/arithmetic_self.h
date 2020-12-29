@@ -22,28 +22,41 @@
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
 #include "nnacl/arithmetic_self_parameter.h"
 
+using mindspore::schema::PrimitiveType_Abs;
+using mindspore::schema::PrimitiveType_Ceil;
+using mindspore::schema::PrimitiveType_Cos;
+using mindspore::schema::PrimitiveType_Eltwise;
+using mindspore::schema::PrimitiveType_Exp;
+using mindspore::schema::PrimitiveType_Floor;
+using mindspore::schema::PrimitiveType_Log;
+using mindspore::schema::PrimitiveType_LogicalNot;
+using mindspore::schema::PrimitiveType_Neg;
+using mindspore::schema::PrimitiveType_Round;
+using mindspore::schema::PrimitiveType_Rsqrt;
+using mindspore::schema::PrimitiveType_Sin;
+using mindspore::schema::PrimitiveType_Sqrt;
+using mindspore::schema::PrimitiveType_Square;
+
 namespace mindspore::kernel {
 
 class ArithmeticSelfOpenCLKernel : public OpenCLKernel {
  public:
-  explicit ArithmeticSelfOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                                      const std::vector<lite::Tensor *> &outputs)
+  ArithmeticSelfOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
+                             const std::vector<lite::Tensor *> &outputs)
       : OpenCLKernel(parameter, inputs, outputs) {}
 
-  ~ArithmeticSelfOpenCLKernel() override{};
+  ~ArithmeticSelfOpenCLKernel() override = default;
 
-  int Init() override;
+  int Prepare() override;
 
-  int ReSize() override;
+  int CheckSpecs() override;
+  void SetConstArgs() override { ocl_runtime_->SetKernelArg(kernel_, 2, output_shape_); }
+  void SetGlobalLocal() override;
 
   int Run() override;
 
-  int GetImageSize(size_t idx, std::vector<size_t> *img_size) override;
-
-  void GetKernelName(std::string *kernel_name, ArithmeticSelfParameter *param);
-
  private:
-  cl::Kernel kernel_;
+  cl_int4 output_shape_ = {};
 };
 
 }  // namespace mindspore::kernel

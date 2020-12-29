@@ -16,13 +16,16 @@
 #ifndef MINDSPORE_CCSRC_MINDDATA_DATASET_ENGINE_CACHE_GRPC_SERVER_H_
 #define MINDSPORE_CCSRC_MINDDATA_DATASET_ENGINE_CACHE_GRPC_SERVER_H_
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
 #include "minddata/dataset/engine/cache/cache_common.h"
-#include "minddata/dataset/engine/cache/cache_arena.h"
+#include "minddata/dataset/engine/cache/cache_ipc.h"
 #include "minddata/dataset/util/allocator.h"
+#include "minddata/dataset/util/arena.h"
 #include "minddata/dataset/util/status.h"
 #include "minddata/dataset/util/task_manager.h"
 
@@ -34,12 +37,11 @@ namespace dataset {
 class CacheServerRequest : public BaseRequest {
  public:
   friend class CacheServer;
+  friend class CacheService;
+  friend class CacheServerGreeterImpl;
   enum class STATE : int8_t { CREATE = 1, PROCESS = 2, FINISH = 3 };
-  explicit CacheServerRequest(int32_t queue_id)
-      : BaseRequest::BaseRequest(BaseRequest::RequestType::kRequestUnknown),
-        qid_(queue_id),
-        st_(STATE::CREATE),
-        responder_(&ctx_) {}
+  CacheServerRequest()
+      : BaseRequest::BaseRequest(BaseRequest::RequestType::kRequestUnknown), st_(STATE::CREATE), responder_(&ctx_) {}
 
   ~CacheServerRequest() override = default;
 
@@ -54,12 +56,7 @@ class CacheServerRequest : public BaseRequest {
   /// \param out
   void Print(std::ostream &out) const override;
 
-  /// \brief Getter of the queue id
-  /// \return The queue where the request should go to
-  int32_t getQid() const { return qid_; }
-
  private:
-  int32_t qid_;
   Status rc_;
   STATE st_;
   grpc::ServerContext ctx_;
@@ -73,7 +70,7 @@ class CacheServerGreeterImpl final {
   friend class CacheServer;
 
  public:
-  explicit CacheServerGreeterImpl(int32_t port, int32_t shared_memory_sz_in_gb);
+  explicit CacheServerGreeterImpl(int32_t port);
   virtual ~CacheServerGreeterImpl();
   /// \brief Brings up gRPC server
   /// \return none
@@ -81,20 +78,18 @@ class CacheServerGreeterImpl final {
   /// \brief Entry function to handle cache server request
   Status HandleRequest(int32_t worker_id);
 
-  /// Return the shared memory pool.
-  /// \return Return the shared memory pool
-  CachedSharedMemoryArena *GetSharedMemoryPool() { return shm_pool_.get(); }
+  /// \brief Montor the status of the unix socket in case it is gone.
+  Status MonitorUnixSocket();
 
+  /// \brief This shutdown down the comm layer
   void Shutdown();
 
  private:
   int32_t port_;
-  size_t shm_pool_sz_in_gb_;
   std::string unix_socket_;
   CacheServerGreeter::AsyncService svc_;
   std::unique_ptr<grpc::ServerCompletionQueue> cq_;
   std::unique_ptr<grpc::Server> server_;
-  std::unique_ptr<CachedSharedMemoryArena> shm_pool_;
 };
 }  // namespace dataset
 }  // namespace mindspore

@@ -44,6 +44,7 @@ constexpr size_t kMulInputNum = 3;
 constexpr size_t kRsqrtInputNum = 2;
 constexpr size_t kSubInputNum = 3;
 constexpr size_t kAssignSubInputNum = 3;
+constexpr size_t kDropoutInputNum = 2;
 
 constexpr size_t kConvBn1OutputNum = 3;
 constexpr size_t kBn2ReluOutputNum = 4;
@@ -98,7 +99,12 @@ constexpr size_t kTopkInputNum = 3;
 constexpr size_t kLarsV2InputNum = 5;
 constexpr size_t kFusedMulApplyMomentumOutputNum = 2;
 constexpr size_t kSplitInputNum = 2;
+constexpr size_t kGatherV2DynInputNum = 3;
 constexpr size_t kUnsortedSegmentSumInputNum = 2;
+constexpr size_t kSoftmaxCrossEntropyWithLogitsOutputNum = 2;
+constexpr size_t kSparseSoftmaxCrossEntropyWithLogitsInputNum = 3;
+constexpr size_t kOneHotOutputNum = 1;
+constexpr size_t kOneHotInputNum = 5;
 
 enum FusedBatchNormInput {
   kX = 1,
@@ -117,7 +123,9 @@ enum ConvBn1Output {
   kMean,
 };
 
-std::vector<int> Convert2Int(const std::vector<size_t> &v);
+std::vector<int64_t> Convert2Int(const std::vector<size_t> &v);
+
+std::vector<int64_t> Convert2Long(const std::vector<size_t> &v);
 
 // check whether node depends on either of nodes or not
 bool IsDepend(const FuncGraph &graph, const AnfNodePtr &node, const std::vector<AnfNodePtr> &nodes);
@@ -126,12 +134,8 @@ bool UnVisited(const BaseRef &n);
 
 bool Visited(const BaseRef &n);
 
-// check if the input node is CNode, then check it's input_size, if meet condition above, return true, otherwise return
-// false. cnode can only be used when return true.
-bool CheckIfCNodeAndInputSize(const AnfNodePtr &node, int input_size, CNodePtr *cnode);
-
 // check if the input node is CNode, then check it's input_size, return CNodePtr if check success.
-CNodePtr CheckAnfNodeIfCNodeAndInputSize(const AnfNodePtr &node, int input_size);
+CNodePtr CheckAnfNodeIfCNodeAndInputSize(const AnfNodePtr &node, size_t input_size);
 
 void CheckCNodeInputSize(const CNodePtr &cnode, size_t input_size);
 
@@ -165,7 +169,7 @@ void HideNopNode(session::KernelGraph *const graph);
 
 void RemoveNopNode(session::KernelGraph *const graph);
 
-AnfNodePtr CreatTupleGetItemNode(const FuncGraphPtr &func_graph, const AnfNodePtr &node, size_t output_idx);
+CNodePtr CreatTupleGetItemNode(const FuncGraphPtr &func_graph, const AnfNodePtr &node, size_t output_idx);
 
 bool IsUsedByOthers(const FuncGraphPtr &graph, const AnfNodePtr &node);
 

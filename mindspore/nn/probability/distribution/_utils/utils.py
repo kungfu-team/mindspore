@@ -159,15 +159,33 @@ def check_prob(p):
         raise ValueError('Probabilities should be less than one')
 
 def check_sum_equal_one(probs):
-    prob_sum = np.sum(probs.asnumpy(), axis=-1)
-    comp = np.equal(np.ones(prob_sum.shape), prob_sum)
-    if not comp.all():
+    """
+    Used in categorical distribution. check if probabilities of each category sum to 1.
+    """
+    if probs is None:
+        raise ValueError(f'input value cannot be None in check_sum_equal_one')
+    if isinstance(probs, Parameter):
+        if not isinstance(probs.data, Tensor):
+            return
+        probs = probs.data
+    if isinstance(probs, Tensor):
+        probs = probs.asnumpy()
+    prob_sum = np.sum(probs, axis=-1)
+    # add a small tolerance here to increase numerical stability
+    comp = np.allclose(prob_sum, np.ones(prob_sum.shape), rtol=1e-14, atol=1e-14)
+    if not comp:
         raise ValueError('Probabilities for each category should sum to one for Categorical distribution.')
 
 def check_rank(probs):
     """
     Used in categorical distribution. check Rank >=1.
     """
+    if probs is None:
+        raise ValueError(f'input value cannot be None in check_rank')
+    if isinstance(probs, Parameter):
+        if not isinstance(probs.data, Tensor):
+            return
+        probs = probs.data
     if probs.asnumpy().ndim == 0:
         raise ValueError('probs for Categorical distribution must have rank >= 1.')
 
@@ -206,12 +224,6 @@ def probs_to_logits(probs, is_binary=False):
     return P.Log()(ps_clamped)
 
 
-def check_type(data_type, value_type, name):
-    if not data_type in value_type:
-        raise TypeError(
-            f"For {name}, valid type include {value_type}, {data_type} is invalid")
-
-
 @constexpr
 def raise_none_error(name):
     raise TypeError(f"the type {name} should be subclass of Tensor."
@@ -234,6 +246,16 @@ def raise_not_impl_error(name):
 def raise_not_implemented_util(func_name, obj, *args, **kwargs):
     raise NotImplementedError(
         f"{func_name} is not implemented for {obj} distribution.")
+
+@constexpr
+def raise_type_error(name, cur_type, required_type):
+    raise TypeError(
+        f"For {name} , the type should be or be subclass of {required_type}, but got {cur_type}")
+
+@constexpr
+def raise_not_defined(func_name, obj, *args, **kwargs):
+    raise ValueError(
+        f"{func_name} is undefined for {obj} distribution.")
 
 
 @constexpr
@@ -266,11 +288,11 @@ class CheckTuple(PrimitiveWithInfer):
         return out
 
     def __call__(self, x, name):
-        if context.get_context("mode") == 0:
-            return x["value"]
-        # Pynative mode
+        # The op is not used in a cell
         if isinstance(x, tuple):
             return x
+        if context.get_context("mode") == 0:
+            return x["value"]
         raise TypeError(f"For {name}, input type should be a tuple.")
 
 
@@ -310,7 +332,7 @@ def set_param_type(args, hint_type):
         TypeError: if tensors in args are not the same dtype.
     """
     int_type = mstype.int_type + mstype.uint_type
-    if hint_type in int_type:
+    if hint_type in int_type or hint_type is None:
         hint_type = mstype.float32
     common_dtype = None
     for name, arg in args.items():

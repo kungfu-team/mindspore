@@ -19,7 +19,11 @@
 #include <vector>
 #include <string>
 #include <memory>
-#include "schema/model_generated.h"
+#include "include/ms_tensor.h"
+
+namespace mindspore::schema {
+struct Tensor;
+}  // namespace mindspore::schema
 
 namespace mindspore::lite {
 /// \brief Allocator defined a memory pool for malloc memory and free memory dynamically.
@@ -27,10 +31,27 @@ namespace mindspore::lite {
 /// \note List public class and interface for reference.
 class Allocator;
 
+/// \brief DeviceContext defined a device context.
+struct DeviceContext;
+
 using TensorPtrVector = std::vector<mindspore::schema::Tensor *>;
+using DeviceContextVector = std::vector<DeviceContext>;
 using Uint32Vector = std::vector<uint32_t>;
 using String = std::string;
-using NodeType = schema::NodeType;
+using NodeType = int; /**< 0 : NodeType_ValueNode, 1 : NodeType_Parameter, 2 : NodeType_CNode. */
 using AllocatorPtr = std::shared_ptr<Allocator>;
+
+/// \brief Set data of MSTensor from string vector.
+///
+/// \param[in] input string vector.
+/// \param[out] MSTensor.
+///
+/// \return STATUS as an error code of this interface, STATUS is defined in errorcode.h.
+int MS_API StringsToMSTensor(const std::vector<std::string> &inputs, tensor::MSTensor *tensor);
+
+/// \brief Get string vector from MSTensor.
+/// \param[in] MSTensor.
+/// \return string vector.
+std::vector<std::string> MS_API MSTensorToStrings(const tensor::MSTensor *tensor);
 }  // namespace mindspore::lite
 #endif  // MINDSPORE_LITE_INCLUDE_LITE_UTILS_H_

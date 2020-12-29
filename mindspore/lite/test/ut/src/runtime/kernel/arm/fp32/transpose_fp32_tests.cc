@@ -18,7 +18,7 @@
 #include <memory>
 #include "src/common/log_adapter.h"
 #include "common/common_test.h"
-#include "mindspore/lite/src/runtime/kernel/arm/fp32/transpose.h"
+#include "mindspore/lite/src/runtime/kernel/arm/fp32/transpose_fp32.h"
 #include "mindspore/lite/nnacl/transpose.h"
 #include "mindspore/lite/src/kernel_registry.h"
 #include "mindspore/lite/src/lite_kernel.h"
@@ -43,7 +43,6 @@ TEST_F(TestTransposeFp32, TransposeFp32_axes4) {
                        1.2791597,   -1.02032341, 0.17405411,  -0.66358529, 1.20223761,  -1.65733338,
                        -0.36793608, 1.91074871,  0.42663834,  1.8033383,   0.30183748,  0.3952082};
 
-  int input_shape[4] = {1, 2, 3, 4};
   int output_shape[4] = {4, 3, 2, 1};
   int perm[8] = {3, 2, 1, 0, 0, 0, 0, 0};
   int strides[8] = {24, 12, 4, 1, 1, 1, 1, 1};
@@ -64,10 +63,10 @@ TEST_F(TestTransposeFp32, TransposeFp32_axes4) {
     param->out_strides_[i] = out_strides[i];
   }
 
-  auto ret = DoTranspose(in, out, input_shape, output_shape, param, 0, 3);
+  auto ret = DoTransposeFp32(in, out, output_shape, param, nullptr, nullptr);
   ASSERT_EQ(ret, 0);
   delete param;
-  CompareOutputData(out, correct, 24, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(out, correct, 24, 0.000001));
 }
 
 TEST_F(TestTransposeFp32, TransposeFp32_axes3) {
@@ -83,7 +82,6 @@ TEST_F(TestTransposeFp32, TransposeFp32_axes3) {
                        -0.52817175, 1.13376944,  1.74481176, 0.04221375,  1.46210794,  0.90159072,
                        -1.07296862, -1.09989127, -0.7612069, 0.58281521,  -2.06014071, 0.50249434};
 
-  int input_shape[3] = {2, 3, 4};
   int output_shape[3] = {4, 3, 2};
   int perm[8] = {2, 1, 0, 0, 0, 0, 0, 0};
   int strides[8] = {12, 4, 1, 1, 1, 1, 1, 1};
@@ -104,10 +102,10 @@ TEST_F(TestTransposeFp32, TransposeFp32_axes3) {
     param->out_strides_[i] = out_strides[i];
   }
 
-  auto ret = DoTranspose(in, out, input_shape, output_shape, param, 0, 3);
+  auto ret = DoTransposeFp32(in, out, output_shape, param, nullptr, nullptr);
   ASSERT_EQ(ret, 0);
   delete param;
-  CompareOutputData(out, correct, 24, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(out, correct, 24, 0.000001));
 }
 
 TEST_F(TestTransposeFp32, TransposeFp32_axes2) {
@@ -123,7 +121,6 @@ TEST_F(TestTransposeFp32, TransposeFp32_axes2) {
                        -0.52817175, 1.74481176, 1.46210794,  1.13376944,  0.04221375,  0.90159072,
                        -1.07296862, -0.7612069, -2.06014071, -1.09989127, 0.58281521,  0.50249434};
 
-  int input_shape[2] = {6, 4};
   int output_shape[2] = {4, 6};
   int perm[8] = {1, 0, 0, 0, 0, 0, 0, 0};
   int strides[8] = {4, 1, 1, 1, 1, 1, 1, 1};
@@ -145,10 +142,10 @@ TEST_F(TestTransposeFp32, TransposeFp32_axes2) {
     param->out_strides_[i] = out_strides[i];
   }
 
-  auto ret = DoTranspose(in, out, input_shape, output_shape, param, 0, 6);
+  auto ret = DoTransposeFp32(in, out, output_shape, param, nullptr, nullptr);
   ASSERT_EQ(ret, 0);
   delete param;
-  CompareOutputData(out, correct, 24, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(out, correct, 24, 0.000001));
 }
 
 TEST_F(TestTransposeFp32, TransposeFp32_test5) {
@@ -183,17 +180,17 @@ TEST_F(TestTransposeFp32, TransposeFp32_test5) {
   }
 
   lite::Tensor input_tensor;
-  input_tensor.SetData(input.data());
+  input_tensor.set_data(input.data());
   input_tensor.set_shape(input_shape);
-  input_tensor.SetFormat(schema::Format_NHWC);
+  input_tensor.set_format(schema::Format_NHWC);
   input_tensor.set_data_type(kNumberTypeFloat32);
   std::vector<lite::Tensor *> inputs_tensor;
   inputs_tensor.emplace_back(&input_tensor);
 
   lite::Tensor output_tensor;
-  output_tensor.SetData(output.data());
+  output_tensor.set_data(output.data());
   output_tensor.set_shape(output_shape);
-  output_tensor.SetFormat(schema::Format_NHWC);
+  output_tensor.set_format(schema::Format_NHWC);
   output_tensor.set_data_type(kNumberTypeFloat32);
   std::vector<lite::Tensor *> outputs_tensor;
   outputs_tensor.emplace_back(&output_tensor);
@@ -213,9 +210,9 @@ TEST_F(TestTransposeFp32, TransposeFp32_test5) {
     std::cout << output[i] << " ";
   }
   std::cout << "\n";
-  CompareOutputData(output.data(), correct, 24, 0.000001);
-  input_tensor.SetData(nullptr);
-  output_tensor.SetData(nullptr);
+  ASSERT_EQ(0, CompareOutputData(output.data(), correct, 24, 0.000001));
+  input_tensor.set_data(nullptr);
+  output_tensor.set_data(nullptr);
 }
 
 }  // namespace mindspore

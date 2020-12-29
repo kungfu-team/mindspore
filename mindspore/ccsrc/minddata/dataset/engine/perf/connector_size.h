@@ -53,13 +53,16 @@ class ConnectorSize : public Sampling {
   std::string Name() const override { return kConnectorSizeSamplingName; }
 
   // Save sampling data to file
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status SaveToFile() override;
 
   Status Init(const std::string &dir_path, const std::string &device_id) override;
 
   // Parse op infomation and transform to json format
   json ParseOpInfo(const DatasetOp &node, const std::vector<int32_t> &size);
+
+  // Change file mode after save throughput data
+  Status ChangeFileMode() { return Status::OK(); }
 
  private:
   ExecutionTree *tree_ = nullptr;          // ExecutionTree pointer

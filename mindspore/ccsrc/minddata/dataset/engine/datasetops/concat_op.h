@@ -44,7 +44,7 @@ class ConcatOp : public PipelineOp {
     // The builder "build" method creates the final object.
     // @return shared_ptr to the new ConcatOp object
     Status Build(std::shared_ptr<ConcatOp> *);
-    Builder &SetSampler(std::shared_ptr<Sampler> sampler) {
+    Builder &SetSampler(std::shared_ptr<SamplerRT> sampler) {
       builder_sampler_ = std::move(sampler);
       return *this;
     }
@@ -61,7 +61,7 @@ class ConcatOp : public PipelineOp {
 
    private:
     int32_t builder_op_connector_size_;
-    std::shared_ptr<Sampler> builder_sampler_;
+    std::shared_ptr<SamplerRT> builder_sampler_;
     std::vector<std::pair<int, int>> children_flag_and_nums_;
     std::vector<std::pair<int, int>> children_start_end_index_;
   };
@@ -70,9 +70,9 @@ class ConcatOp : public PipelineOp {
   // @note The builder class should be used to call it
   // @param op_connector_size - connector size
   explicit ConcatOp(int32_t op_connector_size);
-  explicit ConcatOp(int32_t op_connector_size, std::shared_ptr<Sampler> sampler,
-                    std::vector<std::pair<int, int>> children_flag_and_nums,
-                    std::vector<std::pair<int, int>> children_start_end_index);
+  ConcatOp(int32_t op_connector_size, const std::shared_ptr<SamplerRT> &sampler,
+           const std::vector<std::pair<int, int>> &children_flag_and_nums,
+           const std::vector<std::pair<int, int>> &children_start_end_index);
 
   // Destructor
   ~ConcatOp() = default;
@@ -94,7 +94,7 @@ class ConcatOp : public PipelineOp {
 
   // All dataset ops operate by launching a thread (see ExecutionTree). This class functor will
   // provide the master loop that drives the logic for performing the work
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status operator()() override;
 
   // Op name getter
@@ -111,6 +111,11 @@ class ConcatOp : public PipelineOp {
   /// \return Status of the node visit
   Status PreAccept(NodePass *p, bool *modified) override;
 
+  /// \brief Gets the number of classes
+  /// \param[out] num_classes the number of classes
+  /// \return Status - The status code return
+  Status GetNumClasses(int64_t *num_classes) override;
+
  private:
   Status Verify(int32_t id, const std::unique_ptr<DataBuffer> &buf);
 
@@ -118,7 +123,7 @@ class ConcatOp : public PipelineOp {
   std::unordered_map<std::string, int32_t> column_name_id_;  // Mapping between col index and col name
   std::vector<DataType> data_type_;
   std::vector<dsize_t> data_rank_;
-  std::shared_ptr<Sampler> sampler_;
+  std::shared_ptr<SamplerRT> sampler_;
   std::vector<std::pair<int, int>> children_flag_and_nums_;
   std::vector<std::pair<int, int>> children_start_end_index_;
 };

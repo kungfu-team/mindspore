@@ -17,25 +17,25 @@
 #include "backend/kernel_compiler/hccl/hcom_all_reduce.h"
 #include <memory>
 #include "utils/ms_context.h"
+#include "backend/kernel_compiler/hccl/hccl_context.h"
+#include "external/hccl/hccl.h"
 
 namespace mindspore {
 namespace kernel {
 bool HcomAllReduceKernel::Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> & /*workspace*/,
                                  const std::vector<AddressPtr> &outputs, void *stream_ptr) {
-  auto context_ptr = MsContext::GetInstance();
-  MS_EXCEPTION_IF_NULL(context_ptr);
-  if (context_ptr->get_param<bool>(MS_CTX_ENABLE_TASK_SINK)) {
-    return true;
-  }
-  if (inputs.empty() || outputs.empty() || hccl_data_type_list_.empty()) {
-    MS_LOG(ERROR) << "AllReduce param is empty";
+  MS_LOG(INFO) << "HcclAllReduce launch";
+  if (inputs.size() != 1 || outputs.size() != 1) {
+    MS_LOG(ERROR) << "AllReduce input output size must be 1";
     return false;
   }
-  const char *tag = "Hccl-AllReduce";
-  HcclResult ret = hcom_all_reduce(tag, inputs[0]->addr, outputs[0]->addr, hccl_count_, hccl_data_type_list_[0],
-                                   op_type_, nullptr, stream_ptr);
-  if (ret != HCCL_SUCCESS) {
-    MS_LOG(ERROR) << "HcomAllReduceKernelOp : hcom_all_reduce fail, return: " << static_cast<int>(ret);
+  MS_EXCEPTION_IF_NULL(inputs[0]);
+  MS_EXCEPTION_IF_NULL(outputs[0]);
+  MS_EXCEPTION_IF_NULL(stream_ptr);
+  auto hccl_result = HcclAllReduce(inputs[0]->addr, outputs[0]->addr, hccl_count_, hccl_data_type_list_[0], op_type_,
+                                   HcclContext::GetInstance().hccl_comm(), stream_ptr);
+  if (hccl_result != HCCL_SUCCESS) {
+    MS_LOG(ERROR) << "HcclAllReduce faled, ret:" << hccl_result;
     return false;
   }
   return true;

@@ -4,13 +4,21 @@ if (WIN32)
  set(flatbuffers_USE_STATIC_LIBS ON)
 endif()
 
+if (ENABLE_GITEE)
+    set(REQ_URL "https://gitee.com/mirrors/flatbuffers/repository/archive/v1.11.0.tar.gz")
+    set(MD5 "4051dc865063ffa724c4264dea8dbbe9")
+else()
+    set(REQ_URL "https://github.com/google/flatbuffers/archive/v1.11.0.tar.gz")
+    set(MD5 "02c64880acb89dbd57eebacfd67200d8")
+endif ()
+
 mindspore_add_pkg(flatbuffers
         VER 1.11.0
         LIBS flatbuffers
         EXE flatc
-        URL https://github.com/google/flatbuffers/archive/v1.11.0.tar.gz
-        MD5 02c64880acb89dbd57eebacfd67200d8
-        CMAKE_OPTION -DFLATBUFFERS_BUILD_TESTS=OFF )
+        URL ${REQ_URL}
+        MD5 ${MD5}
+        CMAKE_OPTION -DFLATBUFFERS_BUILD_TESTS=OFF -DCMAKE_INSTALL_LIBDIR=lib)
 
 include_directories(${flatbuffers_INC})
 add_library(mindspore::flatbuffers ALIAS flatbuffers::flatbuffers)

@@ -16,17 +16,52 @@
 The configuration module provides various functions to set and get the supported
 configuration parameters, and read a configuration file.
 """
+import os
 import random
 import numpy
 import mindspore._c_dataengine as cde
 
 __all__ = ['set_seed', 'get_seed', 'set_prefetch_size', 'get_prefetch_size', 'set_num_parallel_workers',
-           'get_num_parallel_workers', 'set_monitor_sampling_interval', 'get_monitor_sampling_interval', 'load']
+           'get_num_parallel_workers', 'set_monitor_sampling_interval', 'get_monitor_sampling_interval', 'load',
+           'get_callback_timeout', 'set_auto_num_workers', 'get_auto_num_workers']
 
 INT32_MAX = 2147483647
 UINT32_MAX = 4294967295
 
 _config = cde.GlobalContext.config_manager()
+
+
+def _init_device_info():
+    """
+    INTERNAL USE ONLY!
+    As rank_id need to pass into deep layer for numa and device_queue.
+    One process work with only one rank_id, In standalone scenario,
+    rank_id may come from env 'CUDA_VISIBLE_DEVICES', For distribute
+    scenario, rank_id come from _get_global_rank()
+    """
+    from mindspore import context
+    from mindspore.parallel._auto_parallel_context import auto_parallel_context
+    from mindspore.parallel._utils import _get_global_rank
+    if context.get_context("device_target") == "GPU":
+        rank_id = _get_global_rank()
+        parallel_mode = auto_parallel_context().get_parallel_mode()
+        if parallel_mode == "stand_alone":
+            cuda_device_info = os.getenv("CUDA_VISIBLE_DEVICES")
+            if cuda_device_info:
+                cuda_id = int(cuda_device_info.split(",")[0].strip())
+                if cuda_id != rank_id:
+                    rank_id = cuda_id
+        _config.set_rank_id(rank_id)
+    elif context.get_context("device_target") == "Ascend":
+        # Ascend is a special scenario, we'd better get rank info from env
+        env_rank_size = os.getenv("RANK_SIZE", None)
+        env_rank_id = os.getenv("RANK_ID", None)
+        if env_rank_size and env_rank_id:
+            # Ascend only support multi-process scenario
+            rank_size = int(env_rank_size.strip())
+            rank_id = int(env_rank_id.strip())
+            if rank_size > 1:
+                _config.set_rank_id(rank_id)
 
 
 def set_seed(seed):
@@ -46,8 +81,6 @@ def set_seed(seed):
         ValueError: If seed is invalid (< 0 or > MAX_UINT_32).
 
     Examples:
-        >>> import mindspore.dataset as ds
-        >>>
         >>> # Set a new global configuration value for the seed value.
         >>> # Operations with randomness will use the seed value to generate random values.
         >>> ds.config.set_seed(1000)
@@ -81,8 +114,6 @@ def set_prefetch_size(size):
         ValueError: If prefetch_size is invalid (<= 0 or > MAX_INT_32).
 
     Examples:
-        >>> import mindspore.dataset as ds
-        >>>
         >>> # Set a new global configuration value for the prefetch size.
         >>> ds.config.set_prefetch_size(1000)
     """
@@ -112,8 +143,6 @@ def set_num_parallel_workers(num):
         ValueError: If num_parallel_workers is invalid (<= 0 or > MAX_INT_32).
 
     Examples:
-        >>> import mindspore.dataset as ds
-        >>>
         >>> # Set a new global configuration value for the number of parallel workers.
         >>> # Now parallel dataset operators will run with 8 workers.
         >>> ds.config.set_num_parallel_workers(8)
@@ -126,6 +155,7 @@ def set_num_parallel_workers(num):
 def get_num_parallel_workers():
     """
     Get the default number of parallel workers.
+    This is the DEFAULT num_parallel_workers value used for each op, it is not related to AutoNumWorker feature.
 
     Returns:
         Int, number of parallel workers to be used as a default for each operation
@@ -144,8 +174,6 @@ def set_monitor_sampling_interval(interval):
         ValueError: If interval is invalid (<= 0 or > MAX_INT_32).
 
     Examples:
-        >>> import mindspore.dataset as ds
-        >>>
         >>> # Set a new global configuration value for the monitor sampling interval.
         >>> ds.config.set_monitor_sampling_interval(100)
     """
@@ -164,6 +192,66 @@ def get_monitor_sampling_interval():
     return _config.get_monitor_sampling_interval()
 
 
+def set_auto_num_workers(enable):
+    """
+    Set num_parallel_workers for each op automatically. (This feature is turned off by default)
+    If turned on, the num_parallel_workers in each op will be adjusted automatically, possibly overwriting the
+    num_parallel_workers passed in by user or the default value (if user doesn't pass anything) set by
+    ds.config.set_num_parallel_workers().
+    For now, this function is only optimized for Yolo3 dataset with per_batch_map (running map in batch).
+    This feature aims to provide a baseline for optimized num_workers assignment for each op.
+    Op whose num_parallel_workers is adjusted to a new value will be logged.
+
+    Args:
+        enable (bool): Whether to enable auto num_workers feature or not.
+
+    Raises:
+        TypeError: If enable is not of boolean type.
+
+    Examples:
+        >>> # Enable auto_num_worker feature, this might override the num_parallel_workers passed in by user
+        >>> ds.config.set_auto_num_workers(True)
+    """
+    if not isinstance(enable, bool):
+        raise TypeError("enable isn't of type bool.")
+    _config.set_auto_num_workers(enable)
+
+
+def _set_auto_workers_config(option):
+    """
+    INTERNAL USE ONLY!
+    Select the weight profile of auto_num_workers. currently these 7 options are supported.
+    Option #0 leaf_num_workers:batch_num_workers:map_num_workers=1:1:1
+    Option #1 leaf_num_workers:batch_num_workers:map_num_workers=2:1:1
+    Option #2 leaf_num_workers:batch_num_workers:map_num_workers=1:2:1
+    Option #3 leaf_num_workers:batch_num_workers:map_num_workers=1:1:2
+    Option #4 leaf_num_workers:batch_num_workers:map_num_workers=2:2:1
+    Option #5 leaf_num_workers:batch_num_workers:map_num_workers=2:1:2
+    Option #6 leaf_num_workers:batch_num_workers:map_num_workers=1:2:2
+    Args:
+        option (int): The id of the profile to use.
+    Raises:
+        ValueError: If option is not int or not within the range of [0, 6]
+    """
+    if not isinstance(option, int):
+        raise ValueError("option isn't of type int.")
+    if option < 0 or option > 6:
+        raise ValueError("option isn't within the required range of [0, 6].")
+    _config.set_auto_worker_config(option)
+
+
+def get_auto_num_workers():
+    """
+    Get the setting (turned on or off) automatic number of workers.
+
+    Returns:
+        Bool, whether auto num worker feature is turned on
+    Examples:
+        >>> num_workers = ds.config.get_auto_num_workers()
+    """
+    return _config.get_auto_num_workers()
+
+
 def set_callback_timeout(timeout):
     """
     Set the default timeout (in seconds) for DSWaitedCallback.
@@ -176,8 +264,6 @@ def set_callback_timeout(timeout):
         ValueError: If timeout is invalid (<= 0 or > MAX_INT_32).
 
     Examples:
-        >>> import mindspore.dataset as ds
-        >>>
         >>> # Set a new global configuration value for the timeout value.
         >>> ds.config.set_callback_timeout(100)
     """
@@ -218,10 +304,8 @@ def load(file):
         RuntimeError: If file is invalid and parsing fails.
 
     Examples:
-        >>> import mindspore.dataset as ds
-        >>>
         >>> # Set new default configuration values according to values in the configuration file.
-        >>> ds.config.load("path/to/config/file")
+        >>> ds.config.load("/path/to/config_directory/config.cfg")
         >>> # example config file:
         >>> # {
         >>> #     "logFilePath": "/tmp",

@@ -28,6 +28,7 @@ def test_csv_dataset_basic():
     buffer = []
     data = ds.CSVDataset(
         TRAIN_FILE,
+        field_delim=',',
         column_defaults=["0", 0, 0.0, "0"],
         column_names=['1', '2', '3', '4'],
         shuffle=False)
@@ -185,6 +186,26 @@ def test_csv_dataset_number():
     assert np.allclose(buffer, [3.0, 0.3, 4, 55.5])
 
 
+def test_csv_dataset_field_delim_none():
+    """
+    Test CSV with field_delim=None
+    """
+    TRAIN_FILE = '../data/dataset/testCSV/1.csv'
+
+    buffer = []
+    data = ds.CSVDataset(
+        TRAIN_FILE,
+        field_delim=None,
+        column_defaults=["0", 0, 0.0, "0"],
+        column_names=['1', '2', '3', '4'],
+        shuffle=False)
+    data = data.repeat(2)
+    data = data.skip(2)
+    for d in data.create_dict_iterator(num_epochs=1, output_numpy=True):
+        buffer.append(d)
+    assert len(buffer) == 4
+
+
 def test_csv_dataset_size():
     TEST_FILE = '../data/dataset/testCSV/size.csv'
     data = ds.CSVDataset(
@@ -193,19 +214,6 @@ def test_csv_dataset_size():
         column_names=['col1', 'col2', 'col3', 'col4'],
         shuffle=False)
     assert data.get_dataset_size() == 5
-
-
-def test_csv_dataset_exception():
-    TEST_FILE = '../data/dataset/testCSV/exception.csv'
-    data = ds.CSVDataset(
-        TEST_FILE,
-        column_defaults=["", "", "", ""],
-        column_names=['col1', 'col2', 'col3', 'col4'],
-        shuffle=False)
-    with pytest.raises(Exception) as err:
-        for _ in data.create_dict_iterator(num_epochs=1, output_numpy=True):
-            pass
-    assert "failed to parse file" in str(err.value)
 
 
 def test_csv_dataset_type_error():
@@ -221,6 +229,31 @@ def test_csv_dataset_type_error():
     assert "type does not match" in str(err.value)
 
 
+def test_csv_dataset_exception():
+    TEST_FILE = '../data/dataset/testCSV/exception.csv'
+    data = ds.CSVDataset(
+        TEST_FILE,
+        column_defaults=["", "", "", ""],
+        column_names=['col1', 'col2', 'col3', 'col4'],
+        shuffle=False)
+    with pytest.raises(Exception) as err:
+        for _ in data.create_dict_iterator(num_epochs=1, output_numpy=True):
+            pass
+    assert "failed to parse file" in str(err.value)
+
+
+def test_csv_dataset_duplicate_columns():
+    data = ds.CSVDataset(
+        DATA_FILE,
+        column_defaults=["1", "2", "3", "4"],
+        column_names=['col1', 'col2', 'col3', 'col4', 'col1', 'col2', 'col3', 'col4'],
+        shuffle=False)
+    with pytest.raises(RuntimeError) as info:
+        _ = data.create_dict_iterator(num_epochs=1, output_numpy=True)
+    assert "Invalid parameter, duplicate column names are not allowed: col1" in str(info.value)
+    assert "column_names" in str(info.value)
+
+
 if __name__ == "__main__":
     test_csv_dataset_basic()
     test_csv_dataset_one_file()
@@ -233,6 +266,8 @@ if __name__ == "__main__":
     test_csv_dataset_chinese()
     test_csv_dataset_header()
     test_csv_dataset_number()
+    test_csv_dataset_field_delim_none()
     test_csv_dataset_size()
-    test_csv_dataset_exception()
     test_csv_dataset_type_error()
+    test_csv_dataset_exception()
+    test_csv_dataset_duplicate_columns()

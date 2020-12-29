@@ -82,6 +82,8 @@ PYBIND11_MODULE(_c_expression, m) {
          "Get Parameter Tensor Layout Dictionary.")
     .def("get_strategy", &ExecutorPy::GetCNodeStrategy, py::arg("phase") = py::str("train"),
          "Get CNode Strategy Dictionary.")
+    .def("get_num_parallel_ops", &ExecutorPy::GetNumOpsInfo, py::arg("phase") = py::str("train"),
+         "Get the number of parallel operators.")
     .def("get_allreduce_fusion", &ExecutorPy::GetAllreduceFusion, py::arg("phase") = py::str("train"),
          "Get Allreduce Fusion Dictionary.")
     .def("fetch_info_for_quant_export", &ExecutorPy::FetchInfoForQuantExport, py::arg("phase") = py::str("train"),
@@ -89,7 +91,8 @@ PYBIND11_MODULE(_c_expression, m) {
     .def("build_data_graph", &ExecutorPy::BuildGraph, py::arg("build_params"), py::arg("phase") = py::str("train"),
          py::arg("broadcast_params") = py::dict(), "Build data graph.")
     .def("has_compiled", &ExecutorPy::HasCompiled, py::arg("phase") = py::str(""), "get if cell compiled.")
-    .def("run_init_graph", &ExecutorPy::RunInitGraph, "Run init Graph.");
+    .def("run_init_graph", &ExecutorPy::RunInitGraph, "Run init Graph.")
+    .def("set_py_exe_path", &ExecutorPy::PyExePath, py::arg("phase") = py::str(""), "set python executable path.");
 
   (void)py::class_<EnvInstance, std::shared_ptr<EnvInstance>>(m, "EnvInstance_").def(py::init());
 
@@ -103,7 +106,7 @@ PYBIND11_MODULE(_c_expression, m) {
               py::arg("batch_size"), py::arg("types"), py::arg("shapes"), py::arg("input_indexs"),
               py::arg("phase") = py::str("dataset"), py::arg("need_run") = py::bool_(true), "Init and exec dataset.");
   (void)m.def("_set_dataset_mode_config", &mindspore::ConfigManager::SetDatasetModeConfig, "API for set dataset mode.");
-  (void)m.def("init_backend", &mindspore::pipeline::InitBackend, "Init Backend.");
+  (void)m.def("init_pipeline", &mindspore::pipeline::InitPipeline, "Init Pipeline.");
 
   (void)m.def("export_graph", &mindspore::pipeline::ExportGraph, "Export Graph.");
 
@@ -246,6 +249,18 @@ PYBIND11_MODULE(_c_expression, m) {
          "Set the parameter elementwise_op_strategy_follow in the DP algorithm.")
     .def("get_elementwise_op_strategy_follow", &CostModelContext::elementwise_stra_follow,
          "Get the parameter elementwise_op_strategy_follow in the DP algorithm.")
+    .def("set_dp_algo_enable_approxi", &CostModelContext::set_dp_algo_enable_approxi,
+         "Set the flag whether enabling approximation in the DP algorithm.")
+    .def("get_dp_algo_enable_approxi", &CostModelContext::dp_algo_enable_approxi,
+         "Get the flag whether enabling approximation in the DP algorithm.")
+    .def("set_dp_algo_approxi_epsilon", &CostModelContext::set_dp_algo_approxi_epsilon,
+         "Set the epsilon which is used in the approximation of DP algorithm.")
+    .def("get_dp_algo_approxi_epsilon", &CostModelContext::dp_algo_approxi_epsilon,
+         "Get the epsilon which is used in the approximation of DP algorithm.")
+    .def("set_dp_algo_single_loop", &CostModelContext::set_dp_algo_single_loop,
+         "Set the flag of generating a single suite of OperatorInfos in for-loop.")
+    .def("get_dp_algo_single_loop", &CostModelContext::dp_algo_single_loop,
+         "Get the flag of whether or not generating a single suite of OperatorInfos in for-loop.")
     .def("reset_cost_model", &CostModelContext::ResetCostModel, "Reset the CostModelContext.")
     .def("reset_algo_parameters", &CostModelContext::ResetAlgoParameters, "Reset the AlgoParameters.");
 
@@ -294,7 +309,14 @@ PYBIND11_MODULE(_c_expression, m) {
     .def("is_role_worker", &PSContext::is_role_worker, "Get whether the role of this process is Worker.")
     .def("is_role_pserver", &PSContext::is_role_pserver, "Get whether the role of this process is PServer.")
     .def("is_role_sched", &PSContext::is_role_sched, "Get whether the role of this process is Scheduler.")
-    .def("ps_rank_id", &PSContext::ps_rank_id, "Get Worker and PServer rank id.");
+    .def("ps_rank_id", &PSContext::ps_rank_id, "Get Worker and PServer rank id.")
+    .def("insert_hash_table_size", &PSContext::InsertHashTableSize, "Insert hash table size.")
+    .def("reinsert_hash_table_size", &PSContext::ReInsertHashTableSize,
+         "Insert hash table size with new parameter name.")
+    .def("insert_weight_init_info", &PSContext::InsertWeightInitInfo, "Insert embedding table initialization seed.")
+    .def("insert_accumu_init_info", &PSContext::InsertAccumuInitInfo, "Insert accumulation initialization value.")
+    .def("clone_hash_table", &PSContext::CloneHashTable, "Clone a hash table.")
+    .def("set_cache_enable", &PSContext::set_cache_enable, "Set ps mode cache enable or not.");
 
   (void)py::class_<OpInfoLoaderPy, std::shared_ptr<OpInfoLoaderPy>>(m, "OpInfoLoaderPy")
     .def(py::init())

@@ -64,9 +64,7 @@ class ParallelBuildManager {
   static int StartCompileOp(const nlohmann::json &kernel_json);
   static bool WaitOne(int *task_id, std::string *task_result, std::string *build_result);
   void ResetTaskInfo();
-
- private:
-  std::string ProcessBuildRetStr(const std::string &build_result);
+  AnfNodePtr GetAnfNodeByTaskID(int32_t task_id);
 
  private:
   std::map<int32_t, AnfNodePtr> pre_task_map_;

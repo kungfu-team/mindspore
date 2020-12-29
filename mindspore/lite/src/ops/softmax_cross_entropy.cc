@@ -16,14 +16,13 @@
 
 #include "src/ops/softmax_cross_entropy.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
-std::vector<int> SoftmaxCrossEntropy::GetAxis() const { return this->primitive_->value.AsSoftmaxCrossEntropy()->axis; }
-
-void SoftmaxCrossEntropy::SetAxis(const std::vector<int> &axis) {
-  this->primitive_->value.AsSoftmaxCrossEntropy()->axis = axis;
-}
 int SoftmaxCrossEntropy::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
   if (this->primitive_ == nullptr) {
     this->primitive_ = new (std::nothrow) schema::PrimitiveT;
@@ -44,7 +43,6 @@ int SoftmaxCrossEntropy::UnPackAttr(const Primitive &prim, const std::vector<Anf
       return RET_ERROR;
     }
 
-    attr->axis = {0};
     this->primitive_->value.value = attr;
     if (this->primitive_->value.value == nullptr) {
       MS_LOG(ERROR) << "primitive value is nullptr";
@@ -55,10 +53,6 @@ int SoftmaxCrossEntropy::UnPackAttr(const Primitive &prim, const std::vector<Anf
 }
 #else
 
-std::vector<int> SoftmaxCrossEntropy::GetAxis() const {
-  auto fb_vector = this->primitive_->value_as_SoftmaxCrossEntropy()->axis();
-  return std::vector<int>(fb_vector->begin(), fb_vector->end());
-}
 int SoftmaxCrossEntropy::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) {
   MS_ASSERT(nullptr != primitive);
   MS_ASSERT(nullptr != fbb);
@@ -67,17 +61,17 @@ int SoftmaxCrossEntropy::UnPackToFlatBuilder(const schema::Primitive *primitive,
     MS_LOG(ERROR) << "value_as_SoftmaxCrossEntropy return nullptr";
     return RET_ERROR;
   }
-  std::vector<int32_t> axis;
-  if (attr->axis() != nullptr) {
-    for (int i = 0; i < static_cast<int>(attr->axis()->size()); i++) {
-      axis.push_back(attr->axis()->data()[i]);
-    }
-  }
-  auto val_offset = schema::CreateSoftmaxCrossEntropyDirect(*fbb, &axis);
+
+  auto val_offset = schema::CreateSoftmaxCrossEntropy(*fbb);
   auto prim_offset = schema::CreatePrimitive(*fbb, schema::PrimitiveType_SoftmaxCrossEntropy, val_offset.o);
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *SoftmaxCrossEntropyCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<SoftmaxCrossEntropy>(primitive);
+}
+Registry SoftmaxCrossEntropyRegistry(schema::PrimitiveType_SoftmaxCrossEntropy, SoftmaxCrossEntropyCreator);
 #endif
 
 int SoftmaxCrossEntropy::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outputs) {
@@ -91,17 +85,18 @@ int SoftmaxCrossEntropy::InferShape(std::vector<Tensor *> inputs, std::vector<Te
   MS_ASSERT(out != nullptr);
 
   std::vector<int> outshape;
+  outshape.push_back(in0->shape()[0]);
   outshape.push_back(1);
   out->set_shape(outshape);
   out->set_data_type(in0->data_type());
-  out->SetFormat(in0->GetFormat());
+  out->set_format(in0->format());
 
   if (1 < outputs.size()) {
     auto *grads = outputs.at(1);
     MS_ASSERT(grads != nullptr);
     grads->set_shape(in0->shape());
     grads->set_data_type(in0->data_type());
-    grads->SetFormat(in0->GetFormat());
+    grads->set_format(in0->format());
   }
   return RET_OK;
 }

@@ -17,11 +17,11 @@
 from mindspore.ops.op_selector import new_ops_selector
 
 op_selector = new_ops_selector(
-    "mindspore.ops.operations", "mindspore.nn.graph_kernels")
+    "mindspore.ops.operations", "mindspore.nn._graph_kernels")
 opt_selector = new_ops_selector(
-    "mindspore.nn.optim", "mindspore.nn.graph_kernels")
+    "mindspore.nn.optim", "mindspore.nn._graph_kernels")
 nn_selector = new_ops_selector(
-    "mindspore.nn", "mindspore.nn.graph_kernels")
+    "mindspore.nn", "mindspore.nn._graph_kernels")
 
 
 @nn_selector
@@ -80,6 +80,12 @@ class Tanh:
 
 @op_selector
 class Gelu:
+    def __call__(self, *args):
+        pass
+
+
+@op_selector
+class FastGelu:
     def __call__(self, *args):
         pass
 

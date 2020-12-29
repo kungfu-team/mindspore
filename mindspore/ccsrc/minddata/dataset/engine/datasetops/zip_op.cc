@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 #include "minddata/dataset/engine/datasetops/zip_op.h"
+#include <algorithm>
 #include <utility>
 #include <iomanip>
 #include "minddata/dataset/core/constants.h"
@@ -22,7 +23,7 @@
 #include "minddata/dataset/engine/opt/pass.h"
 #include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/core/global_context.h"
-#include "utils/log_adapter.h"
+#include "minddata/dataset/util/log_adapter.h"
 
 namespace mindspore {
 namespace dataset {

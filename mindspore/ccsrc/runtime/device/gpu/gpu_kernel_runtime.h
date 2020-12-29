@@ -18,12 +18,14 @@
 #define MINDSPORE_CCSRC_RUNTIME_DEVICE_GPU_GPU_KERNEL_RUNTIME_H_
 
 #include <string>
+#include <map>
 #include <memory>
 #include <vector>
 #include <set>
 #include <utility>
 #include <unordered_map>
 #include <unordered_set>
+#include "backend/session/anf_runtime_algorithm.h"
 #include "runtime/device/kernel_runtime.h"
 #include "runtime/device/kernel_runtime_manager.h"
 #include "backend/optimizer/mem_reuse/mem_swap_manager.h"
@@ -42,7 +44,7 @@ class GPUKernelRuntime : public KernelRuntime {
                                  const std::unordered_set<ValueNodePtr> &value_nodes,
                                  const std::vector<CNodePtr> &execution_order) override;
   void AssignMemory(session::KernelGraph *graph) override;
-  bool Run(session::KernelGraph *graph, bool is_task_sink, Debugger *debugger = nullptr) override;
+  bool Run(session::KernelGraph *graph, bool is_task_sink) override;
   bool GenDynamicKernel(const session::KernelGraph *graph) override { return true; }
   bool RunDynamicKernelAsync(const session::KernelGraph *graph) override { return true; }
 
@@ -67,11 +69,11 @@ class GPUKernelRuntime : public KernelRuntime {
   void ClearKernelOutputAddress(const session::KernelGraph *graph);
   void ClearKernelWorkspaceAddress(const session::KernelGraph *graph);
   void ClearKernelOldOutputAndWorkspace(const session::KernelGraph *graph);
-  bool RunOneStep(const session::KernelGraph *graph, Debugger *debugger = nullptr);
-  bool SearchMemSwapScheme(const session::KernelGraph *graph, Debugger *debugger = nullptr);
-  bool RefineMemSwapScheme(const session::KernelGraph *graph, Debugger *debugger = nullptr);
-  bool LaunchKernelDynamic(const session::KernelGraph *graph, Debugger *debugger = nullptr, bool mock = false,
-                           bool profiling = false);
+  bool RunOneStep(const session::KernelGraph *graph);
+  bool SearchMemSwapScheme(const session::KernelGraph *graph);
+  bool RefineMemSwapScheme(const session::KernelGraph *graph);
+  bool LaunchKernelDynamic(const session::KernelGraph *graph, bool mock = false, bool profiling = false);
+  bool RunOpLaunchKernelDynamic(const session::KernelGraph *graph);
   void LaunchKernelWithTimeProfiling(const AnfNodePtr &kernel, const AddressPtrList &inputs,
                                      const AddressPtrList &workspace, const AddressPtrList &outputs);
   bool AttemptMallocMem(const DeviceAddressPtr &device_address, size_t size, bool mock);
@@ -97,13 +99,29 @@ class GPUKernelRuntime : public KernelRuntime {
   void UpdateHostSwapOutQueue(bool mock);
   void ClearSwapInfo(bool mock);
   void AllocInplaceNodeMemory(const session::KernelGraph *graph);
+  bool IsDistributedTraining(const session::KernelGraph *graph);
+
+  DeviceAddressPtr GetPrevNodeMutableOutputAddr(const AnfNodePtr &node, size_t i, bool visit_nop_node);
+  DeviceAddressPtr GetMutableOutputAddr(const AnfNodePtr &node, size_t i, bool visit_nop_node);
+  session::KernelWithIndex GetPrevNodeOutput(const AnfNodePtr &node, size_t i);
+
   std::unordered_map<uint32_t, MemReuseUtilPtr> mem_reuse_util_map_;
   std::unordered_map<uint32_t, MemSwapManagerPtr> mem_swap_map_;
   std::unordered_map<uint32_t, bool> is_first_step_map_;
   std::unordered_map<uint32_t, std::set<AnfNodePtr>> graph_output_map_;
+  std::unordered_map<uint32_t, bool> is_alloc_communication_res_;
+  std::unordered_map<uint32_t, bool> is_alloc_inplace_res_;
 
   MemReuseUtilPtr mem_reuse_util_{nullptr};
   MemSwapManagerPtr mem_swap_manager_{nullptr};
+
+  bool enable_relation_cache_{false};
+
+  std::unordered_map<AnfNodePtr, std::vector<DeviceAddressPtr>> prev_node_mut_output_addr_cache_;
+  std::unordered_map<AnfNodePtr, std::vector<DeviceAddressPtr>> prev_node_mut_output_addr_skip_nop_node_cache_;
+  std::unordered_map<AnfNodePtr, std::vector<DeviceAddressPtr>> mut_output_addr_cache_;
+  std::unordered_map<AnfNodePtr, std::vector<DeviceAddressPtr>> mut_output_addr_skip_nop_node_cache_;
+  std::unordered_map<AnfNodePtr, std::vector<session::KernelWithIndex>> prev_node_output_cache_;
 };
 MS_REG_KERNEL_RUNTIME(kGPUDevice, GPUKernelRuntime);
 }  // namespace gpu

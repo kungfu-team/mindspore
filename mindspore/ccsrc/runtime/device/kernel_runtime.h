@@ -51,14 +51,13 @@ class KernelRuntime {
   virtual ~KernelRuntime();
   virtual bool Init() = 0;
   virtual void AssignMemory(session::KernelGraph *graph);
-  void RunOpAssignMemory(const ValuePtr &pre_output_value, const std::vector<tensor::TensorPtr> &input_tensors,
-                         session::KernelGraph *graph);
+  void RunOpAssignMemory(const std::vector<tensor::TensorPtr> &input_tensors, session::KernelGraph *graph);
   void RunOpClearMemory(const session::KernelGraph *graph);
   static bool DumpDataEnabled();
   static bool DumpDataEnabledIteration();
-  virtual bool LoadData(session::KernelGraph *graph, Debugger *debugger);
+  virtual bool LoadData(session::KernelGraph *graph);
   virtual bool Load(session::KernelGraph *graph, bool is_task_sink);
-  virtual bool Run(session::KernelGraph *graph, bool is_task_sink, Debugger *debugger = nullptr) = 0;
+  virtual bool Run(session::KernelGraph *graph, bool is_task_sink) = 0;
   virtual bool GenDynamicKernel(const session::KernelGraph *graph) = 0;
   virtual bool RunDynamicKernelAsync(const session::KernelGraph *graph) = 0;
   bool LaunchKernel(const session::KernelGraph *graph);
@@ -67,6 +66,8 @@ class KernelRuntime {
                                      const AddressPtrList &kernel_workspaces) const;
   virtual void AssignStaticMemoryInput(const session::KernelGraph *graph);
   virtual void AssignStaticMemoryValueNode(session::KernelGraph *graph);
+  virtual void SyncValueNodeDeviceAddr(session::KernelGraph *graph);
+  virtual void CleanValueNodeDeviceAddr(session::KernelGraph *graph);
   virtual void ClearGraphRuntimeResource(uint32_t graph_id, const std::vector<AnfNodePtr> &inputs,
                                          const std::unordered_set<ValueNodePtr> &value_nodes,
                                          const std::vector<CNodePtr> &execution_order);
@@ -75,7 +76,9 @@ class KernelRuntime {
                                   const std::vector<CNodePtr> &execution_order);
   virtual bool SyncStream() = 0;
   virtual void ClearGlobalIdleMem() {}
+  virtual void CreateContext() {}
   virtual void SetContext() {}
+  virtual void *context() const { return nullptr; }
   uint8_t *MallocMem(MemType type, size_t size, const DeviceAddressPtr &address) {
     return mem_manager_->MallocMem(type, size, address);
   }
@@ -86,7 +89,17 @@ class KernelRuntime {
   // for GPU and D to impl
   virtual void ReleaseDeviceRes() {}
   void set_device_id(uint32_t device_id) { device_id_ = device_id; }
+  uint32_t device_id() { return device_id_; }
   DeviceAddressPtr AssignSingleOpLaunchMemory(size_t size, const std::string &format, TypeId type);
+
+  // set debugger
+  void SetDebugger() {
+#if !defined(_WIN32) && !defined(_WIN64)
+    debugger_ = Debugger::GetInstance();
+#endif
+  }
+
+  virtual void PreInit() {}
 
  protected:
   virtual DeviceAddressPtr CreateDeviceAddress(void *device_ptr, size_t device_size, const string &format,
@@ -107,6 +120,8 @@ class KernelRuntime {
   void AssignCommunicationNodeInputMem(MemType type, const AnfNodePtr &node);
   void AssignCommunicationNodeMem(MemType type, const AnfNodePtr &node);
 
+  virtual void KernelLaunchProfiling(const std::string &kernel_name) {}
+
  private:
   void AssignStaticMemoryOutput(const session::KernelGraph *graph);
   bool LaunchKernelMod(const session::KernelGraph &graph);
@@ -118,11 +133,16 @@ class KernelRuntime {
   void RunOpAssignOutputNodeMemory(const ValuePtr &pre_output_value, session::KernelGraph *graph);
   void AssignValueNodeTensor(const ValueNodePtr &value_node, const ValuePtr &node_value, size_t output_idx);
   DeviceAddressPtr PreAssignCNodeMemory(const AnfNodePtr &anf_node, size_t index);
+#if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))
+  void GetFirstPSEmbeddingCache(const session::KernelGraph *graph, AnfNodePtr *first_cache_input_index,
+                                size_t *first_cache_size);
+  void CheckIfSupportPSEmbeddingCache(const session::KernelGraph *graph);
+#endif
 
  protected:
   uint32_t device_id_{0};
-#ifdef ENABLE_DEBUGGER
-  Debugger *debugger_;
+#if !defined(_WIN32) && !defined(_WIN64)
+  std::shared_ptr<Debugger> debugger_;
 #endif
   void *stream_ = nullptr;
   std::shared_ptr<MemoryManager> mem_manager_{nullptr};

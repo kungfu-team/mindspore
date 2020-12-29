@@ -23,33 +23,34 @@ to improve their training models.
     class attributes (self.xxx) to support save() and load().
 
 Examples:
-    >>> import mindspore.dataset as ds
-    >>> import mindspore.dataset.transforms.c_transforms as c_transforms
-    >>> import mindspore.dataset.vision.c_transforms as c_vision
     >>> from mindspore.dataset.vision import Border, Inter
-    >>>
-    >>> dataset_dir = "path/to/imagefolder_directory"
+    >>> image_folder_dataset_dir = "/path/to/image_folder_dataset_directory"
     >>> # create a dataset that reads all files in dataset_dir with 8 threads
-    >>> data1 = ds.ImageFolderDataset(dataset_dir, num_parallel_workers=8)
+    >>> image_folder_dataset = ds.ImageFolderDataset(image_folder_dataset_dir,
+    ...                                              num_parallel_workers=8)
     >>> # create a list of transformations to be applied to the image data
     >>> transforms_list = [c_vision.Decode(),
-    >>>                    c_vision.Resize((256, 256), interpolation=Inter.LINEAR),
-    >>>                    c_vision.RandomCrop(200, padding_mode=Border.EDGE),
-    >>>                    c_vision.RandomRotation((0, 15)),
-    >>>                    c_vision.Normalize((100, 115.0, 121.0), (71.0, 68.0, 70.0)),
-    >>>                    c_vision.HWC2CHW()]
+    ...                    c_vision.Resize((256, 256), interpolation=Inter.LINEAR),
+    ...                    c_vision.RandomCrop(200, padding_mode=Border.EDGE),
+    ...                    c_vision.RandomRotation((0, 15)),
+    ...                    c_vision.Normalize((100, 115.0, 121.0), (71.0, 68.0, 70.0)),
+    ...                    c_vision.HWC2CHW()]
     >>> onehot_op = c_transforms.OneHot(num_classes=10)
     >>> # apply the transformation to the dataset through data1.map()
-    >>> data1 = data1.map(operations=transforms_list, input_columns="image")
-    >>> data1 = data1.map(operations=onehot_op, input_columns="label")
+    >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+    ...                                                 input_columns="image")
+    >>> image_folder_dataset = image_folder_dataset.map(operations=onehot_op,
+    ...                                                 input_columns="label")
 """
 import numbers
+import numpy as np
+from PIL import Image
 import mindspore._c_dataengine as cde
 
 from .utils import Inter, Border, ImageBatchFormat
 from .validators import check_prob, check_crop, check_resize_interpolation, check_random_resize_crop, \
-    check_mix_up_batch_c, check_normalize_c, check_random_crop, check_random_color_adjust, check_random_rotation, \
-    check_range, check_resize, check_rescale, check_pad, check_cutout, \
+    check_mix_up_batch_c, check_normalize_c, check_normalizepad_c, check_random_crop, check_random_color_adjust, \
+    check_random_rotation, check_range, check_resize, check_rescale, check_pad, check_cutout, \
     check_uniform_augment_cpp, \
     check_bounding_box_augment_cpp, check_random_select_subpolicy_op, check_auto_contrast, check_random_affine, \
     check_random_solarize, check_soft_dvpp_decode_random_crop_resize_jpeg, check_positive_degrees, FLOAT_MAX_INTEGER, \
@@ -89,10 +90,9 @@ class AutoContrast(cde.AutoContrastOp):
         ignore (Union[int, sequence], optional): Pixel values to ignore (default=None).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> transforms_list = [c_vision.Decode(), c_vision.AutoContrast(cutoff=10.0, ignore=[10, 20])]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_auto_contrast
@@ -119,10 +119,9 @@ class RandomSharpness(cde.RandomSharpnessOp):
         ValueError: If degrees is in (max, min) format instead of (min, max).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> transforms_list = [c_vision.Decode(), c_vision.RandomSharpness(degrees=(0.2, 1.9))]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_positive_degrees
@@ -136,10 +135,9 @@ class Equalize(cde.EqualizeOp):
     Apply histogram equalization on input image.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> transforms_list = [c_vision.Decode(), c_vision.Equalize()]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
 
@@ -148,10 +146,9 @@ class Invert(cde.InvertOp):
     Apply invert on input image in RGB mode.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> transforms_list = [c_vision.Decode(), c_vision.Invert()]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
 
@@ -161,17 +158,33 @@ class Decode(cde.DecodeOp):
 
     Args:
         rgb (bool, optional): Mode of decoding input image (default=True).
+            If True means format of decoded image is RGB else BGR(deprecated).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> transforms_list = [c_vision.Decode(), c_vision.RandomHorizontalFlip()]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     def __init__(self, rgb=True):
         self.rgb = rgb
         super().__init__(self.rgb)
+
+    def __call__(self, img):
+        """
+        Call method.
+
+        Args:
+            img (NumPy): Image to be decoded.
+
+        Returns:
+            img (NumPy), Decoded image.
+        """
+        if not isinstance(img, np.ndarray) or img.ndim != 1 or img.dtype.type is np.str_:
+            raise TypeError("Input should be an encoded image with 1-D NumPy type, got {}.".format(type(img)))
+        decode = cde.Execute(cde.DecodeOp(self.rgb))
+        img = decode(cde.Tensor(np.asarray(img)))
+        return img.as_array()
 
 
 class CutMixBatch(cde.CutMixBatchOp):
@@ -186,15 +199,14 @@ class CutMixBatch(cde.CutMixBatchOp):
         prob (float, optional): The probability by which CutMix is applied to each image (default = 1.0).
 
     Examples:
-        >>> import mindspore.dataset.transforms.c_transforms as c_transforms
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>> from mindspore.dataset.transforms.vision import ImageBatchFormat
-        >>>
+        >>> from mindspore.dataset.vision import ImageBatchFormat
         >>> onehot_op = c_transforms.OneHot(num_classes=10)
-        >>> data1 = data1.map(operations=onehot_op, input_columns=["label"])
+        >>> image_folder_dataset= image_folder_dataset.map(operations=onehot_op,
+        ...                                                input_columns=["label"])
         >>> cutmix_batch_op = c_vision.CutMixBatch(ImageBatchFormat.NHWC, 1.0, 0.5)
-        >>> data1 = data1.batch(5)
-        >>> data1 = data1.map(operations=cutmix_batch_op, input_columns=["image", "label"])
+        >>> image_folder_dataset = image_folder_dataset.batch(5)
+        >>> image_folder_dataset = image_folder_dataset.map(operations=cutmix_batch_op,
+        ...                                                 input_columns=["image", "label"])
     """
 
     @check_cut_mix_batch_c
@@ -214,10 +226,9 @@ class CutOut(cde.CutOutOp):
         num_patches (int, optional): Number of patches to be cut out of an image (default=1).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> transforms_list = [c_vision.Decode(), c_vision.CutOut(80, num_patches=10)]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_cutout
@@ -239,14 +250,13 @@ class MixUpBatch(cde.MixUpBatchOp):
         alpha (float, optional): Hyperparameter of beta distribution (default = 1.0).
 
     Examples:
-        >>> import mindspore.dataset.transforms.c_transforms as c_transforms
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> onehot_op = c_transforms.OneHot(num_classes=10)
-        >>> data1 = data1.map(operations=onehot_op, input_columns=["label"])
+        >>> image_folder_dataset= image_folder_dataset.map(operations=onehot_op,
+        ...                                                input_columns=["label"])
         >>> mixup_batch_op = c_vision.MixUpBatch(alpha=0.9)
-        >>> data1 = data1.batch(5)
-        >>> data1 = data1.map(operations=mixup_batch_op, input_columns=["image", "label"])
+        >>> image_folder_dataset = image_folder_dataset.batch(5)
+        >>> image_folder_dataset = image_folder_dataset.map(operations=mixup_batch_op,
+        ...                                                 input_columns=["image", "label"])
     """
 
     @check_mix_up_batch_c
@@ -261,24 +271,88 @@ class Normalize(cde.NormalizeOp):
 
     Args:
         mean (sequence): List or tuple of mean values for each channel, with respect to channel order.
-            The mean values must be in range (0.0, 255.0].
+            The mean values must be in range [0.0, 255.0].
         std (sequence): List or tuple of standard deviations for each channel, with respect to channel order.
             The standard deviation values must be in range (0.0, 255.0].
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> decode_op = c_vision.Decode()
         >>> normalize_op = c_vision.Normalize(mean=[121.0, 115.0, 100.0], std=[70.0, 68.0, 71.0])
         >>> transforms_list = [decode_op, normalize_op]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_normalize_c
     def __init__(self, mean, std):
+        if len(mean) == 1:
+            mean = [mean[0]] * 3
+        if len(std) == 1:
+            std = [std[0]] * 3
         self.mean = mean
         self.std = std
         super().__init__(*mean, *std)
+
+    def __call__(self, img):
+        """
+        Call method.
+
+        Args:
+            img (NumPy or PIL image): Image array to be normalized.
+
+        Returns:
+            img (NumPy), Normalized Image array.
+        """
+        if not isinstance(img, (np.ndarray, Image.Image)):
+            raise TypeError("Input should be NumPy or PIL image, got {}.".format(type(img)))
+        normalize = cde.Execute(cde.NormalizeOp(*self.mean, *self.std))
+        img = normalize(cde.Tensor(np.asarray(img)))
+        return img.as_array()
+
+
+class NormalizePad(cde.NormalizePadOp):
+    """
+    Normalize the input image with respect to mean and standard deviation then pad an extra channel with value zero.
+
+    Args:
+        mean (sequence): List or tuple of mean values for each channel, with respect to channel order.
+            The mean values must be in range (0.0, 255.0].
+        std (sequence): List or tuple of standard deviations for each channel, with respect to channel order.
+            The standard deviation values must be in range (0.0, 255.0].
+        dtype (str): Set the output data type of normalized image (default is "float32").
+
+    Examples:
+        >>> decode_op = c_vision.Decode()
+        >>> normalize_pad_op = c_vision.NormalizePad(mean=[121.0, 115.0, 100.0],
+        ...                                          std=[70.0, 68.0, 71.0],
+        ...                                          dtype="float32")
+        >>> transforms_list = [decode_op, normalize_pad_op]
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
+    """
+
+    @check_normalizepad_c
+    def __init__(self, mean, std, dtype="float32"):
+        self.mean = mean
+        self.std = std
+        self.dtype = dtype
+        super().__init__(*mean, *std, dtype)
+
+    def __call__(self, img):
+        """
+        Call method.
+
+        Args:
+            img (NumPy or PIL image): Image array to be normalizepad.
+
+        Returns:
+            img (NumPy), NormalizePaded Image array.
+        """
+        if not isinstance(img, (np.ndarray, Image.Image)):
+            raise TypeError("Input should be NumPy or PIL image, got {}.".format(type(img)))
+        normalize_pad = cde.Execute(cde.NormalizePadOp(*self.mean, *self.std, self.dtype))
+        img = normalize_pad(cde.Tensor(np.asarray(img)))
+        return img.as_array()
 
 
 class RandomAffine(cde.RandomAffineOp):
@@ -334,14 +408,15 @@ class RandomAffine(cde.RandomAffineOp):
         TypeError: If fill_value is not a single integer or a 3-tuple.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>> from mindspore.dataset.transforms.vision import Inter
-        >>>
+        >>> from mindspore.dataset.vision import Inter
         >>> decode_op = c_vision.Decode()
-        >>> random_affine_op = c_vision.RandomAffine(degrees=15, translate=(-0.1, 0.1, 0, 0), scale=(0.9, 1.1),
-        >>>     resample=Inter.NEAREST)
+        >>> random_affine_op = c_vision.RandomAffine(degrees=15,
+        ...                                          translate=(-0.1, 0.1, 0, 0),
+        ...                                          scale=(0.9, 1.1),
+        ...                                          resample=Inter.NEAREST)
         >>> transforms_list = [decode_op, random_affine_op]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_random_affine
@@ -419,12 +494,12 @@ class RandomCrop(cde.RandomCropOp):
               value of edge.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
+        >>> from mindspore.dataset.vision import Border
         >>> decode_op = c_vision.Decode()
         >>> random_crop_op = c_vision.RandomCrop(512, [200, 200, 200, 200], padding_mode=Border.EDGE)
         >>> transforms_list = [decode_op, random_crop_op]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_random_crop
@@ -481,12 +556,11 @@ class RandomCropWithBBox(cde.RandomCropWithBBoxOp):
               value of edge.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> decode_op = c_vision.Decode()
         >>> random_crop_with_bbox_op = c_vision.RandomCrop([512, 512], [200, 200, 200, 200])
         >>> transforms_list = [decode_op, random_crop_with_bbox_op]
-        >>> data3 = data3.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_random_crop
@@ -519,10 +593,9 @@ class RandomHorizontalFlip(cde.RandomHorizontalFlipOp):
         prob (float, optional): Probability of the image being flipped (default=0.5).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> transforms_list = [c_vision.Decode(), c_vision.RandomHorizontalFlip(0.75)]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_prob
@@ -539,10 +612,9 @@ class RandomHorizontalFlipWithBBox(cde.RandomHorizontalFlipWithBBoxOp):
         prob (float, optional): Probability of the image being flipped (default=0.5).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> transforms_list = [c_vision.Decode(), c_vision.RandomHorizontalFlipWithBBox(0.70)]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_prob
@@ -560,13 +632,12 @@ class RandomPosterize(cde.RandomPosterizeOp):
             Bits values must be in range of [1,8], and include at
             least one integer value in the given range. It must be in
             (min, max) or integer format. If min=max, then it is a single fixed
-            magnitude operation (default=[4, 8]).
+            magnitude operation (default=(8, 8)).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> transforms_list = [c_vision.Decode(), c_vision.RandomPosterize((6, 8))]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_posterize
@@ -585,10 +656,9 @@ class RandomVerticalFlip(cde.RandomVerticalFlipOp):
         prob (float, optional): Probability of the image being flipped (default=0.5).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> transforms_list = [c_vision.Decode(), c_vision.RandomVerticalFlip(0.25)]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_prob
@@ -605,10 +675,9 @@ class RandomVerticalFlipWithBBox(cde.RandomVerticalFlipWithBBoxOp):
         prob (float, optional): Probability of the image being flipped (default=0.5).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> transforms_list = [c_vision.Decode(), c_vision.RandomVerticalFlipWithBBox(0.20)]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_prob
@@ -628,15 +697,13 @@ class BoundingBoxAugment(cde.BoundingBoxAugmentOp):
             Range: [0, 1] (default=0.3).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> # set bounding box operation with ratio of 1 to apply rotation on all bounding boxes
         >>> bbox_aug_op = c_vision.BoundingBoxAugment(c_vision.RandomRotation(90), 1)
         >>> # map to apply ops
-        >>> data3 = data3.map(operations=[bbox_aug_op],
-        >>>                   input_columns=["image", "bbox"],
-        >>>                   output_columns=["image", "bbox"],
-        >>>                   column_order=["image", "bbox"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=[bbox_aug_op],
+        ...                                                 input_columns=["image", "bbox"],
+        ...                                                 output_columns=["image", "bbox"],
+        ...                                                 column_order=["image", "bbox"])
     """
 
     @check_bounding_box_augment_cpp
@@ -665,23 +732,38 @@ class Resize(cde.ResizeOp):
             - Inter.BICUBIC, means interpolation method is bicubic interpolation.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>> from mindspore.dataset.transforms.vision import Inter
-        >>>
+        >>> from mindspore.dataset.vision import Inter
         >>> decode_op = c_vision.Decode()
         >>> resize_op = c_vision.Resize([100, 75], Inter.BICUBIC)
         >>> transforms_list = [decode_op, resize_op]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_resize_interpolation
     def __init__(self, size, interpolation=Inter.LINEAR):
+        if isinstance(size, int):
+            size = (size, 0)
         self.size = size
         self.interpolation = interpolation
         interpoltn = DE_C_INTER_MODE[interpolation]
-        if isinstance(size, int):
-            size = (size, 0)
         super().__init__(*size, interpoltn)
+
+    def __call__(self, img):
+        """
+        Call method.
+
+        Args:
+            img (NumPy or PIL image): Image to be resized.
+
+        Returns:
+            img (NumPy), Resized image.
+        """
+        if not isinstance(img, (np.ndarray, Image.Image)):
+            raise TypeError("Input should be NumPy or PIL image, got {}.".format(type(img)))
+        resize = cde.Execute(cde.ResizeOp(*self.size, DE_C_INTER_MODE[self.interpolation]))
+        img = resize(cde.Tensor(np.asarray(img)))
+        return img.as_array()
 
 
 class ResizeWithBBox(cde.ResizeWithBBoxOp):
@@ -703,13 +785,12 @@ class ResizeWithBBox(cde.ResizeWithBBoxOp):
             - Inter.BICUBIC, means interpolation method is bicubic interpolation.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>> from mindspore.dataset.transforms.vision import Inter
-        >>>
+        >>> from mindspore.dataset.vision import Inter
         >>> decode_op = c_vision.Decode()
         >>> bbox_op = c_vision.ResizeWithBBox(50, Inter.NEAREST)
         >>> transforms_list = [decode_op, bbox_op]
-        >>> data3 = data3.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_resize_interpolation
@@ -747,13 +828,12 @@ class RandomResizedCropWithBBox(cde.RandomCropAndResizeWithBBoxOp):
             crop area (default=10). If exceeded, fall back to use center crop instead.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>> from mindspore.dataset.transforms.vision import Inter
-        >>>
+        >>> from mindspore.dataset.vision import Inter
         >>> decode_op = c_vision.Decode()
         >>> bbox_op = c_vision.RandomResizedCropWithBBox(size=50, interpolation=Inter.NEAREST)
         >>> transforms_list = [decode_op, bbox_op]
-        >>> data3 = data3.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_random_resize_crop
@@ -795,14 +875,13 @@ class RandomResizedCrop(cde.RandomCropAndResizeOp):
             crop_area (default=10). If exceeded, fall back to use center_crop instead.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>> from mindspore.dataset.transforms.vision import Inter
-        >>>
+        >>> from mindspore.dataset.vision import Inter
         >>> decode_op = c_vision.Decode()
         >>> resize_crop_op = c_vision.RandomResizedCrop(size=(50, 75), scale=(0.25, 0.5),
-        >>>     interpolation=Inter.BILINEAR)
+        ...                                             interpolation=Inter.BILINEAR)
         >>> transforms_list = [decode_op, resize_crop_op]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_random_resize_crop
@@ -829,14 +908,14 @@ class CenterCrop(cde.CenterCropOp):
             If size is a sequence of length 2, it should be (height, width).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> # crop image to a square
         >>> transforms_list1 = [c_vision.Decode(), c_vision.CenterCrop(50)]
-        >>> data1 = data1.map(operations=transforms_list1, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list1,
+        ...                                                 input_columns=["image"])
         >>> # crop image to portrait style
         >>> transforms_list2 = [c_vision.Decode(), c_vision.CenterCrop((60, 40))]
-        >>> data2 = data2.map(operations=transforms_list2, input_columns=["image"])
+        >>> image_folder_dataset_1 = image_folder_dataset_1.map(operations=transforms_list2,
+        ...                                                     input_columns=["image"])
     """
 
     @check_crop
@@ -858,10 +937,9 @@ class RandomColor(cde.RandomColorOp):
             single fixed magnitude operation (default=(0.1, 1.9)).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> transforms_list = [c_vision.Decode(), c_vision.RandomColor((0.5, 2.0))]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_positive_degrees
@@ -888,12 +966,13 @@ class RandomColorAdjust(cde.RandomColorAdjustOp):
             If it is a sequence, it should be [min, max] where -0.5 <= min <= max <= 0.5.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> decode_op = c_vision.Decode()
-        >>> transform_op = c_vision.RandomColorAdjust(brightness=(0.5, 1), contrast=(0.4, 1), saturation=(0.3, 1))
+        >>> transform_op = c_vision.RandomColorAdjust(brightness=(0.5, 1),
+        ...                                           contrast=(0.4, 1),
+        ...                                           saturation=(0.3, 1))
         >>> transforms_list = [decode_op, transform_op]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_random_color_adjust
@@ -949,12 +1028,13 @@ class RandomRotation(cde.RandomRotationOp):
             If it is an integer, it is used for all RGB channels.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>> from mindspore.dataset.transforms.vision import Inter
-        >>>
+        >>> from mindspore.dataset.vision import Inter
         >>> transforms_list = [c_vision.Decode(),
-        >>>                    c_vision.RandomRotation(degrees=5.0, resample=Inter.NEAREST, expand=True)]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        ...                    c_vision.RandomRotation(degrees=5.0,
+        ...                    resample=Inter.NEAREST,
+        ...                    expand=True)]
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_random_rotation
@@ -983,10 +1063,9 @@ class Rescale(cde.RescaleOp):
         shift (float): Shift factor.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> transforms_list = [c_vision.Decode(), c_vision.Rescale(1.0 / 255.0, -1.0)]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_rescale
@@ -994,6 +1073,22 @@ class Rescale(cde.RescaleOp):
         self.rescale = rescale
         self.shift = shift
         super().__init__(rescale, shift)
+
+    def __call__(self, img):
+        """
+        Call method.
+
+        Args:
+            img (NumPy or PIL image): Image to be rescaled.
+
+        Returns:
+            img (NumPy), Rescaled image.
+        """
+        if not isinstance(img, (np.ndarray, Image.Image)):
+            raise TypeError("Input should be NumPy or PIL image, got {}.".format(type(img)))
+        rescale = cde.Execute(cde.RescaleOp(self.rescale, self.shift))
+        img = rescale(cde.Tensor(np.asarray(img)))
+        return img.as_array()
 
 
 class RandomResize(cde.RandomResizeOp):
@@ -1007,14 +1102,14 @@ class RandomResize(cde.RandomResizeOp):
             If size is a sequence of length 2, it should be (height, width).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> # randomly resize image, keeping aspect ratio
         >>> transforms_list1 = [c_vision.Decode(), c_vision.RandomResize(50)]
-        >>> data1 = data1.map(operations=transforms_list1, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list1,
+        ...                                                 input_columns=["image"])
         >>> # randomly resize image to landscape style
         >>> transforms_list2 = [c_vision.Decode(), c_vision.RandomResize((40, 60))]
-        >>> data2 = data2.map(operations=transforms_list2, input_columns=["image"])
+        >>> image_folder_dataset_1 = image_folder_dataset_1.map(operations=transforms_list2,
+        ...                                                     input_columns=["image"])
     """
 
     @check_resize
@@ -1037,14 +1132,14 @@ class RandomResizeWithBBox(cde.RandomResizeWithBBoxOp):
             If size is a sequence of length 2, it should be (height, width).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> # randomly resize image with bounding boxes, keeping aspect ratio
         >>> transforms_list1 = [c_vision.Decode(), c_vision.RandomResizeWithBBox(60)]
-        >>> data1 = data1.map(operations=transforms_list1, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list1,
+        ...                                                 input_columns=["image"])
         >>> # randomly resize image with bounding boxes to portrait style
         >>> transforms_list2 = [c_vision.Decode(), c_vision.RandomResizeWithBBox((80, 60))]
-        >>> data2 = data2.map(operations=transforms_list2, input_columns=["image"])
+        >>> image_folder_dataset_1 = image_folder_dataset_1.map(operations=transforms_list2,
+        ...                                                     input_columns=["image"])
     """
 
     @check_resize
@@ -1060,12 +1155,29 @@ class HWC2CHW(cde.ChannelSwapOp):
     Transpose the input image; shape (H, W, C) to shape (C, H, W).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
-        >>> transforms_list = [c_vision.Decode(), c_vision.RandomHorizontalFlip(0.75), c_vision.RandomCrop(),
-        >>>     c_vision.HWC2CHW()]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> transforms_list = [c_vision.Decode(),
+        ...                    c_vision.RandomHorizontalFlip(0.75),
+        ...                    c_vision.RandomCrop(512),
+        ...                    c_vision.HWC2CHW()]
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
+
+    def __call__(self, img):
+        """
+        Call method.
+
+        Args:
+            img (NumPy or PIL image): Image array, of shape (H, W, C), to have channels swapped.
+
+        Returns:
+            img (NumPy), Image array, of shape (C, H, W), with channels swapped.
+        """
+        if not isinstance(img, (np.ndarray, Image.Image)):
+            raise TypeError("Input should be NumPy or PIL image, got {}.".format(type(img)))
+        hwc2chw = cde.Execute(cde.ChannelSwapOp())
+        img = hwc2chw(cde.Tensor(np.asarray(img)))
+        return img.as_array()
 
 
 class RandomCropDecodeResize(cde.RandomCropDecodeResizeOp):
@@ -1093,13 +1205,14 @@ class RandomCropDecodeResize(cde.RandomCropDecodeResizeOp):
             If exceeded, fall back to use center_crop instead.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>> from mindspore.dataset.transforms.vision import Inter
-        >>>
-        >>> resize_crop_decode_op = c_vision.RandomCropDecodeResize(size=(50, 75), scale=(0.25, 0.5),
-        >>>     interpolation=Inter.NEAREST, max_attempts=5)
+        >>> from mindspore.dataset.vision import Inter
+        >>> resize_crop_decode_op = c_vision.RandomCropDecodeResize(size=(50, 75),
+        ...                                                         scale=(0.25, 0.5),
+        ...                                                         interpolation=Inter.NEAREST,
+        ...                                                         max_attempts=5)
         >>> transforms_list = [resize_crop_decode_op]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_random_resize_crop
@@ -1127,9 +1240,11 @@ class Pad(cde.PadOp):
             with the first value and (right and bottom) with the second value.
             If 4 values are provided as a list or tuple,
             it pads the left, top, right and bottom respectively.
-        fill_value (Union[int, tuple], optional): The pixel intensity of the borders if
-            the padding_mode is Border.CONSTANT (default=0). If it is a 3-tuple, it is used to
-            fill R, G, B channels respectively.
+        fill_value (Union[int, tuple], optional): The pixel intensity of the borders, only valid for
+            padding_mode Border.CONSTANT (default=0).
+            If it is an integer, it is used for all RGB channels.
+            If it is a 3-tuple, it is used to fill R, G, B channels respectively.
+            The fill_value values must be in range [0, 255].
         padding_mode (Border mode, optional): The method of padding (default=Border.CONSTANT). Can be any of
             [Border.CONSTANT, Border.EDGE, Border.REFLECT, Border.SYMMETRIC].
 
@@ -1144,11 +1259,10 @@ class Pad(cde.PadOp):
               value of edge.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>> from mindspore.dataset.transforms.vision import Border
-        >>>
+        >>> from mindspore.dataset.vision import Border
         >>> transforms_list = [c_vision.Decode(), c_vision.Pad([100, 100, 100, 100])]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_pad
@@ -1156,12 +1270,27 @@ class Pad(cde.PadOp):
         padding = parse_padding(padding)
         if isinstance(fill_value, int):
             fill_value = tuple([fill_value] * 3)
-        padding_mode = DE_C_BORDER_TYPE[padding_mode]
-
         self.padding = padding
         self.fill_value = fill_value
         self.padding_mode = padding_mode
+        padding_mode = DE_C_BORDER_TYPE[padding_mode]
         super().__init__(*padding, padding_mode, *fill_value)
+
+    def __call__(self, img):
+        """
+        Call method.
+
+        Args:
+            img (NumPy or PIL image): Image to be padded.
+
+        Returns:
+            img (NumPy), Padded image.
+        """
+        if not isinstance(img, (np.ndarray, Image.Image)):
+            raise TypeError("Input should be NumPy or PIL image, got {}.".format(type(img)))
+        pad = cde.Execute(cde.PadOp(*self.padding, DE_C_BORDER_TYPE[self.padding_mode], *self.fill_value))
+        img = pad(cde.Tensor(np.asarray(img)))
+        return img.as_array()
 
 
 class UniformAugment(cde.UniformAugOp):
@@ -1173,18 +1302,17 @@ class UniformAugment(cde.UniformAugOp):
         num_ops (int, optional): Number of operations to be selected and applied (default=2).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
         >>> import mindspore.dataset.vision.py_transforms as py_vision
-        >>>
         >>> transforms_list = [c_vision.RandomHorizontalFlip(),
-        >>>                    c_vision.RandomVerticalFlip(),
-        >>>                    c_vision.RandomColorAdjust(),
-        >>>                    c_vision.RandomRotation(degrees=45)]
+        ...                    c_vision.RandomVerticalFlip(),
+        ...                    c_vision.RandomColorAdjust(),
+        ...                    c_vision.RandomRotation(degrees=45)]
         >>> uni_aug_op = c_vision.UniformAugment(transforms=transforms_list, num_ops=2)
         >>> transforms_all = [c_vision.Decode(), c_vision.Resize(size=[224, 224]),
-        >>>                   uni_aug_op, py_vision.ToTensor()]
-        >>> data_aug = data1.map(operations=transforms_all, input_columns="image",
-        >>>                      num_parallel_workers=1)
+        ...                   uni_aug_op, py_vision.ToTensor()]
+        >>> image_folder_dataset_1 = image_folder_dataset.map(operations=transforms_all,
+        ...                                                   input_columns="image",
+        ...                                                   num_parallel_workers=1)
     """
 
     @check_uniform_augment_cpp
@@ -1204,12 +1332,13 @@ class RandomSelectSubpolicy(cde.RandomSelectSubpolicyOp):
         policy (list(list(tuple(TensorOp,float))): List of sub-policies to choose from.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
-        >>> policy = [[(c_vision.RandomRotation((45, 45)), 0.5), (c_vision.RandomVerticalFlip(), 1),
-        >>>            (c_vision.RandomColorAdjust(), 0.8)],
-        >>>           [(c_vision.RandomRotation((90, 90)), 1), (c_vision.RandomColorAdjust(), 0.2)]]
-        >>> data_policy = data1.map(operations=c_vision.RandomSelectSubpolicy(policy), input_columns=["image"])
+        >>> policy = [[(c_vision.RandomRotation((45, 45)), 0.5),
+        ...            (c_vision.RandomVerticalFlip(), 1),
+        ...            (c_vision.RandomColorAdjust(), 0.8)],
+        ...           [(c_vision.RandomRotation((90, 90)), 1),
+        ...            (c_vision.RandomColorAdjust(), 0.2)]]
+        >>> image_folder_dataset_1 = image_folder_dataset.map(operations=c_vision.RandomSelectSubpolicy(policy),
+        ...                                                   input_columns=["image"])
     """
 
     @check_random_select_subpolicy_op
@@ -1237,14 +1366,14 @@ class SoftDvppDecodeResizeJpeg(cde.SoftDvppDecodeResizeJpegOp):
             If size is a sequence of length 2, it should be (height, width).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> # decode and resize image, keeping aspect ratio
         >>> transforms_list1 = [c_vision.Decode(), c_vision.SoftDvppDecodeResizeJpeg(70)]
-        >>> data1 = data1.map(operations=transforms_list1, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list1,
+        ...                                                 input_columns=["image"])
         >>> # decode and resize to portrait style
         >>> transforms_list2 = [c_vision.Decode(), c_vision.SoftDvppDecodeResizeJpeg((80, 60))]
-        >>> data2 = data2.map(operations=transforms_list2, input_columns=["image"])
+        >>> image_folder_dataset_1 = image_folder_dataset_1.map(operations=transforms_list2,
+        ...                                                     input_columns=["image"])
     """
 
     @check_resize
@@ -1260,7 +1389,7 @@ class SoftDvppDecodeRandomCropResizeJpeg(cde.SoftDvppDecodeRandomCropResizeJpegO
     Tensor operation to decode, random crop and resize JPEG image using the simulation algorithm of
     Ascend series chip DVPP module.
 
-    The usage scenario is consistent with SoftDvppDecodeReiszeJpeg.
+    The usage scenario is consistent with SoftDvppDecodeResizeJpeg.
     The input image size should be in range [32*32, 8192*8192].
     The zoom-out and zoom-in multiples of the image length and width should in the range [1/32, 16].
     Only images with an even resolution can be output. The output of odd resolution is not supported.
@@ -1277,14 +1406,14 @@ class SoftDvppDecodeRandomCropResizeJpeg(cde.SoftDvppDecodeRandomCropResizeJpegO
             If exceeded, fall back to use center_crop instead.
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> # decode, randomly crop and resize image, keeping aspect ratio
         >>> transforms_list1 = [c_vision.Decode(), c_vision.SoftDvppDecodeRandomCropResizeJpeg(90)]
-        >>> data1 = data1.map(operations=transforms_list1, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list1,
+        ...                                                 input_columns=["image"])
         >>> # decode, randomly crop and resize to landscape style
         >>> transforms_list2 = [c_vision.Decode(), c_vision.SoftDvppDecodeRandomCropResizeJpeg((80, 100))]
-        >>> data2 = data2.map(operations=transforms_list2, input_columns=["image"])
+        >>> image_folder_dataset_1 = image_folder_dataset_1.map(operations=transforms_list2,
+        ...                                                     input_columns=["image"])
     """
 
     @check_soft_dvpp_decode_random_crop_resize_jpeg
@@ -1308,10 +1437,9 @@ class RandomSolarize(cde.RandomSolarizeOp):
             be in (min, max) format. If min=max, then it is a single fixed magnitude operation (default=(0, 255)).
 
     Examples:
-        >>> import mindspore.dataset.vision.c_transforms as c_vision
-        >>>
         >>> transforms_list = [c_vision.Decode(), c_vision.RandomSolarize(threshold=(10,100))]
-        >>> data1 = data1.map(operations=transforms_list, input_columns=["image"])
+        >>> image_folder_dataset = image_folder_dataset.map(operations=transforms_list,
+        ...                                                 input_columns=["image"])
     """
 
     @check_random_solarize

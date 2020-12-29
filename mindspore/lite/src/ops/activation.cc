@@ -16,6 +16,9 @@
 
 #include "src/ops/activation.h"
 #include <memory>
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
 
 namespace mindspore {
 namespace lite {
@@ -50,6 +53,14 @@ int Activation::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> 
     attr->type = schema::ActivationType_SIGMOID;
   } else if (prim.name() == "ReLU6") {
     attr->type = schema::ActivationType_RELU6;
+  } else if (prim.name() == "Swish") {
+    attr->type = schema::ActivationType_SWISH;
+  } else if (prim.name() == "HSwish") {
+    attr->type = schema::ActivationType_HSWISH;
+  } else if (prim.name() == "HSigmoid") {
+    attr->type = schema::ActivationType_HSIGMOID;
+  } else if (prim.name() == "Tanh") {
+    attr->type = schema::ActivationType_TANH;
   }
   this->primitive_->value.value = attr.release();
   if (this->primitive_->value.value == nullptr) {
@@ -76,6 +87,12 @@ int Activation::GetType() const { return this->primitive_->value_as_Activation()
 float Activation::GetAlpha() const { return this->primitive_->value_as_Activation()->alpha(); }
 float Activation::GetMinVal() const { return this->primitive_->value_as_Activation()->min_val(); }
 float Activation::GetMaxVal() const { return this->primitive_->value_as_Activation()->max_val(); }
+
+PrimitiveC *ActivationCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<Activation>(primitive);
+}
+Registry ActivationRegistry(schema::PrimitiveType_Activation, ActivationCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

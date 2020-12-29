@@ -29,6 +29,8 @@ ConstInputToAttrInfoRegistry::ConstInputToAttrInfoRegistry() {
   Register(prim::kPrimAvgPoolGradVm->name(), {0});
   Register(prim::kPrimConv2DBackpropInput->name(), {2});
   Register(prim::kPrimConv2DBackpropFilter->name(), {2});
+  Register(prim::kPrimConv3DBackpropInput->name(), {2});
+  Register(prim::kPrimConv3DBackpropFilter->name(), {2});
   Register(prim::kPrimDepthwiseConv2dNativeBackpropFilter->name(), {1});
   Register(prim::kPrimDepthwiseConv2dNativeBackpropInput->name(), {0});
   Register(prim::kPrimReshape->name(), {1});
@@ -37,6 +39,7 @@ ConstInputToAttrInfoRegistry::ConstInputToAttrInfoRegistry() {
   Register(prim::kPrimReduceSum->name(), {1});
   Register(prim::kPrimReduceMean->name(), {1});
   Register(prim::kPrimGatherV2->name(), {2});
+  Register(prim::kPrimGatherD->name(), {1});
   Register(prim::kPrimEmbeddingLookup->name(), {2, 3, 4, 5});
   Register(prim::kPrimEmbeddingLookupCommGrad->name(), {1});
   Register(prim::kPrimSubscalar->name(), {1});
@@ -49,6 +52,7 @@ ConstInputToAttrInfoRegistry::ConstInputToAttrInfoRegistry() {
   Register(prim::kPrimReduceAll->name(), {1});
   Register(prim::kPrimReduceAny->name(), {1});
   Register(prim::kPrimUnsortedSegmentMin->name(), {2});
+  Register(prim::kPrimUnsortedSegmentMax->name(), {2});
   Register(kSparseGatherV2, {2});
   Register(kUnsortedSegmentProdOpName, {2});
   Register(kSimpleMeanGradOpName, {1});

@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <string>
 #include <memory>
 #include <utility>
 #include "tools/converter/legacy_optimizer/graph/format_trans_pass.h"
-#include "tools/common/converter_op_utils.h"
 #include "tools/common/node_util.h"
 #include "src/common/log_adapter.h"
 #include "src/common/common.h"
@@ -138,19 +138,19 @@ STATUS FormatTransPass::DoNodeInoutFormatTrans(schema::MetaGraphT *graph) {
       MS_LOG(ERROR) << "Op should have " << kOutputNum << " output tensor";
       return RET_ERROR;
     }
-    STATUS status;
+    void *attr = node->primitive->value.value;
+    if (node->primitive->value.type == schema::PrimitiveType_SpaceToDepth) {
+      reinterpret_cast<schema::SpaceToDepthT *>(attr)->format = schema::Format_NHWC;
+    }
+    if (node->primitive->value.type == schema::PrimitiveType_DepthToSpace) {
+      reinterpret_cast<schema::DepthToSpaceT *>(attr)->format = schema::Format_NHWC;
+    }
+    STATUS status = RET_OK;
 #ifdef SUPPORT_TRAIN
     if (IsContain(GetNhwcAllInputOpList(), GetCNodeTType(**iter))) {
       int idx_num = node->inputIndex.size();
+      if (GetCNodeTType(**iter) == schema::PrimitiveType_BNGrad) idx_num = 2;
       for (int i = 0; i < idx_num; i++) {
-        iter = InsertFormatTransNode(graph, iter, kBefore, i, beforeNodeType, &status);
-        if (status != RET_OK) {
-          MS_LOG(ERROR) << "InsertNchw2NhwcNode before " << nodeName << "failed";
-          return RET_ERROR;
-        }
-      }
-    } else if (IsContain(GetNhwcDualInputOpList(), GetCNodeTType(**iter))) {
-      for (int i = 0; i < 2; i++) {
         iter = InsertFormatTransNode(graph, iter, kBefore, i, beforeNodeType, &status);
         if (status != RET_OK) {
           MS_LOG(ERROR) << "InsertNchw2NhwcNode before " << nodeName << "failed";
@@ -161,6 +161,7 @@ STATUS FormatTransPass::DoNodeInoutFormatTrans(schema::MetaGraphT *graph) {
       int idx = 0;
       if (GetCNodeTType(**iter) == schema::PrimitiveType_ApplyMomentum) idx = 3;
       if (GetCNodeTType(**iter) == schema::PrimitiveType_Sgd) idx = 1;
+      if (GetCNodeTType(**iter) == schema::PrimitiveType_Adam) idx = 9;
       iter = InsertFormatTransNode(graph, iter, kBefore, idx, beforeNodeType, &status);
       if (status != RET_OK) {
         MS_LOG(ERROR) << "InsertNhwc2NchwNode after " << nodeName << "failed";
@@ -186,6 +187,7 @@ STATUS FormatTransPass::DoNodeInoutFormatTrans(schema::MetaGraphT *graph) {
 NodeIter FormatTransPass::InsertFormatTransNode(schema::MetaGraphT *graph, NodeIter existNodeIter, InsertPlace place,
                                                 size_t inoutIdx, FormatTransNodeType nodeType, STATUS *errorCode) {
   MS_ASSERT((*existNodeIter) != nullptr);
+  MS_ASSERT(graph != nullptr);
   auto existNodeName = (*existNodeIter)->name;
   std::string tileName;
   if (place == kBefore) {
@@ -195,15 +197,47 @@ NodeIter FormatTransPass::InsertFormatTransNode(schema::MetaGraphT *graph, NodeI
   }
   auto transNode = std::make_unique<schema::CNodeT>();
   transNode->primitive = std::make_unique<schema::PrimitiveT>();
+  transNode->primitive->value.type = schema::PrimitiveType_Transpose;
+  auto attr = new (std::nothrow) schema::TransposeT();
 
   if (nodeType == kNCHW2NHWC) {
     transNode->name = "nchw2nhwc_" + tileName + std::to_string(id++);
-    transNode->primitive->value.type = schema::PrimitiveType_Nchw2Nhwc;
+    attr->perm = {0, 2, 3, 1};
   } else {
     transNode->name = "nhwc2nchw_" + tileName + std::to_string(id++);
-    transNode->primitive->value.type = schema::PrimitiveType_Nhwc2Nchw;
+    attr->perm = {0, 3, 1, 2};
   }
-  return InsertNode(graph, existNodeIter, place, inoutIdx, std::move(transNode), errorCode);
+  transNode->primitive->value.value = attr;
+
+  OpDefCopyer TransposeOpCopyer = [](CNodeT *inOpDef) -> std::unique_ptr<CNodeT> {
+    auto newOpDef = std::make_unique<schema::CNodeT>();
+    if (newOpDef == nullptr) {
+      MS_LOG(ERROR) << "new CNodeT failed";
+      return nullptr;
+    }
+    newOpDef->name = inOpDef->name;
+    newOpDef->quantType = inOpDef->quantType;
+    newOpDef->primitive = std::make_unique<schema::PrimitiveT>();
+    if (newOpDef->primitive == nullptr) {
+      MS_LOG(ERROR) << "new PrimitiveT failed";
+      return nullptr;
+    }
+    newOpDef->primitive->value.type = schema::PrimitiveType_Transpose;
+    auto transposeParam = new (std::nothrow) TransposeT;
+    if (transposeParam == nullptr) {
+      MS_LOG(ERROR) << "new transposeParam failed";
+      return nullptr;
+    }
+    auto inParam = inOpDef->primitive->value.AsTranspose();
+    MS_ASSERT(inParam != nullptr);
+    transposeParam->perm.resize(inParam->perm.size());
+    std::transform(inParam->perm.begin(), inParam->perm.end(), transposeParam->perm.begin(),
+                   [](const int32_t ele) { return ele; });
+    newOpDef->primitive->value.value = transposeParam;
+    return newOpDef;
+  };
+
+  return InsertNode(graph, existNodeIter, place, inoutIdx, std::move(transNode), errorCode, TransposeOpCopyer);
 }
 
 void FormatTransPass::SetQuantType(QuantType quantType) { this->quantType = quantType; }

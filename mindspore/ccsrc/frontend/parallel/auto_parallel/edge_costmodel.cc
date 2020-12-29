@@ -28,6 +28,10 @@ namespace mindspore {
 namespace parallel {
 Status Edge::InitEdgeCost() {
   bool has_available_cost = false;
+  pre_op_output_.clear();
+  next_op_input_.clear();
+  cost_map_.clear();
+
   for (auto &swc : prev_op_->GetStrategyCost()) {
     MS_EXCEPTION_IF_NULL(swc);
     pre_op_output_.emplace_back(std::make_pair(swc->strategy_ptr, swc->outputs_ptr));
@@ -109,7 +113,7 @@ Status Edge::GetRedistributionCost(const TensorLayout &prev_op_output_layout, co
                                    size_t type_length, TypePtr type, CostPtr *cost) {
   MS_EXCEPTION_IF_NULL(prev_op_);
   MS_EXCEPTION_IF_NULL(cost);
-  RankList dev_list = prev_op_->global_device_list();
+  RankList dev_list = prev_op_->stage_device_list();
   TensorRedistribution tensor_redistribution(false);
 
   // Init TensorRedistribution
@@ -332,5 +336,8 @@ void Edge::SetCostMapAndInputOutput(std::map<CostPtrKey, CostPtrList> &cost_map)
     next_op_input_.emplace_back(std::pair<StrategyPtr, std::vector<TensorInfo>>(key_pair.second, {}));
   }
 }
+
+// Return true if there are available strategies in this edge.
+bool Edge::CheckStrategyCostPossibility() { return !cost_map_.empty(); }
 }  // namespace parallel
 }  // namespace mindspore

@@ -19,15 +19,16 @@
 #include "include/errorcode.h"
 #include "src/common/log_adapter.h"
 #include "src/tensor.h"
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
 
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
 int Concat::GetAxis() const { return this->primitive_->value.AsConcat()->axis; }
-int Concat::GetN() const { return this->primitive_->value.AsConcat()->n; }
 
 void Concat::SetAxis(int axis) { this->primitive_->value.AsConcat()->axis = axis; }
-void Concat::SetN(int n) { this->primitive_->value.AsConcat()->n = n; }
 
 int Concat::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
   if (this->primitive_ == nullptr) {
@@ -48,7 +49,7 @@ int Concat::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inp
       MS_LOG(ERROR) << "new primitiveT value failed";
       return RET_ERROR;
     }
-    auto prim_axis = GetValue<int>(prim.GetAttr("axis"));
+    auto prim_axis = CastToInt(prim.GetAttr("axis")).front();
     attr->axis = prim_axis;
     this->primitive_->value.value = attr;
     if (this->primitive_->value.value == nullptr) {
@@ -68,13 +69,15 @@ int Concat::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers:
     MS_LOG(ERROR) << "value_as_Concat return nullptr";
     return RET_ERROR;
   }
-  auto val_offset = schema::CreateConcat(*fbb, attr->axis(), attr->n());
+  auto val_offset = schema::CreateConcat(*fbb, attr->axis());
   auto prim_offset = schema::CreatePrimitive(*fbb, schema::PrimitiveType_Concat, val_offset.o);
   fbb->Finish(prim_offset);
   return RET_OK;
 }
 int Concat::GetAxis() const { return this->primitive_->value_as_Concat()->axis(); }
-int Concat::GetN() const { return this->primitive_->value_as_Concat()->n(); }
+
+PrimitiveC *ConcatCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Concat>(primitive); }
+Registry ConcatRegistry(schema::PrimitiveType_Concat, ConcatCreator);
 
 #endif
 
@@ -93,12 +96,11 @@ int Concat::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
     return RET_PARAM_INVALID;
   }
   output->set_data_type(input0->data_type());
-  output->SetFormat(input0->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output->set_format(input0->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
 
-  MS_ASSERT(concat_prim != nullptr);
   auto input0_shape = inputs_.at(0)->shape();
   auto axis = GetAxis() < 0 ? GetAxis() + input0_shape.size() : GetAxis();
   if (axis < 0 || axis >= input0_shape.size()) {

@@ -20,6 +20,10 @@
 #include <algorithm>
 #include "runtime/device/gpu/gpu_device_manager.h"
 
+#define CUDA_KERNEL_ASSERT(cond)                                                       \
+  if (!(cond)) {                                                                       \
+    __assert_fail(#cond, __FILE__, static_cast<unsigned int>(__LINE__), __FUNCTION__); \
+  }
 namespace mindspore {
 namespace device {
 namespace gpu {
@@ -31,6 +35,8 @@ class CudaCommon {
     return std::min(((total_threads - 1) / threads_per_block_) + 1, max_blocks_);
   }
   size_t share_memory_size() const { return max_share_memory_; }
+  void set_check_sm(const bool &flag) { check_sm_ = flag; }
+  bool check_sm() const { return check_sm_; }
 
   static CudaCommon &GetInstance() {
     static CudaCommon instance;
@@ -55,6 +61,7 @@ class CudaCommon {
   int threads_per_block_;
   int major_sm_;
   size_t max_share_memory_;
+  bool check_sm_{true};
 };
 #define GET_BLOCKS(total_threads) mindspore::device::gpu::CudaCommon::GetInstance().blocks_num(total_threads)
 #define GET_THREADS mindspore::device::gpu::CudaCommon::GetInstance().threads_num()

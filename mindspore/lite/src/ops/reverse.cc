@@ -16,6 +16,10 @@
 
 #include "src/ops/reverse.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -48,6 +52,11 @@ int Reverse::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *ReverseCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Reverse>(primitive); }
+Registry ReverseRegistry(schema::PrimitiveType_Reverse, ReverseCreator);
+
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

@@ -339,7 +339,7 @@ def test_cache_nomap_basic8():
          |
       TFReader
     """
-    logger.info("Test cache basic 4")
+    logger.info("Test cache basic 8")
     if "SESSION_ID" in os.environ:
         session_id = int(os.environ['SESSION_ID'])
     else:
@@ -355,7 +355,33 @@ def test_cache_nomap_basic8():
 
     logger.info("Number of data in ds1: {} ".format(num_iter))
     assert num_iter == 3
-    logger.info('test_cache_basic3 Ended.\n')
+    logger.info('test_cache_basic8 Ended.\n')
+
+
+@pytest.mark.skipif(os.environ.get('RUN_CACHE_TEST') != 'TRUE', reason="Require to bring up cache server")
+def test_cache_nomap_basic9():
+    """
+    Testing the GetStat interface for getting some info from server, but this should fail if the cache is not created
+    in a pipeline.
+    """
+
+    logger.info("Test cache nomap basic 9")
+    if "SESSION_ID" in os.environ:
+        session_id = int(os.environ['SESSION_ID'])
+    else:
+        raise RuntimeError("Testcase requires SESSION_ID environment variable")
+
+    some_cache = ds.DatasetCache(session_id=session_id, size=0, spilling=True)
+
+    # Contact the server to get the statistics, this should fail because we have not used this cache in any pipeline
+    # so there will not be any cache to get stats on.
+    with pytest.raises(RuntimeError) as e:
+        stat = some_cache.GetStat()
+        cache_sz = stat.avg_cache_sz
+        logger.info("Average row cache size: {}".format(cache_sz))
+    assert "Unexpected error" in str(e.value)
+
+    logger.info("test_cache_nomap_basic9 Ended.\n")
 
 
 @pytest.mark.skipif(os.environ.get('RUN_CACHE_TEST') != 'TRUE', reason="Require to bring up cache server")
@@ -564,7 +590,7 @@ def test_cache_nomap_disallowed_share1():
 
     with pytest.raises(RuntimeError) as e:
         sum([1 for _ in ds2])
-    assert "Attempt to re-use a cache for a different tree!" in str(e.value)
+    assert "Cannot re-use a cache for a different tree!" in str(e.value)
 
     logger.info("test_cache_nomap_disallowed_share1 Ended.\n")
 
@@ -1156,7 +1182,8 @@ def test_cache_nomap_server_stop():
         num_iter = 0
         for _ in ds1.create_dict_iterator():
             num_iter += 1
-    assert "Network error. Cache server is unreachable. Make sure the server is running." in str(e.value)
+    assert "Network error. Cache server with port 50052 is unreachable. Make sure the server is running." in \
+           str(e.value)
 
     logger.info("test_cache_nomap_server_stop Ended.\n")
 
@@ -1290,6 +1317,50 @@ def test_cache_nomap_epoch_ctrl3():
     # reply on garbage collector to destroy iter1
 
     logger.info("test_cache_nomap_epoch_ctrl3 Ended.\n")
+
+
+@pytest.mark.skipif(os.environ.get('RUN_CACHE_TEST') != 'TRUE', reason="Require to bring up cache server")
+def test_cache_nomap_epoch_ctrl4():
+    """
+    Test using two-loops method with repeat under cache
+
+        cache
+         |
+     Map(decode)
+         |
+       repeat
+         |
+      TFRecord
+    """
+
+    logger.info("Test cache nomap epoch ctrl4")
+    if "SESSION_ID" in os.environ:
+        session_id = int(os.environ['SESSION_ID'])
+    else:
+        raise RuntimeError("Testcase requires SESSION_ID environment variable")
+
+    some_cache = ds.DatasetCache(session_id=session_id, size=0, spilling=True)
+
+    # This dataset has 3 records in it only
+    ds1 = ds.TFRecordDataset(DATA_DIR, SCHEMA_DIR)
+    ds1 = ds1.repeat(2)
+    decode_op = c_vision.Decode()
+    ds1 = ds1.map(input_columns=["image"], operations=decode_op, cache=some_cache)
+
+    num_epoch = 5
+    iter1 = ds1.create_dict_iterator(num_epochs=num_epoch)
+
+    epoch_count = 0
+    for _ in range(num_epoch):
+        row_count = 0
+        for _ in iter1:
+            row_count += 1
+        logger.info("Number of data in ds1: {} ".format(row_count))
+        assert row_count == 6
+        epoch_count += 1
+    assert epoch_count == num_epoch
+
+    logger.info("test_cache_nomap_epoch_ctrl4 Ended.\n")
 
 
 @pytest.mark.skipif(os.environ.get('RUN_CACHE_TEST') != 'TRUE', reason="Require to bring up cache server")
@@ -1678,7 +1749,7 @@ def test_cache_nomap_textfile1():
     # However, the sharding will be done by the sampler, not by the clue leaf node
     # In this case, it is a row-based sharding, not the file-based sharding that would happen if
     # there was not any cache.
-    ds1 = ds.CSVDataset(TEXT_FILE_DATA_DIR, num_shards=3, shard_id=1, cache=some_cache)
+    ds1 = ds.TextFileDataset(TEXT_FILE_DATA_DIR, num_shards=3, shard_id=1, cache=some_cache)
 
     num_epoch = 4
     iter1 = ds1.create_dict_iterator(num_epochs=num_epoch, output_numpy=True)
@@ -1704,6 +1775,7 @@ def test_cache_nomap_textfile2():
          |
      TextFile
     """
+
     def my_tokenizer(line):
         words = line.split()
         if not words:
@@ -1732,6 +1804,113 @@ def test_cache_nomap_textfile2():
     assert epoch_count == num_epoch
 
     logger.info("test_cache_nomap_textfile2 Ended.\n")
+
+
+@pytest.mark.skipif(os.environ.get('RUN_CACHE_TEST') != 'TRUE', reason="Require to bring up cache server")
+def test_cache_nomap_nested_repeat():
+    """
+    Test cache on pipeline with nested repeat ops
+
+        Repeat
+          |
+        Cache
+          |
+      Map(decode)
+          |
+        Repeat
+          |
+      TFRecord
+    """
+
+    logger.info("Test cache nomap nested repeat")
+    if "SESSION_ID" in os.environ:
+        session_id = int(os.environ['SESSION_ID'])
+    else:
+        raise RuntimeError("Testcase requires SESSION_ID environment variable")
+
+    some_cache = ds.DatasetCache(session_id=session_id, size=0, spilling=True)
+
+    # This dataset has 3 records in it only
+    ds1 = ds.TFRecordDataset(DATA_DIR, SCHEMA_DIR)
+    decode_op = c_vision.Decode()
+    ds1 = ds1.repeat(4)
+    ds1 = ds1.map(operations=decode_op, input_columns=["image"], cache=some_cache)
+    ds1 = ds1.repeat(2)
+
+    num_iter = 0
+    for _ in ds1.create_dict_iterator(num_epochs=1):
+        logger.info("get data from dataset")
+        num_iter += 1
+
+    logger.info("Number of data in ds1: {} ".format(num_iter))
+    assert num_iter == 24
+    logger.info('test_cache_nomap_nested_repeat Ended.\n')
+
+
+@pytest.mark.skipif(os.environ.get('RUN_CACHE_TEST') != 'TRUE', reason="Require to bring up cache server")
+def test_cache_nomap_get_repeat_count():
+    """
+    Test get_repeat_count() for a pipeline with cache and nested repeat ops
+
+        Cache
+          |
+      Map(decode)
+          |
+        Repeat
+          |
+      TFRecord
+    """
+
+    logger.info("Test cache nomap get_repeat_count")
+    if "SESSION_ID" in os.environ:
+        session_id = int(os.environ['SESSION_ID'])
+    else:
+        raise RuntimeError("Testcase requires SESSION_ID environment variable")
+
+    some_cache = ds.DatasetCache(session_id=session_id, size=0, spilling=True)
+
+    # This dataset has 3 records in it only
+    ds1 = ds.TFRecordDataset(DATA_DIR, SCHEMA_DIR, columns_list=["image"], shuffle=False)
+    ds1 = ds1.repeat(4)
+    decode_op = c_vision.Decode()
+    ds1 = ds1.map(operations=decode_op, input_columns=["image"], cache=some_cache)
+
+    repeat_count = ds1.get_repeat_count()
+    logger.info("repeat_count: {}".format(repeat_count))
+    assert repeat_count == 4
+
+    num_iter = 0
+    for _ in ds1.create_dict_iterator(num_epochs=1):
+        logger.info("get data from dataset")
+        num_iter += 1
+    assert num_iter == 12
+
+
+@pytest.mark.skipif(os.environ.get('RUN_CACHE_TEST') != 'TRUE', reason="Require to bring up cache server")
+def test_cache_nomap_long_file_list():
+    """
+    Test cache after TFRecord with a long list of files as arguments
+
+        Cache
+          |
+      TFRecord
+    """
+
+    logger.info("Test cache nomap long file list")
+    if "SESSION_ID" in os.environ:
+        session_id = int(os.environ['SESSION_ID'])
+    else:
+        raise RuntimeError("Testcase requires SESSION_ID environment variable")
+
+    some_cache = ds.DatasetCache(session_id=session_id, size=1, spilling=False)
+
+    ds1 = ds.TFRecordDataset([DATA_DIR[0] for _ in range(0, 1000)], SCHEMA_DIR, columns_list=["image"],
+                             cache=some_cache)
+
+    with pytest.raises(RuntimeError) as e:
+        sum([1 for _ in ds1])
+    assert "Out of memory" in str(e.value)
+    logger.info("test_cache_nomap_long_file_list Ended.\n")
 
 
 if __name__ == '__main__':

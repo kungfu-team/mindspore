@@ -25,10 +25,12 @@ namespace ps {
 using mindspore::kernel::ps::SparseApplyFtrlPSKernel;
 OptimizerInfo *OptimizerInfoBuilder::Build(const std::shared_ptr<PServerKernel> &pserver_kernel,
                                            const WeightPtr &weight, const Keys &keys, const Values &values,
-                                           const Lengths &lens, const InputsShapePtr &inputs_shape, size_t worker_num) {
+                                           const Lengths &lens, const InputsShapePtr &inputs_shape, size_t worker_num,
+                                           bool sharded) {
   MS_EXCEPTION_IF_NULL(pserver_kernel);
   MS_EXCEPTION_IF_NULL(inputs_shape);
-  OptimizerInfo *optim_info = BuildInputs(weight, keys, values, lens, inputs_shape, worker_num, pserver_kernel);
+  OptimizerInfo *optim_info =
+    BuildInputs(weight, keys, values, lens, inputs_shape, worker_num, pserver_kernel, sharded);
   MS_EXCEPTION_IF_NULL(optim_info);
   std::vector<size_t> ws_sizes = pserver_kernel->workspace_sizes();
   BuildWorkspaces(optim_info, ws_sizes, worker_num);
@@ -96,7 +98,7 @@ AddressPtr OptimizerInfoBuilder::GenInputAddrPtr(const std::string &optim_type, 
   void *src_data = reinterpret_cast<T *>(ps_data) + addr_data_offset;
   MS_EXCEPTION_IF_NULL(dst_data);
   MS_EXCEPTION_IF_NULL(src_data);
-  int ret = memcpy_s(dst_data, dst_size, src_data, src_size);
+  int64_t ret = memcpy_s(dst_data, dst_size, src_data, src_size);
   if (ret != 0) {
     MS_LOG(EXCEPTION) << "memcpy_s error, errorno(" << ret << ")";
     delete[] buffer;
@@ -108,7 +110,7 @@ AddressPtr OptimizerInfoBuilder::GenInputAddrPtr(const std::string &optim_type, 
 
 OptimizerInfo *MomentumOptimInfoBuilder::BuildInputs(const WeightPtr &weight, const Keys &keys, const Values &values,
                                                      const Lengths &lens, const InputsShapePtr &inputs_shape,
-                                                     size_t worker_num, const std::shared_ptr<PServerKernel> &) {
+                                                     size_t worker_num, const std::shared_ptr<PServerKernel> &, bool) {
   AddressPtr weight_addr = std::make_shared<kernel::Address>();
   MS_EXCEPTION_IF_NULL(weight_addr);
   weight_addr->addr = weight->data();
@@ -119,7 +121,7 @@ OptimizerInfo *MomentumOptimInfoBuilder::BuildInputs(const WeightPtr &weight, co
   accumulate->addr = new float[weight->size()];
   MS_EXCEPTION_IF_NULL(accumulate->addr);
   accumulate->size = weight->size() * sizeof(float);
-  int ret = memset_s(accumulate->addr, accumulate->size, 0x00, accumulate->size);
+  int64_t ret = memset_s(accumulate->addr, accumulate->size, 0x00, accumulate->size);
   if (ret != 0) {
     MS_LOG(EXCEPTION) << "memset_s error, errorno(" << ret << ")";
     delete[] reinterpret_cast<float *>(accumulate->addr);
@@ -135,7 +137,8 @@ OptimizerInfo *MomentumOptimInfoBuilder::BuildInputs(const WeightPtr &weight, co
 
 OptimizerInfo *SparseAdamOptimInfoBuilder::BuildInputs(const WeightPtr &weight, const Keys &keys, const Values &values,
                                                        const Lengths &lens, const InputsShapePtr &inputs_shape,
-                                                       size_t worker_num, const std::shared_ptr<PServerKernel> &) {
+                                                       size_t worker_num, const std::shared_ptr<PServerKernel> &,
+                                                       bool sharded) {
   AddressPtr weight_addr = std::make_shared<kernel::Address>();
   MS_EXCEPTION_IF_NULL(weight_addr);
   weight_addr->addr = weight->data();
@@ -146,7 +149,7 @@ OptimizerInfo *SparseAdamOptimInfoBuilder::BuildInputs(const WeightPtr &weight, 
   m->addr = new float[weight->size()];
   MS_EXCEPTION_IF_NULL(m->addr);
   m->size = weight->size() * sizeof(float);
-  int ret = memset_s(m->addr, m->size, 0x00, m->size);
+  int64_t ret = memset_s(m->addr, m->size, 0x00, m->size);
   if (ret != 0) {
     MS_LOG(EXCEPTION) << "memset_s error, errorno(" << ret << ")";
     delete[] reinterpret_cast<float *>(m->addr);
@@ -178,13 +181,14 @@ OptimizerInfo *SparseAdamOptimInfoBuilder::BuildInputs(const WeightPtr &weight, 
   AddressPtr grad = GenInputAddrPtr<float>(kSparseAdam, "grad", values.data(), lens, inputs_shape);
   AddressPtr indices = GenInputAddrPtr<float>(kSparseAdam, "indices", values.data(), lens, inputs_shape);
   return new SparseAdamOptimInfo(weight_addr, m, v, beta1_power, beta2_power, learning_rate, beta1, beta2, epsilon,
-                                 grad, indices);
+                                 grad, indices, sharded);
 }
 
 OptimizerInfo *SparseFtrlOptimInfoBuilder::BuildInputs(const WeightPtr &weight, const Keys &keys, const Values &values,
                                                        const Lengths &lens, const InputsShapePtr &inputs_shape,
                                                        size_t worker_num,
-                                                       const std::shared_ptr<PServerKernel> &pserver_kernel) {
+                                                       const std::shared_ptr<PServerKernel> &pserver_kernel,
+                                                       bool sharded) {
   MS_EXCEPTION_IF_NULL(inputs_shape);
   AddressPtr weight_addr = std::make_shared<kernel::Address>();
   MS_EXCEPTION_IF_NULL(weight_addr);
@@ -205,7 +209,7 @@ OptimizerInfo *SparseFtrlOptimInfoBuilder::BuildInputs(const WeightPtr &weight, 
   MS_EXCEPTION_IF_NULL(linear);
   linear->addr = new float[weight->size()];
   MS_EXCEPTION_IF_NULL(linear->addr);
-  int ret = memset_s(linear->addr, weight->size() * sizeof(float), 0x00, weight->size() * sizeof(float));
+  int64_t ret = memset_s(linear->addr, weight->size() * sizeof(float), 0x00, weight->size() * sizeof(float));
   if (ret != 0) {
     MS_LOG(EXCEPTION) << "memset_s error, errorno(" << ret << ")";
     delete[] reinterpret_cast<float *>(linear->addr);
@@ -216,7 +220,7 @@ OptimizerInfo *SparseFtrlOptimInfoBuilder::BuildInputs(const WeightPtr &weight, 
 
   AddressPtr grad = GenInputAddrPtr<float>(kSparseFtrl, "grad", values.data(), lens, inputs_shape);
   AddressPtr indices = GenInputAddrPtr<float>(kSparseFtrl, "indices", values.data(), lens, inputs_shape);
-  return new SparseFtrlOptimInfo(weight_addr, accum, linear, grad, indices);
+  return new SparseFtrlOptimInfo(weight_addr, accum, linear, grad, indices, sharded);
 }
 }  // namespace ps
 }  // namespace mindspore

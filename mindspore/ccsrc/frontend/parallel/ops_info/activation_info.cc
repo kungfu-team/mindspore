@@ -41,11 +41,9 @@ Status DropoutInfo::CheckStrategy(const StrategyPtr &strategy) {
   }
 
   // dropout don't support repeated calculation
-  CheckGlobalDeviceManager();
   auto input_strategy = strategy->GetInputDim().at(0);
-  size_t dev_num = g_device_manager->GetDeviceListByStageId(stage_id_).size();
-  auto product_p = std::accumulate(input_strategy.begin(), input_strategy.end(), 1, std::multiplies<int>());
-  if (IntToSize(product_p) != dev_num) {
+  auto product_p = std::accumulate(input_strategy.begin(), input_strategy.end(), 1, std::multiplies<int64_t>());
+  if (product_p != stage_device_size_) {
     MS_LOG(ERROR) << name_ << ": Invalid strategy. Don't support repeated calc.";
     return FAILED;
   }
@@ -92,7 +90,7 @@ Status ActivationOther::GetAttrs() {
   return SUCCESS;
 }
 
-Status Activation::GenerateStrategies(int32_t stage_id) {
+Status Activation::GenerateStrategies(int64_t stage_id) {
   if ((inputs_shape_.size() != ACTIVATION_INPUTS_SIZE) || (outputs_shape_.size() != ACTIVATION_OUTPUTS_SIZE)) {
     MS_LOG(ERROR) << name_ << " : Inputs shape size(" << inputs_shape_.size() << ") or outputs shape size("
                   << outputs_shape_.size() << "is wrong.";
@@ -118,7 +116,16 @@ Status Activation::GenerateStrategies(int32_t stage_id) {
   return SUCCESS;
 }
 
-Status DropoutInfo::GenerateStrategies(int32_t stage_id) {
+bool DropoutInfo::IsRepeatedStrategy(const StrategyPtr &sp) {
+  auto input_strategy = sp->GetInputDim().at(0);
+  auto product_p = std::accumulate(input_strategy.begin(), input_strategy.end(), 1, std::multiplies<int64_t>());
+  if (product_p != stage_device_size_) {
+    return true;
+  }
+  return false;
+}
+
+Status DropoutInfo::GenerateStrategies(int64_t stage_id) {
   Shape input0_split(inputs_shape_[0].size(), 1);
   Shapes splittable_inputs = {input0_split};
 
@@ -129,6 +136,9 @@ Status DropoutInfo::GenerateStrategies(int32_t stage_id) {
   }
   size_t success = 0;
   for (auto &sp : sp_vector) {
+    if (IsRepeatedStrategy(sp)) {
+      continue;
+    }
     if (SetCostUnderStrategy(sp) == SUCCESS) {
       success++;
       MS_LOG(INFO) << name_ << " : Successfully generated " << success << " strategy";
@@ -148,13 +158,13 @@ Status Softmax::CheckStrategy(const StrategyPtr &strategy) {
   Dimensions input_strategy = stra.at(0);
 
   for (auto &element : axis_) {
-    int32_t axis_index = element;
+    int64_t axis_index = element;
     if (element < 0) {
       size_t input_dim = inputs_shape_.at(0).size();
-      axis_index = static_cast<int32_t>(input_dim) + element;
+      axis_index = static_cast<int64_t>(input_dim) + element;
     }
 
-    int32_t axis_strategy = input_strategy.at(IntToSize(axis_index));
+    int64_t axis_strategy = input_strategy.at(LongToSize(axis_index));
     // Dimension corresponding to axis is un-splittable
     if (axis_strategy != MIN_SLICE_NUM) {
       MS_LOG(ERROR) << name_ << " : The strategy corresponding to axis dimension(" << axis_strategy << ") is not 1";
@@ -174,10 +184,10 @@ Status Softmax::GetAttrs() {
   auto iter = attrs_.find(AXIS);
   if (iter != attrs_.end()) {
     MS_EXCEPTION_IF_NULL(iter->second);
-    if (iter->second->isa<Int32Imm>()) {  // the axis is a number
-      int32_t axis_element = iter->second->cast<Int32ImmPtr>()->value();
+    if (iter->second->isa<Int64Imm>()) {  // the axis is a number
+      int64_t axis_element = iter->second->cast<Int64ImmPtr>()->value();
       axis_.push_back(axis_element);
-      MS_LOG(INFO) << name_ << " : The axis is int, value is " << axis_element;
+      MS_LOG(INFO) << name_ << " : The axis is int64_t, value is " << axis_element;
     } else if (iter->second->isa<ValueTuple>()) {  // the axis is a tuple
       ValueTuplePtr value_tuple = iter->second->cast<ValueTuplePtr>();
       if (value_tuple == nullptr) {
@@ -186,14 +196,14 @@ Status Softmax::GetAttrs() {
       }
       std::vector<ValuePtr> value_vector = value_tuple->value();
       (void)std::transform(value_vector.begin(), value_vector.end(), std::back_inserter(axis_),
-                           [](const ValuePtr &value) { return static_cast<int32_t>(GetValue<int>(value)); });
+                           [](const ValuePtr &value) { return static_cast<int64_t>(GetValue<int64_t>(value)); });
       if (axis_.empty()) {
         MS_LOG(ERROR) << name_ << " : The axis tuple is empty.";
         return FAILED;
       }
       MS_LOG(INFO) << name_ << " : The axis is tuple, value is " << ListToString(axis_);
     } else {
-      MS_LOG(ERROR) << name_ << " : The value of axis is not int or tuple int.";
+      MS_LOG(ERROR) << name_ << " : The value of axis is not int64_t or tuple int64_t.";
       return FAILED;
     }
   }
@@ -204,9 +214,9 @@ Status Softmax::GetAttrs() {
   }
 
   // for example: tensor dimension is 4, then axis range [-4, 3]
-  int32_t dim = SizeToInt(inputs_shape_.at(0).size());
+  int64_t dim = SizeToLong(inputs_shape_.at(0).size());
   auto it =
-    std::find_if(axis_.begin(), axis_.end(), [dim](int32_t element) { return ((element >= dim) || (element < -dim)); });
+    std::find_if(axis_.begin(), axis_.end(), [dim](int64_t element) { return ((element >= dim) || (element < -dim)); });
   if (it != axis_.end()) {
     MS_LOG(ERROR) << name_ << " : The axis(" << *it << ") is out of range[" << -dim << ", " << dim - 1 << "].";
     return FAILED;
@@ -217,7 +227,7 @@ Status Softmax::GetAttrs() {
 
 Status Softmax::SetCostUnderStrategy(const StrategyPtr &strategy) { return SetCostUnderStrategyBase(strategy); }
 
-Status Softmax::GenerateStrategies(int32_t stage_id) {
+Status Softmax::GenerateStrategies(int64_t stage_id) {
   if (GetAttrs() != SUCCESS) {
     MS_LOG(ERROR) << name_ << " : GetAttrs failed.";
     return FAILED;
@@ -230,12 +240,12 @@ Status Softmax::GenerateStrategies(int32_t stage_id) {
   Shape input0_split;
   (void)input0_split.insert(input0_split.begin(), inputs_shape_[0].size(), 1);
   for (auto &element : axis_) {
-    int32_t axis_index = element;
+    int64_t axis_index = element;
     if (element < 0) {
       size_t input_dim = inputs_shape_.at(0).size();
-      axis_index = static_cast<int32_t>(input_dim) + element;
+      axis_index = static_cast<int64_t>(input_dim) + element;
     }
-    input0_split[IntToSize(axis_index)] = 0;
+    input0_split[LongToSize(axis_index)] = 0;
   }
   Shapes splittable_inputs = {input0_split};
 
@@ -307,27 +317,18 @@ Status ActivationBase::InferTensorMap() {
 }
 
 Status ActivationBase::InferTensorInfo() {
-  // infer tensor shape
-  Shape input_shape = inputs_shape_.at(0);
-
-  // infer slice shape
-  Shapes inputs_slice_shape, outputs_slice_shape;
-  Strategys inputs_strategy = strategy_->GetInputDim();
-  Strategys outputs_strategy = {inputs_strategy.at(0)};
-  if (InferSliceShape(inputs_strategy, outputs_strategy, &inputs_slice_shape, &outputs_slice_shape) != SUCCESS) {
-    return FAILED;
-  }
-  Shape input_slice_shape = inputs_slice_shape.at(0);
-
-  TensorLayout input_tensor_layout;
-  if (input_tensor_layout.InitFromVector(dev_matrix_shape_, inputs_tensor_map_[0], input_shape) != SUCCESS) {
+  TensorLayout input_tensor_layout, output_tensor_layout;
+  if ((input_tensor_layout.InitFromVector(dev_matrix_shape_, inputs_tensor_map_[0], inputs_shape_[0]) != SUCCESS) ||
+      (output_tensor_layout.InitFromVector(dev_matrix_shape_, outputs_tensor_map_[0], outputs_shape_[0]))) {
+    MS_LOG(ERROR) << name_ << ": init tensor layout failed";
     return FAILED;
   }
 
-  TensorInfo input_tensor_info(input_tensor_layout, input_shape, input_slice_shape);
+  TensorInfo input_tensor_info(input_tensor_layout);
+  TensorInfo output_tensor_info(output_tensor_layout);
 
   inputs_tensor_info_.push_back(input_tensor_info);
-  outputs_tensor_info_.push_back(input_tensor_info);  // the same as input
+  outputs_tensor_info_.push_back(output_tensor_info);
 
   return SUCCESS;
 }
@@ -410,19 +411,19 @@ Status ExpandDimsInfo::GetAttrs() {
     return FAILED;
   }
 
-  if (!input_value_.back()->isa<Int32Imm>()) {
-    MS_LOG(ERROR) << name_ << ": The type of axis is not int";
+  if (!input_value_.back()->isa<Int64Imm>()) {
+    MS_LOG(ERROR) << name_ << ": The type of axis is not int64_t";
     return FAILED;
   }
 
-  int32_t axis = GetValue<int32_t>(input_value_.back());
+  int64_t axis = GetValue<int64_t>(input_value_.back());
 
   if (inputs_shape_.empty()) {
     MS_LOG(ERROR) << name_ << ": The inputs shape is empty";
     return FAILED;
   }
 
-  int32_t dim = SizeToInt(inputs_shape_[0].size());
+  int64_t dim = SizeToLong(inputs_shape_[0].size());
   if ((axis > dim) || (axis < -dim - 1)) {
     MS_LOG(ERROR) << name_ << ": The axis(" << axis << ") is out of range[" << -dim - 1 << ", " << dim << "]";
     return FAILED;
@@ -448,13 +449,13 @@ Status ExpandDimsInfo::InferTensorMap() {
   Shape input_tensor_map, output_tensor_map;
   size_t size = inputs_shape_[0].size();
   for (size_t i = 0; i < size; ++i) {
-    input_tensor_map.push_back(SizeToInt(size - i - 1));
+    input_tensor_map.push_back(SizeToLong(size - i - 1));
   }
 
   inputs_tensor_map_.push_back(input_tensor_map);
 
   output_tensor_map = input_tensor_map;
-  if ((positive_axis_ < 0) || (positive_axis_ > SizeToInt(size))) {
+  if ((positive_axis_ < 0) || (positive_axis_ > SizeToLong(size))) {
     MS_LOG(ERROR) << name_ << ": Invalid positive axis " << positive_axis_;
     return FAILED;
   }
@@ -479,7 +480,7 @@ Status ExpandDimsInfo::InferTensorStrategy() {
   }
 
   Shape output_strategy = inputs_strategy_[0];
-  if ((positive_axis_ < 0) || (positive_axis_ > SizeToInt(output_strategy.size()))) {
+  if ((positive_axis_ < 0) || (positive_axis_ > SizeToLong(output_strategy.size()))) {
     MS_LOG(ERROR) << name_ << ": Invalid positive axis " << positive_axis_;
     return FAILED;
   }
@@ -568,7 +569,7 @@ Status ExpandDimsInfo::InferMirrorOps() {
 }
 
 Status SqueezeInfo::InferAxis(const ValueTuplePtr &value_tuple) {
-  std::vector<int32_t> axis;
+  std::vector<int64_t> axis;
   auto axis_list = value_tuple->value();
   if (inputs_shape_.empty()) {
     MS_LOG(ERROR) << name_ << ": The inputs shape is empty";
@@ -589,12 +590,12 @@ Status SqueezeInfo::InferAxis(const ValueTuplePtr &value_tuple) {
 
   // convert negative axis to positive.
   for (auto &dim : axis_list) {
-    if (!dim->isa<Int32Imm>()) {
-      MS_LOG(ERROR) << name_ << ": The type of axis is not int";
+    if (!dim->isa<Int64Imm>()) {
+      MS_LOG(ERROR) << name_ << ": The type of axis is not int64_t";
       return FAILED;
     }
-    int32_t dim_value = GetValue<int32_t>(dim);
-    int32_t positive_value = (dim_value < 0) ? (dim_value + SizeToInt(input_size)) : dim_value;
+    int64_t dim_value = GetValue<int64_t>(dim);
+    int64_t positive_value = (dim_value < 0) ? (dim_value + SizeToLong(input_size)) : dim_value;
     axis.push_back(positive_value);
   }
   axis_ = MakeValue(axis)->cast<ValueTuplePtr>();
@@ -633,14 +634,14 @@ Status SqueezeInfo::InferTensorMap() {
     return FAILED;
   }
   size_t size = inputs_shape_[0].size();
-  std::vector<int32_t> axis = GetValue<const std::vector<int>>(axis_);
+  std::vector<int64_t> axis = GetValue<const std::vector<int64_t>>(axis_);
   for (size_t i = 0; i < size; ++i) {
     size_t index = size - i - 1;
-    auto iter = std::find(axis.begin(), axis.end(), SizeToInt(i));
+    auto iter = std::find(axis.begin(), axis.end(), SizeToLong(i));
     if (iter == axis.end()) {
-      output_tensor_map.push_back(SizeToInt(index));
+      output_tensor_map.push_back(SizeToLong(index));
     }
-    input_tensor_map.push_back(SizeToInt(index));
+    input_tensor_map.push_back(SizeToLong(index));
   }
   inputs_tensor_map_.push_back(input_tensor_map);
   outputs_tensor_map_.push_back(output_tensor_map);
@@ -668,9 +669,9 @@ Status SqueezeInfo::InferTensorInfo() {
   Shapes inputs_slice_shape, outputs_slice_shape;
   Strategys inputs_strategy = strategy_->GetInputDim();
   Dimensions output_strategy;
-  std::vector<int32_t> axis = GetValue<const std::vector<int>>(axis_);
+  std::vector<int64_t> axis = GetValue<const std::vector<int64_t>>(axis_);
   for (size_t i = 0; i < inputs_shape_[0].size(); ++i) {
-    auto iter = std::find(axis.begin(), axis.end(), SizeToInt(i));
+    auto iter = std::find(axis.begin(), axis.end(), SizeToLong(i));
     if (iter == axis.end()) {
       output_strategy.push_back(inputs_strategy[0].at(i));
     }

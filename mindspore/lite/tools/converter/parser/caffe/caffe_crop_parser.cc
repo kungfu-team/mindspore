@@ -17,57 +17,44 @@
 #include "tools/converter/parser/caffe/caffe_crop_parser.h"
 #include <memory>
 
-const int32_t CROP_AXIS = 2;
-
 namespace mindspore {
 namespace lite {
-STATUS CaffeCropParser::Parse(const caffe::LayerParameter &proto, const caffe::LayerParameter &weight,
-                              schema::CNodeT *op, std::vector<schema::TensorT *> *weightVec) {
-  MS_LOG(DEBUG) << "parse CaffeCropParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
+PrimitiveC *CaffeCropParser::ParseLitePrimitive(const caffe::LayerParameter &proto,
+                                                const caffe::LayerParameter &weight) {
   std::unique_ptr<schema::CropT> attr = std::make_unique<schema::CropT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   if (!proto.has_crop_param()) {
-    attr->axis = CROP_AXIS;
+    attr->axis = 2;
     std::vector<int64_t> offsets(2, 0);
     attr->offsets = offsets;
   } else {
-    const caffe::CropParameter cropParam = proto.crop_param();
+    const caffe::CropParameter &cropParam = proto.crop_param();
     if (cropParam.has_axis()) {
       if (cropParam.axis() == -1) {
         MS_LOG(WARNING) << "axis with -1 may lead to calculation errors when input less than 4 dims.";
       }
       attr->axis = cropParam.axis();
     } else {
-      attr->axis = CROP_AXIS;
+      attr->axis = 2;
     }
 
     if (cropParam.offset_size() != 0) {
       std::vector<int64_t> offsets;
+      offsets.reserve(cropParam.offset_size());
       for (int i = 0; i < cropParam.offset_size(); i++) {
         offsets.push_back(cropParam.offset(i));
       }
       attr->offsets = offsets;
     }
   }
-
-  op->name = proto.name();
-  op->primitive->value.type = schema::PrimitiveType_Crop;
-  op->primitive->value.value = attr.release();
-  return RET_OK;
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  primitive->value.type = schema::PrimitiveType_Crop;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
 CaffeNodeRegistrar g_caffeCropParser("Crop", new CaffeCropParser());

@@ -25,7 +25,7 @@
 
 namespace mindspore {
 namespace dataset {
-class DistributedSampler : public Sampler {
+class DistributedSamplerRT : public SamplerRT {
  public:
   /// \brief Constructor
   /// \param[in] num_samples The total number of rows in the dataset
@@ -34,16 +34,18 @@ class DistributedSampler : public Sampler {
   /// \param[in] shuffle Option to shuffle
   /// \param seed Seed parameter to shuffle, default to max unsigned int (different seed in sampler will
   ///     result in different samples being picked
-  /// \param[in] offset The starting position which the elements in the dataset are send to.The application
-  ///     scenario of this parameter is when the concatdataset is set distributedSampler
+  /// \param[in] offset The starting device id where the elements in the dataset are send to, which should be no more
+  ///     than num_dev. The application scenario of this parameter is when the concatdataset is set distributedSampler
   /// \param even_dist The option to indicate whether or not each shard returns the same number of rows.
   ///     This option is not exposed in the python API. Current behavior is that the remainder will always
-  ///     be handled by the first n shards, n being the corresponding device id.
-  DistributedSampler(int64_t num_samples, int64_t num_dev, int64_t dev_id, bool shuffle,
-                     uint32_t seed = std::numeric_limits<uint32_t>::max(), int64_t offset = -1, bool even_dist = true);
+  ///     be handled by the first n shards, n being the corresponding device id. Please notice that when offset is set,
+  ///     even_dist will be forcibly converted to false for sending rest datasets in concatdataset scenario.
+  DistributedSamplerRT(int64_t num_samples, int64_t num_dev, int64_t dev_id, bool shuffle,
+                       uint32_t seed = std::numeric_limits<uint32_t>::max(), int64_t offset = -1,
+                       bool even_dist = true);
 
   /// \brief default destructor
-  ~DistributedSampler() = default;
+  ~DistributedSamplerRT() = default;
 
   /// \param std::unique_ptr<DataBuffer> * pBuffer
   /// \param int32_t workerId
@@ -61,7 +63,14 @@ class DistributedSampler : public Sampler {
 
   int64_t GetDeviceNum() { return num_devices_; }
 
-  void Print(std::ostream &out, bool show_all) const override;
+  /// \brief Recursively calls this function on its children to get the actual number of samples on a tree of samplers
+  /// \note This is not a getter for num_samples_. For example, if num_samples_ is 0 or if it's smaller than num_rows,
+  ///     then num_samples_ is not returned at all.
+  /// \param[in] num_rows The total number of rows in the dataset
+  /// \return int64_t Calculated number of samples
+  int64_t CalculateNumSamples(int64_t num_rows) override;
+
+  void SamplerPrint(std::ostream &out, bool show_all) const override;
 
  private:
   int64_t cnt_;  // number of samples that have already been filled in to buffer

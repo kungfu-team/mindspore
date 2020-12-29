@@ -35,15 +35,15 @@ AbstractBasePtr InferImplPooling(const AnalysisEnginePtr &, const PrimitivePtr &
   if (input_shape->shape().size() != 4) {
     MS_LOG(EXCEPTION) << "Pooling input should be a 4-D tensor.";
   }
-  int h_input = input_shape->shape()[2];
-  int w_input = input_shape->shape()[3];
+  int64_t h_input = input_shape->shape()[2];
+  int64_t w_input = input_shape->shape()[3];
 
-  int window = primitive->GetAttr("window")->cast<Int32ImmPtr>()->value();
-  int stride = primitive->GetAttr("stride")->cast<Int32ImmPtr>()->value();
-  int padding = primitive->GetAttr("pad")->cast<Int32ImmPtr>()->value();
-  int nan_opt = primitive->GetAttr("nan_opt")->cast<Int32ImmPtr>()->value();
-  int data_mode = primitive->GetAttr("data_mode")->cast<Int32ImmPtr>()->value();
-  int ceil_mode = primitive->GetAttr("ceil_mode")->cast<Int32ImmPtr>()->value();
+  int64_t window = primitive->GetAttr("window")->cast<Int64ImmPtr>()->value();
+  int64_t stride = primitive->GetAttr("stride")->cast<Int64ImmPtr>()->value();
+  int64_t padding = primitive->GetAttr("pad")->cast<Int64ImmPtr>()->value();
+  int64_t nan_opt = primitive->GetAttr("nan_opt")->cast<Int64ImmPtr>()->value();
+  int64_t data_mode = primitive->GetAttr("data_mode")->cast<Int64ImmPtr>()->value();
+  int64_t ceil_mode = primitive->GetAttr("ceil_mode")->cast<Int64ImmPtr>()->value();
 
   if (stride <= 0) {
     MS_LOG(EXCEPTION) << "Invalid stride value: " << stride << ", should greater then 0";
@@ -81,8 +81,8 @@ AbstractBasePtr InferImplPooling(const AnalysisEnginePtr &, const PrimitivePtr &
     }
   }
 
-  int h_out = ((h_input + 2 * padding - (window - 1) - 1) / stride) + 1;
-  int w_out = ((w_input + 2 * padding - (window - 1) - 1) / stride) + 1;
+  int64_t h_out = ((h_input + 2 * padding - (window - 1) - 1) / stride) + 1;
+  int64_t w_out = ((w_input + 2 * padding - (window - 1) - 1) / stride) + 1;
   ShapeVector shape_out = {input_shape->shape()[0], input_shape->shape()[1], h_out, w_out};
   AbstractBasePtr ret = input_tensor->Broaden();
   ret->set_shape(std::make_shared<Shape>(shape_out));
@@ -252,6 +252,21 @@ AbstractBasePtr InferImplReluGrad(const AnalysisEnginePtr &, const PrimitivePtr 
   return out->Broaden();
 }
 
+AbstractBasePtr InferImplFusedSparseAdam(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                                         const AbstractBasePtrList &args_spec_list) {
+  // the output is useless, so we dont have to focus on the output shape
+  MS_EXCEPTION_IF_NULL(args_spec_list[1]);
+  MS_EXCEPTION_IF_NULL(args_spec_list[2]);
+  MS_EXCEPTION_IF_NULL(args_spec_list[3]);
+
+  auto dx = args_spec_list[1]->Broaden();
+  auto dscale = args_spec_list[2]->Broaden();
+  auto dbias = args_spec_list[3]->Broaden();
+
+  AbstractBasePtrList rets = {dx, dscale, dbias};
+  return std::make_shared<AbstractTuple>(rets);
+}
+
 AbstractBasePtr InferImplConv2DBackpropInput(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
                                              const AbstractBasePtrList &args_spec_list) {
   // Inputs: three tensors(doutput, input, filters).
@@ -296,13 +311,6 @@ AbstractBasePtr InferImplRelu(const AnalysisEnginePtr &, const PrimitivePtr &pri
   return args_spec_list[0]->Broaden();
 }
 
-AbstractBasePtr InferImplZerosLike(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
-                                   const AbstractBasePtrList &args_spec_list) {
-  // Inputs: a tensor.
-  CheckArgsSize(primitive->name(), args_spec_list, 1);
-  return args_spec_list[0]->Broaden();
-}
-
 AbstractBasePtr InferImplBpropCut(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
                                   const AbstractBasePtrList &args_spec_list) {
   // Inputs: a tensor.
@@ -329,10 +337,10 @@ AbstractBasePtr InferImplLayerNorm(const AnalysisEnginePtr &, const PrimitivePtr
 
   // begin_norm_axis and begin_params_axis should be smaller than the size of input_x and >= -1
   ValuePtr bna_ptr = primitive->GetAttr("begin_norm_axis");
-  int begin_norm_axis = CheckAxis(op_name, bna_ptr, -1, SizeToInt(input_rank) - 1);
+  int64_t begin_norm_axis = CheckAxis(op_name, bna_ptr, -1, SizeToLong(input_rank) - 1);
 
   ValuePtr bpa_ptr = primitive->GetAttr("begin_params_axis");
-  int begin_params_axis = CheckAxis(op_name, bpa_ptr, -1, SizeToInt(input_rank) - 1);
+  int64_t begin_params_axis = CheckAxis(op_name, bpa_ptr, -1, SizeToLong(input_rank) - 1);
   begin_params_axis = GetPositiveAxis(begin_params_axis, input_rank);
 
   // the beta and gama shape should be x_shape[begin_params_axis:]
@@ -353,7 +361,7 @@ AbstractBasePtr InferImplLayerNorm(const AnalysisEnginePtr &, const PrimitivePtr
     MS_LOG(EXCEPTION) << "LayerNorm evaluator gamma or beta is a AbstractScalar that is not support.";
   }
 
-  size_t begin_params_axis_u = IntToSize(begin_params_axis);
+  size_t begin_params_axis_u = LongToSize(begin_params_axis);
   if ((begin_params_axis_u > input_shape_list.size()) ||
       (gamma_shape_list.size() + begin_params_axis_u < input_shape_list.size()) ||
       (beta_shape_list.size() + begin_params_axis_u < input_shape_list.size())) {
@@ -416,15 +424,13 @@ AbstractBasePtr InferImplDropoutGenMask(const AnalysisEnginePtr &, const Primiti
   }
 
   auto x_shape_data = x_shape->elements();
-  int count = 1;
+  int64_t count = 1;
   for (std::size_t i = 0; i < x_shape->size(); ++i) {
     auto value_track = x_shape_data[i]->GetValueTrack();
     MS_EXCEPTION_IF_NULL(value_track);
     int64_t e_value = 0;
     if (value_track->isa<Int64Imm>()) {
       e_value = GetValue<int64_t>(value_track);
-    } else if (value_track->isa<Int32Imm>()) {
-      e_value = static_cast<int64_t>(GetValue<int>(value_track));
     } else {
       MS_LOG(EXCEPTION) << "DropOutGenMask input x_shape elements is not int64 or int32, but "
                         << value_track->ToString() << ".";
@@ -471,5 +477,73 @@ AbstractBasePtr InferImplSparseApplyProximalAdagrad(const AnalysisEnginePtr &, c
   }
   return std::make_shared<AbstractTuple>(elements);
 }
+
+AbstractBasePtr InferImplSGD(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                             const AbstractBasePtrList &args_spec_list) {
+  CheckArgsSize(primitive->name(), args_spec_list, 6);
+  AbstractBasePtrList elements;
+  elements.push_back(args_spec_list[0]->Clone()->Broaden());
+  return std::make_shared<AbstractTuple>(elements);
+}
+
+AbstractBasePtr InferImplPad(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                             const AbstractBasePtrList &args_spec_list) {
+  const std::string op_name = primitive->name();
+  CheckArgsSize(op_name, args_spec_list, 1);
+  auto arg = CheckArg<AbstractTensor>(op_name, args_spec_list, 0);
+  auto input_shp = arg->shape()->shape();
+  MS_EXCEPTION_IF_NULL(primitive);
+  auto padding_attr = primitive->GetAttr("paddings");
+  MS_EXCEPTION_IF_NULL(padding_attr);
+  if (!padding_attr->isa<ValueTuple>()) {
+    MS_LOG(EXCEPTION) << "Paddings is not a ValueTuple";
+  }
+  std::vector<ValuePtr> paddings = padding_attr->cast<ValueTuplePtr>()->value();
+  std::vector<std::vector<int64_t>> paddings_vec;
+  for (ValuePtr paddings_elements : paddings) {
+    std::vector<ValuePtr> paddings_elements_tuple = paddings_elements->cast<ValueTuplePtr>()->value();
+    std::vector<int64_t> paddings_vec_item;
+    (void)std::transform(std::begin(paddings_elements_tuple), std::end(paddings_elements_tuple),
+                         std::back_inserter(paddings_vec_item),
+                         [](const ValuePtr &e) -> int64_t { return GetValue<int64_t>(e); });
+    paddings_vec.push_back(paddings_vec_item);
+  }
+
+  ShapeVector result_shp;
+  size_t length = paddings_vec.size();
+  for (size_t i = 0; i < length; ++i) {
+    if (paddings_vec[i].size() != 2) {
+      MS_LOG(EXCEPTION) << "Paddings 's second dim size is not 2";
+    }
+    result_shp.push_back(input_shp[i] + paddings_vec[i][0] + paddings_vec[i][1]);
+  }
+  return std::make_shared<AbstractTensor>(arg->element(), std::make_shared<Shape>(result_shp));
+}
+
+AbstractBasePtr InferImplComputeAccidentalHits(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                                               const AbstractBasePtrList &args_spec_list) {
+  // inputs: true_classes, sampled_candidates
+  const std::string op_name = primitive->name();
+  CheckArgsSize(op_name, args_spec_list, 2);
+  AbstractTensorPtr input = CheckArg<AbstractTensor>(op_name, args_spec_list, 0);
+
+  auto shape = input->shape();
+  if (shape->shape().size() != 2) {
+    MS_LOG(EXCEPTION) << "Rank of " << op_name << "'s input must be 2.";
+  }
+  ShapeVector indices_shape = {Shape::SHP_ANY};
+  ShapeVector min_shape = {1};
+  ShapeVector max_shape = {shape->shape()[0] * shape->shape()[1]};
+
+  auto indices =
+    std::make_shared<AbstractTensor>(input->element(), std::make_shared<Shape>(indices_shape, min_shape, max_shape));
+
+  auto weights = std::make_shared<AbstractTensor>(kFloat32, indices_shape);
+  weights->set_shape(std::make_shared<Shape>(indices_shape, min_shape, max_shape));
+  // outputs: indices, ids, weights
+  AbstractBasePtrList elements = {indices, indices, weights};
+  return std::make_shared<AbstractTuple>(elements);
+}
+
 }  // namespace abstract
 }  // namespace mindspore

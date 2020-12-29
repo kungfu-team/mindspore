@@ -13,11 +13,13 @@
 # limitations under the License.
 # ============================================================================
 """Uniform Distribution"""
+import numpy as np
 from mindspore.ops import operations as P
 from mindspore.ops import composite as C
+from mindspore._checkparam import Validator
 from mindspore.common import dtype as mstype
 from .distribution import Distribution
-from ._utils.utils import check_greater, check_type, check_distribution_name
+from ._utils.utils import check_greater, check_distribution_name
 from ._utils.custom_ops import exp_generic, log_generic
 
 
@@ -26,11 +28,14 @@ class Uniform(Distribution):
     Example class: Uniform Distribution.
 
     Args:
-        low (int, float, list, numpy.ndarray, Tensor, Parameter): The lower bound of the distribution.
-        high (int, float, list, numpy.ndarray, Tensor, Parameter): The upper bound of the distribution.
+        low (int, float, list, numpy.ndarray, Tensor): The lower bound of the distribution.
+        high (int, float, list, numpy.ndarray, Tensor): The upper bound of the distribution.
         seed (int): The seed uses in sampling. The global seed is used if it is None. Default: None.
         dtype (mindspore.dtype): The type of the event samples. Default: mstype.float32.
         name (str): The name of the distribution. Default: 'Uniform'.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Note:
         `low` must be stricly less than `high`.
@@ -38,79 +43,94 @@ class Uniform(Distribution):
         `dtype` must be float type because Uniform distributions are continuous.
 
     Examples:
-        >>> # To initialize a Uniform distribution of the lower bound 0.0 and the higher bound 1.0.
+        >>> import mindspore
+        >>> import mindspore.context as context
+        >>> import mindspore.nn as nn
         >>> import mindspore.nn.probability.distribution as msd
-        >>> u = msd.Uniform(0.0, 1.0, dtype=mstype.float32)
-        >>>
-        >>> # The following creates two independent Uniform distributions.
-        >>> u = msd.Uniform([0.0, 0.0], [1.0, 2.0], dtype=mstype.float32)
-        >>>
-        >>> # A Uniform distribution can be initilized without arguments.
+        >>> from mindspore import Tensor
+        >>> context.set_context(mode=context.GRAPH_MODE)
+        >>> # To initialize a Uniform distribution of the lower bound 0.0 and the higher bound 1.0.
+        >>> u1 = msd.Uniform(0.0, 1.0, dtype=mindspore.float32)
+        >>> # A Uniform distribution can be initialized without arguments.
         >>> # In this case, `high` and `low` must be passed in through arguments during function calls.
-        >>> u = msd.Uniform(dtype=mstype.float32)
+        >>> u2 = msd.Uniform(dtype=mindspore.float32)
         >>>
-        >>> # To use a Uniform distribution in a network.
-        >>> class net(Cell):
-        >>>     def __init__(self)
-        >>>         super(net, self).__init__():
-        >>>         self.u1 = msd.Uniform(0.0, 1.0, dtype=mstype.float32)
-        >>>         self.u2 = msd.Uniform(dtype=mstype.float32)
-        >>>
-        >>>     # All the following calls in construct are valid.
-        >>>     def construct(self, value, low_b, high_b, low_a, high_a):
-        >>>
-        >>>         # Private interfaces of probability functions corresponding to public interfaces, including
-        >>>         # `prob`, `log_prob`, `cdf`, `log_cdf`, `survival_function`, and `log_survival`, have the same arguments.
-        >>>         # Args:
-        >>>         #     value (Tensor): the value to be evaluated.
-        >>>         #     low (Tensor): the lower bound of distribution. Default: self.low.
-        >>>         #     high (Tensor): the higher bound of distribution. Default: self.high.
-        >>>
-        >>>         # Examples of `prob`.
-        >>>         # Similar calls can be made to other probability functions
-        >>>         # by replacing 'prob' by the name of the function.
-        >>>         ans = self.u1.prob(value)
-        >>>         # Evaluate with respect to distribution b.
-        >>>         ans = self.u1.prob(value, low_b, high_b)
-        >>>         # `high` and `low` must be passed in during function calls.
-        >>>         ans = self.u2.prob(value, low_a, high_a)
-        >>>
-        >>>
-        >>>         # Functions `mean`, `sd`, `var`, and `entropy` have the same arguments.
-        >>>         # Args:
-        >>>         #     low (Tensor): the lower bound of distribution. Default: self.low.
-        >>>         #     high (Tensor): the higher bound of distribution. Default: self.high.
-        >>>
-        >>>         # Examples of `mean`. `sd`, `var`, and `entropy` are similar.
-        >>>         ans = self.u1.mean() # return 0.5
-        >>>         ans = self.u1.mean(low_b, high_b) # return (low_b + high_b) / 2
-        >>>         # `high` and `low` must be passed in during function calls.
-        >>>         ans = self.u2.mean(low_a, high_a)
-        >>>
-        >>>         # Interfaces of 'kl_loss' and 'cross_entropy' are the same.
-        >>>         # Args:
-        >>>         #     dist (str): the type of the distributions. Should be "Uniform" in this case.
-        >>>         #     low_b (Tensor): the lower bound of distribution b.
-        >>>         #     high_b (Tensor): the upper bound of distribution b.
-        >>>         #     low_a (Tensor): the lower bound of distribution a. Default: self.low.
-        >>>         #     high_a (Tensor): the upper bound of distribution a. Default: self.high.
-        >>>
-        >>>         # Examples of `kl_loss`. `cross_entropy` is similar.
-        >>>         ans = self.u1.kl_loss('Uniform', low_b, high_b)
-        >>>         ans = self.u1.kl_loss('Uniform', low_b, high_b, low_a, high_a)
-        >>>         # Additional `high` and `low` must be passed in.
-        >>>         ans = self.u2.kl_loss('Uniform', low_b, high_b, low_a, high_a)
-        >>>
-        >>>
-        >>>         # Examples of `sample`.
-        >>>         # Args:
-        >>>         #     shape (tuple): the shape of the sample. Default: ()
-        >>>         #     low (Tensor): the lower bound of the distribution. Default: self.low.
-        >>>         #     high (Tensor): the upper bound of the distribution. Default: self.high.
-        >>>         ans = self.u1.sample()
-        >>>         ans = self.u1.sample((2,3))
-        >>>         ans = self.u1.sample((2,3), low_b, high_b)
-        >>>         ans = self.u2.sample((2,3), low_a, high_a)
+        >>> # Here are some tensors used below for testing
+        >>> value = Tensor([0.5, 0.8], dtype=mindspore.float32)
+        >>> low_a = Tensor([0., 0.], dtype=mindspore.float32)
+        >>> high_a = Tensor([2.0, 4.0], dtype=mindspore.float32)
+        >>> low_b = Tensor([-1.5], dtype=mindspore.float32)
+        >>> high_b = Tensor([2.5, 5.], dtype=mindspore.float32)
+        >>> # Private interfaces of probability functions corresponding to public interfaces, including
+        >>> # `prob`, `log_prob`, `cdf`, `log_cdf`, `survival_function`, and `log_survival`, have the same arguments.
+        >>> # Args:
+        >>> #     value (Tensor): the value to be evaluated.
+        >>> #     low (Tensor): the lower bound of the distribution. Default: self.low.
+        >>> #     high (Tensor): the higher bound of the distribution. Default: self.high.
+        >>> # Examples of `prob`.
+        >>> # Similar calls can be made to other probability functions
+        >>> # by replacing 'prob' by the name of the function.
+        >>> ans = u1.prob(value)
+        >>> print(ans.shape)
+        (2,)
+        >>> # Evaluate with respect to distribution b.
+        >>> ans = u1.prob(value, low_b, high_b)
+        >>> print(ans.shape)
+        (2,)
+        >>> # `high` and `low` must be passed in during function calls.
+        >>> ans = u2.prob(value, low_a, high_a)
+        >>> print(ans.shape)
+        (2,)
+        >>> # Functions `mean`, `sd`, `var`, and `entropy` have the same arguments.
+        >>> # Args:
+        >>> #     low (Tensor): the lower bound of the distribution. Default: self.low.
+        >>> #     high (Tensor): the higher bound of the distribution. Default: self.high.
+        >>> # Examples of `mean`. `sd`, `var`, and `entropy` are similar.
+        >>> ans = u1.mean() # return 0.5
+        >>> print(ans.shape)
+        ()
+        >>> ans = u1.mean(low_b, high_b) # return (low_b + high_b) / 2
+        >>> print(ans.shape)
+        (2,)
+        >>> # `high` and `low` must be passed in during function calls.
+        >>> ans = u2.mean(low_a, high_a)
+        >>> print(ans.shape)
+        (2,)
+        >>> # Interfaces of 'kl_loss' and 'cross_entropy' are the same.
+        >>> # Args:
+        >>> #     dist (str): the type of the distributions. Should be "Uniform" in this case.
+        >>> #     low_b (Tensor): the lower bound of distribution b.
+        >>> #     high_b (Tensor): the upper bound of distribution b.
+        >>> #     low_a (Tensor): the lower bound of distribution a. Default: self.low.
+        >>> #     high_a (Tensor): the upper bound of distribution a. Default: self.high.
+        >>> # Examples of `kl_loss`. `cross_entropy` is similar.
+        >>> ans = u1.kl_loss('Uniform', low_b, high_b)
+        >>> print(ans.shape)
+        (2,)
+        >>> ans = u1.kl_loss('Uniform', low_b, high_b, low_a, high_a)
+        >>> print(ans.shape)
+        (2,)
+        >>> # Additional `high` and `low` must be passed in.
+        >>> ans = u2.kl_loss('Uniform', low_b, high_b, low_a, high_a)
+        >>> print(ans.shape)
+        (2,)
+        >>> # Examples of `sample`.
+        >>> # Args:
+        >>> #     shape (tuple): the shape of the sample. Default: ()
+        >>> #     low (Tensor): the lower bound of the distribution. Default: self.low.
+        >>> #     high (Tensor): the upper bound of the distribution. Default: self.high.
+        >>> ans = u1.sample()
+        >>> print(ans.shape)
+        ()
+        >>> ans = u1.sample((2,3))
+        >>> print(ans.shape)
+        (2, 3)
+        >>> ans = u1.sample((2,3), low_b, high_b)
+        >>> print(ans.shape)
+        (2, 3, 2)
+        >>> ans = u2.sample((2,3), low_a, high_a)
+        >>> print(ans.shape)
+        (2, 3, 2)
     """
 
     def __init__(self,
@@ -125,7 +145,7 @@ class Uniform(Distribution):
         param = dict(locals())
         param['param_dict'] = {'low': low, 'high': high}
         valid_dtype = mstype.float_type
-        check_type(dtype, valid_dtype, type(self).__name__)
+        Validator.check_type_name("dtype", dtype, valid_dtype, type(self).__name__)
         super(Uniform, self).__init__(seed, dtype, name, param)
 
         self._low = self._add_parameter(low, 'low')
@@ -153,24 +173,38 @@ class Uniform(Distribution):
 
     def extend_repr(self):
         if self.is_scalar_batch:
-            str_info = f'low = {self.low}, high = {self.high}'
+            s = f'low = {self.low}, high = {self.high}'
         else:
-            str_info = f'batch_shape = {self._broadcast_shape}'
-        return str_info
+            s = f'batch_shape = {self._broadcast_shape}'
+        return s
 
     @property
     def low(self):
         """
-        Return the lower bound of the distribution.
+        Return the lower bound of the distribution after casting to dtype.
         """
         return self._low
 
     @property
     def high(self):
         """
-        Return the upper bound of the distribution.
+        Return the upper bound of the distribution after casting to dtype..
         """
         return self._high
+
+    def _get_dist_type(self):
+        return "Uniform"
+
+    def _get_dist_args(self, low=None, high=None):
+        if low is not None:
+            self.checktensor(low, 'low')
+        else:
+            low = self.low
+        if high is not None:
+            self.checktensor(high, 'high')
+        else:
+            high = self.high
+        return low, high
 
     def _range(self, low=None, high=None):
         r"""
@@ -266,7 +300,8 @@ class Uniform(Distribution):
         kl = self.log(high_b - low_b) - self.log(high_a - low_a)
         comp = self.logicaland(self.lessequal(
             low_b, low_a), self.lessequal(high_a, high_b))
-        return self.select(comp, kl, self.log(self.zeroslike(kl)))
+        inf = self.fill(self.dtypeop(kl), self.shape(kl), np.inf)
+        return self.select(comp, kl, inf)
 
     def _cdf(self, value, low=None, high=None):
         r"""

@@ -19,9 +19,11 @@ SequentialSampler, SubsetRandomSampler, and WeightedRandomSampler.
 Users can also define a custom sampler by extending from the Sampler class.
 """
 
+import numbers
 import numpy as np
 import mindspore._c_dataengine as cde
 import mindspore.dataset as ds
+
 
 class Sampler:
     """
@@ -223,7 +225,8 @@ class DistributedSampler(BuiltinSampler):
         shard_id (int): Shard ID of the current shard within num_shards.
         shuffle (bool, optional): If True, the indices are shuffled (default=True).
         num_samples (int, optional): The number of samples to draw (default=None, all elements).
-        offset(int, optional): The starting sample ID where access to elements in the dataset begins (default=-1).
+        offset(int, optional): The starting shard ID where the elements in the dataset are sent to (default=-1), which
+            should be no more than num_shards.
 
     Examples:
         >>> import mindspore.dataset as ds
@@ -238,22 +241,27 @@ class DistributedSampler(BuiltinSampler):
         ValueError: If num_shards is not positive.
         ValueError: If shard_id is smaller than 0 or equal to num_shards or larger than num_shards.
         ValueError: If shuffle is not a boolean value.
+        ValueError: If offset is greater than num_shards.
     """
 
     def __init__(self, num_shards, shard_id, shuffle=True, num_samples=None, offset=-1):
         if num_shards <= 0:
-            raise ValueError("num_shards should be a positive integer value, but got num_shards={}".format(num_shards))
+            raise ValueError("num_shards should be a positive integer value, but got num_shards:{}.".format(num_shards))
 
         if shard_id < 0 or shard_id >= num_shards:
-            raise ValueError("shard_id is invalid, shard_id={}".format(shard_id))
+            raise ValueError("shard_id should in range [0, {}], but got shard_id: {}.".format(num_shards, shard_id))
 
         if not isinstance(shuffle, bool):
-            raise ValueError("shuffle should be a boolean value, but got shuffle={}".format(shuffle))
+            raise ValueError("shuffle should be a boolean value, but got shuffle: {}.".format(shuffle))
 
         if num_samples is not None:
             if num_samples <= 0:
                 raise ValueError("num_samples should be a positive integer "
-                                 "value, but got num_samples={}".format(num_samples))
+                                 "value, but got num_samples: {}.".format(num_samples))
+
+        if offset > num_shards:
+            raise ValueError("offset should be no more than num_shards: {}, "
+                             "but got offset: {}".format(num_shards, offset))
 
         self.num_shards = num_shards
         self.shard_id = shard_id
@@ -304,6 +312,7 @@ class PKSampler(BuiltinSampler):
     Args:
         num_val (int): Number of elements to sample for each class.
         num_class (int, optional): Number of classes to sample (default=None, all classes).
+            The parameter does not supported to specify currently.
         shuffle (bool, optional): If True, the class IDs are shuffled (default=False).
         class_column (str, optional): Name of column with class labels for MindDataset (default='label').
         num_samples (int, optional): The number of samples to draw (default=None, all elements).
@@ -325,18 +334,18 @@ class PKSampler(BuiltinSampler):
 
     def __init__(self, num_val, num_class=None, shuffle=False, class_column='label', num_samples=None):
         if num_val <= 0:
-            raise ValueError("num_val should be a positive integer value, but got num_val={}".format(num_val))
+            raise ValueError("num_val should be a positive integer value, but got num_val: {}.".format(num_val))
 
         if num_class is not None:
-            raise NotImplementedError("Not support specify num_class")
+            raise NotImplementedError("Not supported to specify num_class for PKSampler.")
 
         if not isinstance(shuffle, bool):
-            raise ValueError("shuffle should be a boolean value, but got shuffle={}".format(shuffle))
+            raise ValueError("shuffle should be a boolean value, but got shuffle: {}.".format(shuffle))
 
         if num_samples is not None:
             if num_samples <= 0:
                 raise ValueError("num_samples should be a positive integer "
-                                 "value, but got num_samples={}".format(num_samples))
+                                 "value, but got num_samples: {}.".format(num_samples))
 
         self.num_val = num_val
         self.shuffle = shuffle
@@ -365,7 +374,7 @@ class PKSampler(BuiltinSampler):
     def create_for_minddataset(self):
         if not self.class_column or not isinstance(self.class_column, str):
             raise ValueError("class_column should be a not empty string value, \
-                    but got class_column={}".format(class_column))
+                    but got class_column: {}.".format(class_column))
         num_samples = self.num_samples if self.num_samples is not None else 0
         c_sampler = cde.MindrecordPkSampler(self.num_val, self.class_column, self.shuffle, num_samples)
         c_child_sampler = self.create_child_for_minddataset()
@@ -397,12 +406,12 @@ class RandomSampler(BuiltinSampler):
 
     def __init__(self, replacement=False, num_samples=None):
         if not isinstance(replacement, bool):
-            raise ValueError("replacement should be a boolean value, but got replacement={}".format(replacement))
+            raise ValueError("replacement should be a boolean value, but got replacement: {}.".format(replacement))
 
         if num_samples is not None:
             if num_samples <= 0:
                 raise ValueError("num_samples should be a positive integer "
-                                 "value, but got num_samples={}".format(num_samples))
+                                 "value, but got num_samples: {}.".format(num_samples))
 
         self.deterministic = False
         self.replacement = replacement
@@ -455,12 +464,12 @@ class SequentialSampler(BuiltinSampler):
         if num_samples is not None:
             if num_samples <= 0:
                 raise ValueError("num_samples should be a positive integer "
-                                 "value, but got num_samples={}".format(num_samples))
+                                 "value, but got num_samples: {}.".format(num_samples))
 
         if start_index is not None:
             if start_index < 0:
                 raise ValueError("start_index should be a positive integer "
-                                 "value or 0, but got start_index={}".format(start_index))
+                                 "value or 0, but got start_index: {}.".format(start_index))
 
         self.start_index = start_index
         super().__init__(num_samples)
@@ -510,7 +519,7 @@ class SubsetRandomSampler(BuiltinSampler):
         >>> indices = [0, 1, 2, 3, 7, 88, 119]
         >>>
         >>> # creates a SubsetRandomSampler, will sample from the provided indices
-        >>> sampler = ds.SubsetRandomSampler()
+        >>> sampler = ds.SubsetRandomSampler(indices)
         >>> data = ds.ImageFolderDataset(dataset_dir, num_parallel_workers=8, sampler=sampler)
     """
 
@@ -518,7 +527,7 @@ class SubsetRandomSampler(BuiltinSampler):
         if num_samples is not None:
             if num_samples <= 0:
                 raise ValueError("num_samples should be a positive integer "
-                                 "value, but got num_samples={}".format(num_samples))
+                                 "value, but got num_samples: {}.".format(num_samples))
 
         if not isinstance(indices, list):
             indices = [indices]
@@ -561,7 +570,7 @@ class WeightedRandomSampler(BuiltinSampler):
     Samples the elements from [0, len(weights) - 1] randomly with the given weights (probabilities).
 
     Args:
-        weights (list[float]): A sequence of weights, not necessarily summing up to 1.
+        weights (list[float, int]): A sequence of weights, not necessarily summing up to 1.
         num_samples (int, optional): Number of elements to sample (default=None, all elements).
         replacement (bool): If True, put the sample ID back for the next draw (default=True).
 
@@ -585,13 +594,27 @@ class WeightedRandomSampler(BuiltinSampler):
         if not isinstance(weights, list):
             weights = [weights]
 
+        for ind, w in enumerate(weights):
+            if not isinstance(w, numbers.Number):
+                raise TypeError("type of weights element should be number, "
+                                "but got w[{}]: {}, type: {}.".format(ind, w, type(w)))
+
+        if weights == []:
+            raise ValueError("weights size should not be 0")
+
+        if list(filter(lambda x: x < 0, weights)) != []:
+            raise ValueError("weights should not contain negative numbers.")
+
+        if list(filter(lambda x: x == 0, weights)) == weights:
+            raise ValueError("elements of weights should not be all zeros.")
+
         if num_samples is not None:
             if num_samples <= 0:
                 raise ValueError("num_samples should be a positive integer "
-                                 "value, but got num_samples={}".format(num_samples))
+                                 "value, but got num_samples: {}.".format(num_samples))
 
         if not isinstance(replacement, bool):
-            raise ValueError("replacement should be a boolean value, but got replacement={}".format(replacement))
+            raise ValueError("replacement should be a boolean value, but got replacement: {}.".format(replacement))
 
         self.weights = weights
         self.replacement = replacement

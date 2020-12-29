@@ -14,28 +14,25 @@
  * limitations under the License.
  */
 
-#ifndef PREDICT_COMMON_FLAG_PARSER_H_
-#define PREDICT_COMMON_FLAG_PARSER_H_
+#ifndef MINDSPORE_LITE_TOOLS_COMMON_FLAG_PARSER_H
+#define MINDSPORE_LITE_TOOLS_COMMON_FLAG_PARSER_H
 
 #include <functional>
 #include <map>
 #include <utility>
 #include <string>
-
 #include "src/common/utils.h"
 #include "tools/common/option.h"
 
 namespace mindspore {
 namespace lite {
-struct FlagInfo;
-
 struct Nothing {};
 
 class FlagParser {
  public:
-  FlagParser() { AddFlag(&FlagParser::help, "help", "print usage message", ""); }
+  FlagParser() { AddFlag(&FlagParser::help, helpStr, "print usage message", ""); }
 
-  virtual ~FlagParser() {}
+  virtual ~FlagParser() = default;
 
   // only support read flags from command line
   virtual Option<std::string> ParseFlags(int argc, const char *const *argv, bool supportUnknown = false,
@@ -44,6 +41,7 @@ class FlagParser {
 
   template <typename Flags, typename T1, typename T2>
   void AddFlag(T1 *t1, const std::string &flagName, const std::string &helpInfo, const T2 *t2);
+
   template <typename Flags, typename T1, typename T2>
   void AddFlag(T1 *t1, const std::string &flagName, const std::string &helpInfo, const T2 &t2);
 
@@ -60,7 +58,7 @@ class FlagParser {
   // Option-type fields
   template <typename Flags, typename T>
   void AddFlag(Option<T> Flags::*t, const std::string &flagName, const std::string &helpInfo);
-  bool help;
+  bool help{};
 
  protected:
   template <typename Flags>
@@ -70,14 +68,15 @@ class FlagParser {
 
   std::string binName;
   Option<std::string> usageMsg;
+  std::string helpStr = "help";
 
  private:
   struct FlagInfo {
     std::string flagName;
-    bool isRequired;
-    bool isBoolean;
+    bool isRequired = false;
+    bool isBoolean = false;
     std::string helpInfo;
-    bool isParsed;
+    bool isParsed = false;
     std::function<Option<Nothing>(FlagParser *, const std::string &)> parse;
   };
 
@@ -93,7 +92,7 @@ class FlagParser {
 
   Option<std::string> InnerParseFlags(std::multimap<std::string, Option<std::string>> *values);
 
-  bool GetRealFlagName(std::string *flagName, const std::string &oriFlagName);
+  static bool GetRealFlagName(std::string *flagName, const std::string &oriFlagName);
 
   std::map<std::string, FlagInfo> flags;
 };
@@ -180,7 +179,7 @@ void FlagParser::AddFlag(T1 *t1, const std::string &flagName, const std::string 
 
   FlagInfo flagItem;
 
-  // flagItem is as a output parameter
+  // flagItem is as an output parameter
   ConstructFlag(t1, flagName, helpInfo, flagItem);
   flagItem.parse = [t1](FlagParser *base, const std::string &value) -> Option<Nothing> {
     if (base != nullptr) {
@@ -218,7 +217,7 @@ void FlagParser::AddFlag(T1 Flags::*t1, const std::string &flagName, const std::
     return;
   }
 
-  Flags *flag = dynamic_cast<Flags *>(this);
+  auto *flag = dynamic_cast<Flags *>(this);
   if (flag == nullptr) {
     return;
   }
@@ -228,7 +227,10 @@ void FlagParser::AddFlag(T1 Flags::*t1, const std::string &flagName, const std::
   // flagItem is as a output parameter
   ConstructFlag(t1, flagName, helpInfo, &flagItem);
   flagItem.parse = [t1](FlagParser *base, const std::string &value) -> Option<Nothing> {
-    Flags *flag = dynamic_cast<Flags *>(base);
+    auto *flag = dynamic_cast<Flags *>(base);
+    if (flag == nullptr) {
+      return Option<Nothing>(None());
+    }
     if (base != nullptr) {
       Option<T1> ret = Option<T1>(GenericParseValue<T1>(value));
       if (ret.IsNone()) {
@@ -267,7 +269,7 @@ void FlagParser::AddFlag(Option<T> Flags::*t, const std::string &flagName, const
     return;
   }
 
-  Flags *flag = dynamic_cast<Flags *>(this);
+  auto *flag = dynamic_cast<Flags *>(this);
   if (flag == nullptr) {
     MS_LOG(ERROR) << "dynamic_cast failed";
     return;
@@ -278,7 +280,7 @@ void FlagParser::AddFlag(Option<T> Flags::*t, const std::string &flagName, const
   ConstructFlag(t, flagName, helpInfo, &flagItem);
   flagItem.isRequired = false;
   flagItem.parse = [t](FlagParser *base, const std::string &value) -> Option<Nothing> {
-    Flags *flag = dynamic_cast<Flags *>(base);
+    auto *flag = dynamic_cast<Flags *>(base);
     if (base != nullptr) {
       Option<T> ret = Option<std::string>(GenericParseValue<T>(value));
       if (ret.IsNone()) {
@@ -297,4 +299,4 @@ void FlagParser::AddFlag(Option<T> Flags::*t, const std::string &flagName, const
 }  // namespace lite
 }  // namespace mindspore
 
-#endif  // PREDICT_COMMON_FLAG_PARSER_H_
+#endif  // MINDSPORE_LITE_TOOLS_COMMON_FLAG_PARSER_H

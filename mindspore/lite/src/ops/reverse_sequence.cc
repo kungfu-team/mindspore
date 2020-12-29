@@ -16,6 +16,10 @@
 
 #include "src/ops/reverse_sequence.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -45,6 +49,12 @@ int ReverseSequence::UnPackToFlatBuilder(const schema::Primitive *primitive, fla
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *ReverseSequenceCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<ReverseSequence>(primitive);
+}
+Registry ReverseSequenceRegistry(schema::PrimitiveType_ReverseSequence, ReverseSequenceCreator);
+
 #endif
 
 int ReverseSequence::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outputs) {
@@ -54,9 +64,9 @@ int ReverseSequence::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor
   MS_ASSERT(output != nullptr);
 
   output->set_data_type(input->data_type());
-  output->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output->set_format(input->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   output->set_shape(input->shape());
   return RET_OK;

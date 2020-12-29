@@ -18,9 +18,14 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <utility>
 
-#include "mindspore/core/utils/log_adapter.h"
+#ifndef ENABLE_ANDROID
+#include "utils/log_adapter.h"
+#else
+#include "mindspore/lite/src/common/log_adapter.h"
+#endif
 #include "minddata/dataset/util/system_pool.h"
 
 namespace mindspore {
@@ -30,13 +35,18 @@ ConfigManager::ConfigManager()
       num_parallel_workers_(kCfgParallelWorkers),
       worker_connector_size_(kCfgWorkerConnectorSize),
       op_connector_size_(kCfgOpConnectorSize),
+      rank_id_(kCfgDefaultRankId),
       seed_(kCfgDefaultSeed),
       monitor_sampling_interval_(kCfgMonitorSamplingInterval),
       callback_timout_(kCfgCallbackTimeout),
       cache_host_(kCfgDefaultCacheHost),
       cache_port_(kCfgDefaultCachePort),
       num_connections_(kDftNumConnections),
-      prefetch_size_(kDftPrefetchSize) {
+      prefetch_size_(kDftPrefetchSize),
+      auto_num_workers_(kDftAutoNumWorkers),
+      num_cpu_threads_(std::thread::hardware_concurrency()),
+      auto_num_workers_num_shards_(1),
+      auto_worker_config_(0) {
   auto env_cache_host = std::getenv("MS_CACHE_HOST");
   auto env_cache_port = std::getenv("MS_CACHE_PORT");
   if (env_cache_host != nullptr) {
@@ -64,7 +74,7 @@ void ConfigManager::Print(std::ostream &out) const {
       << "\nSize of each Connector : " << op_connector_size_ << std::endl;
 }
 
-// Private helper function that taks a nlohmann json format and populates the settings
+// Private helper function that takes a nlohmann json format and populates the settings
 Status ConfigManager::FromJson(const nlohmann::json &j) {
   set_rows_per_buffer(j.value("rowsPerBuffer", rows_per_buffer_));
   set_num_parallel_workers(j.value("numParallelWorkers", num_parallel_workers_));
@@ -119,6 +129,8 @@ void ConfigManager::set_op_connector_size(int32_t connector_size) { op_connector
 
 uint32_t ConfigManager::seed() const { return seed_; }
 
+void ConfigManager::set_rank_id(int32_t rank_id) { rank_id_ = rank_id; }
+
 void ConfigManager::set_seed(uint32_t seed) { seed_ = seed; }
 
 void ConfigManager::set_monitor_sampling_interval(uint32_t interval) { monitor_sampling_interval_ = interval; }
@@ -132,5 +144,6 @@ void ConfigManager::set_cache_port(int32_t cache_port) { cache_port_ = cache_por
 void ConfigManager::set_num_connections(int32_t num_connections) { num_connections_ = num_connections; }
 
 void ConfigManager::set_prefetch_size(int32_t prefetch_size) { prefetch_size_ = prefetch_size; }
+
 }  // namespace dataset
 }  // namespace mindspore

@@ -78,6 +78,8 @@ constexpr const char kNameApplyAdam[] = "Adam";
 constexpr const char kNameExtractImagePatches[] = "ExtractImagePatches";
 constexpr const char kNameReLU6[] = "ReLU6";
 constexpr const char kNameReLU6Grad[] = "ReLU6Grad";
+constexpr const char kNameSoftplus[] = "Softplus";
+constexpr const char kNameSoftplusGrad[] = "SoftplusGrad";
 constexpr const char kNameElu[] = "Elu";
 constexpr const char kNameEluGrad[] = "EluGrad";
 constexpr const char kNameTensorScatterUpdate[] = "TensorScatterUpdate";
@@ -183,6 +185,10 @@ constexpr const char kNameBasicLSTMCell[] = "BasicLSTMCell";
 constexpr const char kNameBasicLSTMCellInputGrad[] = "BasicLSTMCellInputGrad";
 constexpr const char kNameBasicLSTMCellWeightGrad[] = "BasicLSTMCellWeightGrad";
 constexpr const char kNameBasicLSTMCellCStateGrad[] = "BasicLSTMCellCStateGrad";
+constexpr const char kNameDynamicRNN[] = "DynamicRNN";
+constexpr const char kNameDynamicRNNGrad[] = "DynamicRNNGrad";
+constexpr const char kNameDynamicGRUV2[] = "DynamicGRUV2";
+constexpr const char kNameDynamicGRUV2Grad[] = "DynamicGRUV2Grad";
 constexpr const char kNameL2Loss[] = "L2Loss";
 constexpr const char kNameCTCLoss[] = "CTCLoss";
 constexpr const char kNameRange[] = "Range";
@@ -195,6 +201,7 @@ constexpr const char kNameEditDistance[] = "EditDistance";
 constexpr const char kNameCase[] = "Case";
 constexpr const char kNameAssert[] = "Assert";
 constexpr const char kNameCTCGreedyDecoder[] = "CTCGreedyDecoder";
+constexpr const char kNameReverseV2[] = "ReverseV2";
 
 class OpAdapterMap {
  public:

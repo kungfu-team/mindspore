@@ -26,6 +26,7 @@
 #include "runtime/device/convert_tensor_utils.h"
 #include "ir/dtype/type.h"
 #include "ir/tensor.h"
+#include "abstract/utils.h"
 #include "backend/kernel_compiler/tbe/tbe_kernel_build.h"
 #include "backend/kernel_compiler/tbe/tbe_kernel_parallel_build.h"
 #include "utils/utils.h"
@@ -287,21 +288,21 @@ bool AscendDeviceAddress::SyncDeviceToHost(const ShapeVector &shape, size_t size
   SyncStream();
   bool sync_ok = false;
   std::vector<size_t> host_shape;
-  (void)std::transform(shape.begin(), shape.end(), std::back_inserter(host_shape), IntToSize);
+  (void)std::transform(shape.begin(), shape.end(), std::back_inserter(host_shape), LongToSize);
   if (host_shape.empty()) {
     host_shape.emplace_back(1);
   }
-  if (format_ == kOpFormat_NCHW || format_ == kOpFormat_DEFAULT || format_ == kOpFormat_NDHWC) {
+  if (format_ == kOpFormat_NCHW || format_ == kOpFormat_DEFAULT || format_ == kOpFormat_NCDHW) {
     if (type_id_ == type) {
       SyncMemory(host_ptr, ptr_, size, RT_MEMCPY_DEVICE_TO_HOST);
       sync_ok = true;
     } else if (type_id_ == kNumberTypeFloat32 && type == kNumberTypeFloat64) {
       sync_ok = SyncDeviceToHostAndFloatToFloat64(host_ptr, size, ptr_, size_);
     } else {
-      auto shape_size = trans::ShapeSize(host_shape);
+      auto shape_size = abstract::ShapeSize(host_shape);
       auto host = std::vector<uint8_t>(size_);
       SyncMemory(host.data(), ptr_, size_, RT_MEMCPY_DEVICE_TO_HOST);
-      const trans::TypeIdArgs type_args{host.data(), shape_size, type_id_, type, size};
+      const trans::TypeIdArgs type_args{host.data(), shape_size, type_id_, type, size_};
       sync_ok = trans::TransDataType(type_args, host_ptr);
       if (!sync_ok) {
         MS_LOG(ERROR) << "trans data type failed.";
@@ -413,11 +414,11 @@ bool AscendDeviceAddress::SyncDeviceToHostAndConvertFormatBasedOnTransData(const
   MS_EXCEPTION_IF_NULL(kernel_mod_ptr);
   auto host_size = size;
   if (type_id_ != type) {
-    auto device_dtype_size = trans::TypeIdSize(type_id_);
+    auto device_dtype_size = abstract::TypeIdSize(type_id_);
     if (device_dtype_size < 1) {
       MS_LOG(ERROR) << "Illegal dtype.";
     }
-    auto shape_size = trans::ShapeSize(host_shape);
+    auto shape_size = abstract::ShapeSize(host_shape);
     size = device_dtype_size * shape_size;
   }
   size = GetCommonAlignSize(size);
@@ -431,7 +432,7 @@ bool AscendDeviceAddress::SyncDeviceToHostAndConvertFormatBasedOnTransData(const
   } else {
     auto host = std::vector<uint8_t>(size);
     SyncMemory(host.data(), output_address->GetPtr(), size, RT_MEMCPY_DEVICE_TO_HOST);
-    auto shape_size = trans::ShapeSize(host_shape);
+    auto shape_size = abstract::ShapeSize(host_shape);
     const trans::TypeIdArgs type_args{host.data(), shape_size, type_id_, type, host_size};
     sync_ok = trans::TransDataType(type_args, host_ptr);
     if (!sync_ok) {
@@ -453,14 +454,14 @@ std::vector<size_t> AscendDeviceAddress::GetWorkspaceSizeList(const nlohmann::js
 
 std::vector<size_t> AscendDeviceAddress::GetDeviceShape(std::vector<size_t> *host_shape) const {
   std::vector<size_t> device_shape;
-  if (format_ == kOpFormat_FRAC_NZ || format_ == kOpFormat_NDHWC) {
+  if (format_ == kOpFormat_FRAC_NZ || format_ == kOpFormat_NCDHW) {
     device_shape = trans::TransShapeToDevice(*host_shape, format_);
   } else {
     if (host_shape_.empty()) {
       *host_shape = trans::PaddingShapeTo4d(*host_shape);
     } else {
       host_shape->clear();
-      (void)std::transform(host_shape_.begin(), host_shape_.end(), std::back_inserter(*host_shape), IntToSize);
+      (void)std::transform(host_shape_.begin(), host_shape_.end(), std::back_inserter(*host_shape), LongToSize);
     }
     device_shape = trans::TransShapeToDevice(*host_shape, format_);
   }
@@ -473,7 +474,7 @@ bool AscendDeviceAddress::SyncDeviceToHostAndConvertFormat(const ShapeVector &sh
                << ", size:" << size_ << "), Host(type_id:" << TypeIdLabel(type) << ", size:" << size << ")";
   bool sync_ok = false;
   std::vector<size_t> host_shape;
-  (void)std::transform(shape.begin(), shape.end(), std::back_inserter(host_shape), IntToSize);
+  (void)std::transform(shape.begin(), shape.end(), std::back_inserter(host_shape), LongToSize);
   if (host_shape.empty()) {
     host_shape.emplace_back(1);
   }
@@ -500,7 +501,7 @@ bool AscendDeviceAddress::SyncDeviceToHostAndConvertFormat(const ShapeVector &sh
       MS_LOG(ERROR) << "Trans format failed.";
       return false;
     }
-    auto shape_size = trans::ShapeSize(host_shape);
+    auto shape_size = abstract::ShapeSize(host_shape);
     const trans::TypeIdArgs type_args{host.data(), shape_size, type_id_, type, size};
     sync_ok = trans::TransDataType(type_args, host_ptr);
     if (!sync_ok) {
@@ -526,18 +527,18 @@ bool AscendDeviceAddress::SyncHostToDevice(const ShapeVector &shape, size_t size
   SyncStream();
   bool sync_ok = false;
   std::vector<size_t> host_shape;
-  (void)std::transform(shape.begin(), shape.end(), std::back_inserter(host_shape), IntToSize);
+  (void)std::transform(shape.begin(), shape.end(), std::back_inserter(host_shape), LongToSize);
   if (host_shape.empty()) {
     host_shape.emplace_back(1);
   }
-  if (format_ == kOpFormat_NCHW || format_ == kOpFormat_DEFAULT || format_ == kOpFormat_NDHWC) {
+  if (format_ == kOpFormat_NCHW || format_ == kOpFormat_DEFAULT || format_ == kOpFormat_NCDHW) {
     if (type_id_ == type) {
-      SyncMemory(ptr_, host_ptr, size_, RT_MEMCPY_HOST_TO_DEVICE);
+      SyncMemory(ptr_, host_ptr, size, RT_MEMCPY_HOST_TO_DEVICE);
       sync_ok = true;
     } else if (type_id_ == kNumberTypeFloat32 && type == kNumberTypeFloat64) {
       sync_ok = Float64ToFloatAndSyncHostToDevice(ptr_, size_, host_ptr, size);
     } else {
-      auto shape_size = trans::ShapeSize(host_shape);
+      auto shape_size = abstract::ShapeSize(host_shape);
       const trans::TypeIdArgs type_args{host_ptr, shape_size, type, type_id_, size};
       auto host_tmp = std::vector<uint8_t>(size_);
       sync_ok = trans::TransDataType(type_args, host_tmp.data());
@@ -569,19 +570,19 @@ bool AscendDeviceAddress::ConvertFormatAndSyncHostToDevice(const ShapeVector &sh
   MS_LOG(INFO) << "ConvertFormatAndSyncHostToDevice, Device(format:" << format_ << ", type_id:" << TypeIdLabel(type_id_)
                << ", size:" << size_ << "), Host(type_id:" << TypeIdLabel(type) << ", size:" << size << ")";
   std::vector<size_t> host_shape;
-  (void)std::transform(shape.begin(), shape.end(), std::back_inserter(host_shape), IntToSize);
+  (void)std::transform(shape.begin(), shape.end(), std::back_inserter(host_shape), LongToSize);
   if (host_shape.empty()) {
     host_shape.emplace_back(1);
   }
   std::vector<size_t> device_shape;
-  if (format_ == kOpFormat_FRAC_NZ || format_ == kOpFormat_NDHWC) {
+  if (format_ == kOpFormat_FRAC_NZ || format_ == kOpFormat_NCDHW || format_ == kOpFormat_NDC1HWC0) {
     device_shape = trans::TransShapeToDevice(host_shape, format_);
   } else {
     host_shape = trans::PaddingShapeTo4d(host_shape);
     device_shape = trans::TransShapeToDevice(host_shape, format_);
   }
   if (type_id_ != type) {
-    auto shape_size = trans::ShapeSize(host_shape);
+    auto shape_size = abstract::ShapeSize(host_shape);
     const trans::TypeIdArgs type_args{host_ptr, shape_size, type, type_id_, size};
     auto host_tmp = std::vector<uint8_t>(size_);
     sync_ok = trans::TransDataType(type_args, host_tmp.data());
@@ -673,8 +674,10 @@ bool AscendDeviceAddress::LoadMemToHost(const std::string &tensor_name, int exec
                                         const std::string &host_fmt, const ShapeVector &host_shape, TypeId host_type,
                                         size_t slot, bool keep_prev) const {
   bool ret = false;
-  TensorLoader *tensor_loader = Debugger::GetInstance()->debug_services()->tensor_loader();
-  MS_EXCEPTION_IF_NULL(tensor_loader);
+  if (Debugger::GetInstance()->TensorExistsInCurrent(tensor_name)) {
+    MS_LOG(INFO) << tensor_name << " already loaded for this step so not loading it again.";
+    return true;
+  }
   // TensorData is freed up in AscendSession class
   auto tensor_data = std::make_shared<mindspore::TensorData>();
   tensor_data->SetName(tensor_name);
@@ -688,7 +691,7 @@ bool AscendDeviceAddress::LoadMemToHost(const std::string &tensor_name, int exec
   }
   MS_LOG(INFO) << "E2E tensor name is " << tensor_name;
   tensor_data->SetTensor(out_tensor);
-  ret = tensor_loader->LoadNewTensor(tensor_data, keep_prev);
+  ret = Debugger::GetInstance()->LoadNewTensor(tensor_data, keep_prev);
   return ret;
 }
 #endif

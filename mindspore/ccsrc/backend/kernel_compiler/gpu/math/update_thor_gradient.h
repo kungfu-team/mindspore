@@ -85,6 +85,7 @@ class UpdateThorGradientGpuKernel : public GpuKernel {
 
     try {
       CHECK_CUBLAS_RET_WITH_EXCEPT(
+        kernel_node_,
         cublasGemmStridedBatchedEx(handle_, CUBLAS_OP_N, CUBLAS_OP_N, SizeToInt(gradient_size.ori_w),
                                    SizeToInt(gradient_size.h), SizeToInt(gradient_size.h), &alpha, input2_addr,
                                    gradient_size.dtype, ldb, stride_b, input1_addr, gradient_size.dtype, lda, stride_a,
@@ -116,6 +117,7 @@ class UpdateThorGradientGpuKernel : public GpuKernel {
       r_output_addr = workspace3_addr;
     }
     CHECK_CUBLAS_RET_WITH_EXCEPT(
+      kernel_node_,
       cublasGemmStridedBatchedEx(handle_, CUBLAS_OP_N, CUBLAS_OP_N, SizeToInt(gradient_size.w),
                                  SizeToInt(gradient_size.h), SizeToInt(gradient_size.w), &alpha, input3_addr,
                                  gradient_size.dtype, ldb_r, stride_b, r_input_addr, gradient_size.dtype, lda_r,
@@ -138,6 +140,7 @@ class UpdateThorGradientGpuKernel : public GpuKernel {
   }
 
   bool Init(const CNodePtr &kernel_node) override {
+    kernel_node_ = kernel_node;
     handle_ = device::gpu::GPUDeviceManager::GetInstance().GetCublasHandle();
     SetProperty(kernel_node);
     InitSizeLists();
@@ -159,8 +162,8 @@ class UpdateThorGradientGpuKernel : public GpuKernel {
     size_t output_size = gradient_size.ori_h * gradient_size.ori_w * unit_size;
     output_size_list_.push_back(output_size);
 
-    size_t workspace_size_ = 0;
-    workspace_size_ = gradient_size.w * gradient_size.h * gradient_size.batch_w * gradient_size.batch_h * unit_size;
+    size_t workspace_size_ =
+      gradient_size.w * gradient_size.h * gradient_size.batch_w * gradient_size.batch_h * unit_size;
     workspace_size_list_.push_back(workspace_size_);
 
     if (gradient_size.need_convert) {
@@ -183,7 +186,7 @@ class UpdateThorGradientGpuKernel : public GpuKernel {
     auto gradient_shape = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 1);
     auto matrix_g_shape = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 2);
 
-    split_dim = size_t(GetAttr<int>(kernel_node, "split_dim"));
+    split_dim = LongToSize(GetAttr<int64_t>(kernel_node, "split_dim"));
 
     gradient_size.batch_h = gradient_shape[0] / split_dim;
     gradient_size.batch_w = gradient_shape[1] / split_dim;

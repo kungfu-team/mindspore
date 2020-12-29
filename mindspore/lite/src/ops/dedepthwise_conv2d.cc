@@ -16,6 +16,10 @@
 
 #include "src/ops/dedepthwise_conv2d.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -35,13 +39,12 @@ int DeDepthwiseConv2D::GetPadLeft() const { return this->primitive_->value.AsDeD
 int DeDepthwiseConv2D::GetPadRight() const { return this->primitive_->value.AsDeDepthwiseConv2D()->padRight; }
 int DeDepthwiseConv2D::GetDilateW() const { return this->primitive_->value.AsDeDepthwiseConv2D()->dilateW; }
 int DeDepthwiseConv2D::GetDilateH() const { return this->primitive_->value.AsDeDepthwiseConv2D()->dilateH; }
-bool DeDepthwiseConv2D::GetHasBias() const { return this->primitive_->value.AsDeDepthwiseConv2D()->hasBias; }
 int DeDepthwiseConv2D::GetActivationType() const {
   return this->primitive_->value.AsDeDepthwiseConv2D()->activationType;
 }
 
 void DeDepthwiseConv2D::SetFormat(int format) {
-  this->primitive_->value.AsDeDepthwiseConv2D()->format = (schema::Format)format;
+  this->primitive_->value.AsDeDepthwiseConv2D()->format = static_cast<schema::Format>(format);
 }
 void DeDepthwiseConv2D::SetChannelIn(int channel_in) {
   this->primitive_->value.AsDeDepthwiseConv2D()->channelIn = channel_in;
@@ -54,7 +57,7 @@ void DeDepthwiseConv2D::SetKernelH(int kernel_h) { this->primitive_->value.AsDeD
 void DeDepthwiseConv2D::SetStrideW(int stride_w) { this->primitive_->value.AsDeDepthwiseConv2D()->strideW = stride_w; }
 void DeDepthwiseConv2D::SetStrideH(int stride_h) { this->primitive_->value.AsDeDepthwiseConv2D()->strideH = stride_h; }
 void DeDepthwiseConv2D::SetPadMode(int pad_mode) {
-  this->primitive_->value.AsDeDepthwiseConv2D()->padMode = (schema::PadMode)pad_mode;
+  this->primitive_->value.AsDeDepthwiseConv2D()->padMode = static_cast<schema::PadMode>(pad_mode);
 }
 void DeDepthwiseConv2D::SetPadUp(int pad_up) { this->primitive_->value.AsDeDepthwiseConv2D()->padUp = pad_up; }
 void DeDepthwiseConv2D::SetPadDown(int pad_down) { this->primitive_->value.AsDeDepthwiseConv2D()->padDown = pad_down; }
@@ -64,9 +67,8 @@ void DeDepthwiseConv2D::SetPadRight(int pad_right) {
 }
 void DeDepthwiseConv2D::SetDilateW(int dilate_w) { this->primitive_->value.AsDeDepthwiseConv2D()->dilateW = dilate_w; }
 void DeDepthwiseConv2D::SetDilateH(int dilate_h) { this->primitive_->value.AsDeDepthwiseConv2D()->dilateH = dilate_h; }
-void DeDepthwiseConv2D::SetHasBias(bool has_bias) { this->primitive_->value.AsDeDepthwiseConv2D()->hasBias = has_bias; }
 void DeDepthwiseConv2D::SetActivationType(int activation_type) {
-  this->primitive_->value.AsDeDepthwiseConv2D()->activationType = (schema::ActivationType)activation_type;
+  this->primitive_->value.AsDeDepthwiseConv2D()->activationType = static_cast<schema::ActivationType>(activation_type);
 }
 
 #else
@@ -104,12 +106,16 @@ int DeDepthwiseConv2D::GetPadLeft() const { return this->primitive_->value_as_De
 int DeDepthwiseConv2D::GetPadRight() const { return this->primitive_->value_as_DeDepthwiseConv2D()->padRight(); }
 int DeDepthwiseConv2D::GetDilateW() const { return this->primitive_->value_as_DeDepthwiseConv2D()->dilateW(); }
 int DeDepthwiseConv2D::GetDilateH() const { return this->primitive_->value_as_DeDepthwiseConv2D()->dilateH(); }
-bool DeDepthwiseConv2D::GetHasBias() const { return this->primitive_->value_as_DeDepthwiseConv2D()->hasBias(); }
 int DeDepthwiseConv2D::GetActivationType() const {
   return this->primitive_->value_as_DeDepthwiseConv2D()->activationType();
 }
 
+PrimitiveC *DeDepthwiseConv2DCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<DeDepthwiseConv2D>(primitive);
+}
+Registry DeDepthwiseConv2DRegistry(schema::PrimitiveType_DeDepthwiseConv2D, DeDepthwiseConv2DCreator);
 #endif
+
 int DeDepthwiseConv2D::InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) {
   if (inputs_.size() != kDoubleNum && inputs_.size() != kMultiNum) {
     MS_LOG(ERROR) << "inputs number is invalid";
@@ -126,10 +132,10 @@ int DeDepthwiseConv2D::InferShape(std::vector<lite::Tensor *> inputs_, std::vect
   MS_ASSERT(weight != nullptr);
   auto output = outputs_.front();
   MS_ASSERT(output != nullptr);
-  output->SetFormat(input->GetFormat());
+  output->set_format(input->format());
   output->set_data_type(input->data_type());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   auto in_shape = input->shape();
   int input_h = in_shape.at(1);

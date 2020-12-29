@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
+#include <set>
 #include <nlohmann/json.hpp>
 
 #include "utils/ms_utils.h"
@@ -42,7 +43,7 @@ Status ManifestOp::Builder::Build(std::shared_ptr<ManifestOp> *ptr) {
   if (builder_sampler_ == nullptr) {
     const int64_t num_samples = 0;
     const int64_t start_index = 0;
-    builder_sampler_ = std::make_shared<SequentialSampler>(start_index, num_samples);
+    builder_sampler_ = std::make_shared<SequentialSamplerRT>(start_index, num_samples);
   }
   builder_schema_ = std::make_unique<DataSchema>();
   RETURN_IF_NOT_OK(
@@ -66,7 +67,7 @@ Status ManifestOp::Builder::SanityCheck() {
 
 ManifestOp::ManifestOp(int32_t num_works, int32_t rows_per_buffer, std::string file, int32_t queue_size, bool decode,
                        const std::map<std::string, int32_t> &class_index, std::unique_ptr<DataSchema> data_schema,
-                       std::shared_ptr<Sampler> sampler, std::string usage)
+                       std::shared_ptr<SamplerRT> sampler, std::string usage)
     : ParallelOp(num_works, queue_size, std::move(sampler)),
       rows_per_buffer_(rows_per_buffer),
       io_block_pushed_(0),
@@ -243,7 +244,8 @@ void ManifestOp::Print(std::ostream &out, bool show_all) const {
     // Call the super class for displaying any common detailed info
     ParallelOp::Print(out, show_all);
     // Then show any custom derived-internal stuff
-    out << "\nNumber of rows:" << num_rows_ << "\nManifest file: " << file_ << "\n\n";
+    out << "\nNumber of rows:" << num_rows_ << "\nManifest file: " << file_ << "\nDecode: " << (decode_ ? "yes" : "no")
+        << "\n\n";
   }
 }
 
@@ -297,6 +299,7 @@ Status ManifestOp::ParseManifestFile() {
     RETURN_STATUS_UNEXPECTED("Invalid file, failed to open Manifest file: " + file_);
   }
   std::string line;
+  std::set<std::string> classes;
   while (getline(file_handle, line)) {
     try {
       nlohmann::json js = nlohmann::json::parse(line);
@@ -317,6 +320,7 @@ Status ManifestOp::ParseManifestFile() {
       for (nlohmann::json::iterator it = annotations.begin(); it != annotations.end(); ++it) {
         nlohmann::json annotation = it.value();
         std::string label_name = annotation.value("name", "");
+        classes.insert(label_name);
         if (label_name == "") {
           file_handle.close();
           RETURN_STATUS_UNEXPECTED("Invalid data, label name is not found in Manifest file: " + image_file_path);
@@ -336,6 +340,7 @@ Status ManifestOp::ParseManifestFile() {
       RETURN_STATUS_UNEXPECTED("Invalid file, failed to parse manifest file: " + line);
     }
   }
+  num_classes_ = classes.size();
   file_handle.close();
 
   return Status::OK();
@@ -391,16 +396,9 @@ Status ManifestOp::CountDatasetInfo() {
   return Status::OK();
 }
 
-#ifdef ENABLE_PYTHON
-Status ManifestOp::CountTotalRows(const std::string &file, const py::dict &dict, const std::string &usage,
-                                  int64_t *count, int64_t *numClasses) {
+Status ManifestOp::CountTotalRows(const std::string &file, const std::map<std::string, int32_t> &map,
+                                  const std::string &usage, int64_t *count, int64_t *numClasses) {
   // the logic of counting the number of samples is copied from ParseManifestFile()
-  std::map<std::string, int32_t> map;
-  for (auto p : dict) {
-    (void)map.insert(std::pair<std::string, int32_t>(py::reinterpret_borrow<py::str>(p.first),
-                                                     py::reinterpret_borrow<py::int_>(p.second)));
-  }
-
   std::shared_ptr<ManifestOp> op;
   *count = 0;
   RETURN_IF_NOT_OK(Builder().SetManifestFile(file).SetClassIndex(map).SetUsage(usage).Build(&op));
@@ -410,6 +408,7 @@ Status ManifestOp::CountTotalRows(const std::string &file, const py::dict &dict,
   return Status::OK();
 }
 
+#ifdef ENABLE_PYTHON
 Status ManifestOp::GetClassIndexing(const std::string &file, const py::dict &dict, const std::string &usage,
                                     std::map<std::string, int32_t> *output_class_indexing) {
   std::map<std::string, int32_t> input_class_indexing;
@@ -453,5 +452,42 @@ Status ManifestOp::ComputeColMap() {
   }
   return Status::OK();
 }
+
+// Get number of classes
+Status ManifestOp::GetNumClasses(int64_t *num_classes) {
+  if (num_classes_ > 0) {
+    *num_classes = num_classes_;
+    return Status::OK();
+  }
+  int64_t classes_count;
+  std::shared_ptr<ManifestOp> op;
+  RETURN_IF_NOT_OK(Builder().SetManifestFile(file_).SetClassIndex(class_index_).SetUsage(usage_).Build(&op));
+  RETURN_IF_NOT_OK(op->ParseManifestFile());
+  classes_count = static_cast<int64_t>(op->label_index_.size());
+  *num_classes = classes_count;
+  num_classes_ = classes_count;
+  return Status::OK();
+}
+
+Status ManifestOp::GetClassIndexing(std::vector<std::pair<std::string, std::vector<int32_t>>> *output_class_indexing) {
+  if ((*output_class_indexing).empty()) {
+    std::shared_ptr<ManifestOp> op;
+    RETURN_IF_NOT_OK(Builder().SetManifestFile(file_).SetClassIndex(class_index_).SetUsage(usage_).Build(&op));
+    RETURN_IF_NOT_OK(op->ParseManifestFile());
+    RETURN_IF_NOT_OK(op->CountDatasetInfo());
+    uint32_t count = 0;
+    for (const auto label : op->label_index_) {
+      if (!class_index_.empty()) {
+        (*output_class_indexing)
+          .emplace_back(std::make_pair(label.first, std::vector<int32_t>(1, class_index_[label.first])));
+      } else {
+        (*output_class_indexing).emplace_back(std::make_pair(label.first, std::vector<int32_t>(1, count)));
+      }
+      count++;
+    }
+  }
+  return Status::OK();
+}
+
 }  // namespace dataset
 }  // namespace mindspore

@@ -18,18 +18,80 @@ import copy
 from .model import PrimLib, Tensor, Value, Operator, Graph, AlignShape, AddControlBuddy
 
 
+def get_tile_output_shape(shape, multiples):
+    """compute output shape of tile"""
+
+    if multiples is None:
+        return shape
+    if not isinstance(shape, (list, tuple)):
+        raise TypeError("Input shape of Tile must be of type list or tuple")
+    if not isinstance(multiples, (list, tuple)):
+        raise TypeError("multiples of Tile must be of type list or tuple")
+
+    shape = list(shape)
+    multiples = list(multiples)
+    diff_len = len(multiples) - len(shape)
+    if diff_len < 0:
+        raise ValueError("Dimensions of multiples{} < dimensions of input{} in Tile".format(multiples, shape))
+    if diff_len > 0:
+        for _ in range(diff_len):
+            shape.insert(0, 1)
+
+    shape_compatible = True
+    output_shape = []
+    input_reshape = []
+    output_reshape = []
+    for sh, mul in list(zip(shape, multiples)):
+        dim = sh * mul
+        output_shape.append(dim)
+        if sh == 1 or mul == 1:
+            input_reshape.append(sh)
+            output_reshape.append(dim)
+        else:
+            shape_compatible = False
+            input_reshape.append(1)
+            input_reshape.append(sh)
+            output_reshape.append(mul)
+            output_reshape.append(sh)
+
+    return output_shape, input_reshape, output_reshape, shape_compatible
+
+
 class OpInfer:
     """Op infer"""
     @staticmethod
     def default_reduce_infer(inputs, attrs):
+        """Default reduce infer"""
         shape = copy.deepcopy(inputs[0].shape)
-        for i in attrs['reduce_axis']:
-            shape[i] = 1
+        if attrs['keep_dims']:
+            for i in attrs['reduce_axis']:
+                shape[i] = 1
+            return shape
+
+        real_shape = []
+        for i, _ in enumerate(shape):
+            if i not in attrs['reduce_axis']:
+                real_shape.append(shape[i])
+        return real_shape
+
+    @staticmethod
+    def default_elementwise_infer(inputs, attrs):
+        """Default elementwise infer"""
+        shape = (1,)
+        max_flatten_shape = 1
+        for t in inputs:
+            flatten_shape = 1
+            for s in t.shape:
+                flatten_shape *= s
+            if flatten_shape >= max_flatten_shape:
+                max_flatten_shape = flatten_shape
+                shape = t.shape
         return shape
 
     default_infer_shape_func = [
         None,
-        lambda inputs, attrs: max([t.shape for t in inputs]),
+        None,
+        default_elementwise_infer.__func__,
         lambda inputs, attrs: max([t.shape for t in inputs]),
         default_reduce_infer.__func__,
         None,
@@ -48,6 +110,10 @@ class OpInfer:
 
     infer_shape_func = {
         # add special infer func here
+        'InplaceAssign': lambda inputs, attrs: inputs[2].shape,
+        'Reshape': lambda inputs, attrs: attrs["shape"],
+        'BroadcastTo': lambda inputs, attrs: attrs["shape"],
+        'Tile': lambda inputs, attrs: get_tile_output_shape(inputs[0].shape, attrs["multiples"])[0],
     }
     infer_dtype_func = {
         # add special infer func here
@@ -72,8 +138,15 @@ class OpInfer:
 class GraphBuilder:
     """Graph builder"""
     class GraphWrapper:
+        """Graph wrapper"""
+
         def __init__(self, name):
             self.graph = Graph(name, [])
+
+        def set_input(self, *para):
+            for t in para:
+                t.para_type = Tensor.PARA_INPUT
+                self.graph.inputs.append(t)
 
         def set_output(self, *para):
             for t in para:
@@ -119,7 +192,15 @@ class GraphBuilder:
         """Create a new Value"""
         if name in (None, ''):
             name = self._alloc_tensor_name()
-        return Value(name, dtype, value, data_format)
+
+        if dtype == "float16":
+            # For float16 value, it will be changed to float32 wrongly. And there is no good solution for now.
+            # So instead just declare float32 value and then cast it to float16.
+            v_fp32 = Value(name, "float32", value, data_format)
+            v = self.emit("Cast", [v_fp32], attrs={"dst_type": "float16"})
+        else:
+            v = Value(name, dtype, value, data_format)
+        return v
 
     def op(self, prim, output, inputs, attrs=None):
         """Insert an operator into graph"""
@@ -136,9 +217,9 @@ class GraphBuilder:
         """Emit a new operation"""
         if attrs is None:
             attrs = {}
-        if isinstance(inputs, Tensor):
+        if isinstance(inputs, (Tensor, Value)):
             inputs = [inputs]
-        tensor_inputs = [t for t in inputs if isinstance(t, Tensor)]
+        tensor_inputs = [t for t in inputs if isinstance(t, (Tensor, Value))]
         out_shape, out_dtype, out_format = OpInfer.infer(prim, tensor_inputs, attrs)
         output = self.tensor(out_shape, out_dtype, out_format, name)
         self.op(prim, output, inputs, attrs)
@@ -164,6 +245,16 @@ class CompositeGraph:
     def load(self, desc):
         """Load Graph from json"""
         def _attr_of(op, inputs, output):
+            def _get_axis_while_none(input_shape, output_shape):
+                red_axis = []
+                if len(output_shape) == len(input_shape):
+                    for i, s in enumerate(output_shape):
+                        if s == 1 and input_shape[i] > 1:
+                            red_axis.append(i)
+                else:
+                    red_axis = list(range(len(output_shape)))
+                return red_axis
+
             attr = {}
             if op['name'] not in ('ReduceSum', 'ReduceMax', 'ReduceMin'):
                 return attr
@@ -171,11 +262,10 @@ class CompositeGraph:
                 if a['name'] == 'axis':
                     red_axis, dim_size = [], len(inputs[0].shape)
                     if not a['value']:
-                        assert len(output.shape) == len(inputs[0].shape)
-                        for i in range(len(output.shape)):
-                            if output.shape[i] == 1 and inputs[0].shape[i] > 1:
-                                red_axis.append(i)
+                        red_axis = _get_axis_while_none(inputs[0].shape, output.shape)
                     else:
+                        if isinstance(a['value'], int):
+                            a['value'] = [a['value']]
                         for i in a['value']:
                             red_axis.append(i if i >= 0 else dim_size + i)
                     attr['reduce_axis'] = red_axis

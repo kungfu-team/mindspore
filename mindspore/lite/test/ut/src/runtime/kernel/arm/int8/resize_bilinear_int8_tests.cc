@@ -19,8 +19,8 @@
 #include "include/context.h"
 #include "src/tensor.h"
 #include "common/common_test.h"
-#include "mindspore/lite/src/kernel_registry.h"
-#include "nnacl/int8/resize.h"
+#include "src/kernel_registry.h"
+#include "nnacl/int8/resize_int8.h"
 
 namespace mindspore {
 using mindspore::lite::QuantArg;
@@ -47,8 +47,8 @@ class TestResizeBilinearInt8 : public mindspore::CommonTest {
 };
 
 void TestResizeBilinearInt8::TearDown() {
-  in_tensor.SetData(nullptr);
-  out_tensor.SetData(nullptr);
+  in_tensor.set_data(nullptr);
+  out_tensor.set_data(nullptr);
 }
 
 void TestResizeBilinearInt8::Prepare(const std::vector<int> &in_shape, const std::vector<int> &out_shape,
@@ -57,18 +57,18 @@ void TestResizeBilinearInt8::Prepare(const std::vector<int> &in_shape, const std
                                      const int thread_num) {
   in_tensor.set_data_type(kNumberTypeInt8);
   in_tensor.set_shape(in_shape);
-  in_tensor.SetData(input_data);
+  in_tensor.set_data(input_data);
   in_tensor.AddQuantParam(quant_in);
 
   out_tensor.set_data_type(kNumberTypeInt8);
   out_tensor.set_shape(out_shape);
-  out_tensor.SetData(output_data);
+  out_tensor.set_data(output_data);
   out_tensor.AddQuantParam(quant_out);
 
   inputs.push_back(&in_tensor);
   outputs.push_back(&out_tensor);
 
-  param_.method_ = static_cast<int>(schema::ResizeMethod_BILINEAR);
+  param_.method_ = static_cast<int>(schema::ResizeMethod_LINEAR);
   param_.new_width_ = out_shape[2];
   param_.new_height_ = out_shape[1];
   param_.align_corners_ = align_corners;

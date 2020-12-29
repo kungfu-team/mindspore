@@ -109,10 +109,9 @@ class Monitor(Callback):
             1, cb_params.epoch_num, cur_step_in_epoch, cb_params.batch_num, step_loss,
             np.mean(self.losses), step_mseconds, self.lr_init[cb_params.cur_step_num - 1]))
 
+
 def load_ckpt(network, pretrain_ckpt_path, trainable=True):
-    """
-    incremental_learning or not
-    """
+    """load checkpoint into network."""
     param_dict = load_checkpoint(pretrain_ckpt_path)
     load_param_into_net(network, param_dict)
     if not trainable:

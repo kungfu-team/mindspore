@@ -15,6 +15,30 @@
  */
 
 #include "minddata/dataset/engine/opt/pass.h"
+#include "minddata/dataset/engine/ir/datasetops/batch_node.h"
+#include "minddata/dataset/engine/ir/datasetops/bucket_batch_by_length_node.h"
+#ifndef ENABLE_ANDROID
+#include "minddata/dataset/engine/ir/datasetops/build_sentence_piece_vocab_node.h"
+#endif
+#include "minddata/dataset/engine/ir/datasetops/build_vocab_node.h"
+#include "minddata/dataset/engine/ir/datasetops/concat_node.h"
+#include "minddata/dataset/engine/ir/datasetops/filter_node.h"
+#include "minddata/dataset/engine/ir/datasetops/map_node.h"
+#include "minddata/dataset/engine/ir/datasetops/project_node.h"
+#include "minddata/dataset/engine/ir/datasetops/rename_node.h"
+#include "minddata/dataset/engine/ir/datasetops/repeat_node.h"
+#include "minddata/dataset/engine/ir/datasetops/root_node.h"
+#include "minddata/dataset/engine/ir/datasetops/shuffle_node.h"
+#include "minddata/dataset/engine/ir/datasetops/skip_node.h"
+#ifdef ENABLE_PYTHON
+#include "minddata/dataset/engine/ir/datasetops/sync_wait_node.h"
+#endif
+#include "minddata/dataset/engine/ir/datasetops/take_node.h"
+#include "minddata/dataset/engine/ir/datasetops/transfer_node.h"
+#include "minddata/dataset/engine/ir/datasetops/zip_node.h"
+
+//////////////////////////////////
+// This section of code will be removed once the migration of optimizer from DatasetOp to DatasetNode is done.
 #include "minddata/dataset/engine/datasetops/batch_op.h"
 #include "minddata/dataset/engine/datasetops/build_vocab_op.h"
 #ifndef ENABLE_ANDROID
@@ -57,10 +81,194 @@
 #include "minddata/dataset/engine/datasetops/source/image_folder_op.h"
 #include "minddata/dataset/engine/datasetops/take_op.h"
 #include "minddata/dataset/engine/datasetops/zip_op.h"
+//////////////////////////////////
 
 namespace mindspore {
 namespace dataset {
 
+// Driver method for TreePass
+Status IRTreePass::Run(std::shared_ptr<DatasetNode> root_ir, bool *modified) {
+  if (root_ir == nullptr || modified == nullptr) {
+    return Status(StatusCode::kUnexpectedError, "Null pointer passed to TreePass");
+  }
+  return this->RunOnTree(root_ir, modified);
+}
+
+// Driver method for NodePass
+Status IRNodePass::Run(std::shared_ptr<DatasetNode> root_ir, bool *modified) {
+  if (root_ir == nullptr || modified == nullptr) {
+    return Status(StatusCode::kUnexpectedError, "Null pointer passed to NodePass");
+  }
+  if (traversalOrder_ == Order::DFS) {
+    // DFS
+    return DFSNodeVisit(root_ir, modified);
+  } else if (traversalOrder_ == Order::BFS) {
+    // BFS
+    return BFSNodeVisit(root_ir, modified);
+  }
+  return Status::OK();
+}
+
+// Helper function to perform DFS visit
+Status IRNodePass::DFSNodeVisit(std::shared_ptr<DatasetNode> node_ir, bool *modified) {
+  bool m = false;
+
+  RETURN_IF_NOT_OK(node_ir->Accept(this, &m));
+  *modified |= m;
+  for (const auto &c : node_ir->Children()) {
+    RETURN_IF_NOT_OK(this->DFSNodeVisit(c, &m));
+    *modified |= m;
+  }
+  RETURN_IF_NOT_OK(node_ir->AcceptAfter(this, &m));
+  *modified |= m;
+  return Status::OK();
+}
+
+// Helper function to perform BFS visit
+Status IRNodePass::BFSNodeVisit(std::shared_ptr<DatasetNode> node_ir, bool *modified) {
+  bool m = false;
+
+  // Initialize bfs queue with root
+  std::queue<std::shared_ptr<DatasetNode>> bfsQueue;
+  bfsQueue.push(node_ir);
+
+  // BFS loop
+  while (!bfsQueue.empty()) {
+    // Pop the front of the bfs queue
+    auto curNode = bfsQueue.front();
+    bfsQueue.pop();
+
+    // Run node pass
+    RETURN_IF_NOT_OK(curNode->Accept(this, &m));
+    *modified |= m;
+
+    // Push children into bfs queue
+    for (const auto &c : curNode->Children()) {
+      bfsQueue.push(c);
+    }
+  }
+  return Status::OK();
+}
+
+// For non-leaf IR node
+Status IRNodePass::Visit(std::shared_ptr<BatchNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<BatchNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<BucketBatchByLengthNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<BucketBatchByLengthNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<BuildVocabNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<BuildVocabNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<ConcatNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<ConcatNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<FilterNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<FilterNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<MapNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<MapNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<ProjectNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<ProjectNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<RenameNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<RenameNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<RepeatNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<RepeatNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<RootNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<RootNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<ShuffleNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<ShuffleNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<SkipNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<SkipNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<TakeNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<TakeNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<TransferNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<TransferNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<ZipNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<ZipNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+#ifdef ENABLE_PYTHON
+Status IRNodePass::Visit(std::shared_ptr<SyncWaitNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<SyncWaitNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+#endif
+#ifndef ENABLE_ANDROID
+Status IRNodePass::Visit(std::shared_ptr<BuildSentenceVocabNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<BuildSentenceVocabNode> node, bool *modified) {
+  return VisitAfter(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+#endif
+
+// leaf-IR Node
+Status IRNodePass::Visit(std::shared_ptr<MappableSourceNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+
+Status IRNodePass::Visit(std::shared_ptr<NonMappableSourceNode> node, bool *modified) {
+  return Visit(std::static_pointer_cast<DatasetNode>(node), modified);
+}
+
+//////////////////////////////////
+// This section of code will be removed once the migration of optimizer from DatasetOp to DatasetNode is done.
 // Driver method for TreePass
 Status TreePass::Run(ExecutionTree *tree, bool *modified) {
   if (tree == nullptr || modified == nullptr) {
@@ -237,6 +445,21 @@ Status NodePass::PreRunOnNode(std::shared_ptr<ConcatOp> node, bool *modified) {
   return PreRunOnNode(std::static_pointer_cast<DatasetOp>(node), modified);
 }
 
+Status NodePass::PreRunOnNode(std::shared_ptr<TakeOp> node, bool *modified) {
+  // Fallback to base class visitor by default
+  return PreRunOnNode(std::static_pointer_cast<DatasetOp>(node), modified);
+}
+
+Status NodePass::PreRunOnNode(std::shared_ptr<SkipOp> node, bool *modified) {
+  // Fallback to base class visitor by default
+  return PreRunOnNode(std::static_pointer_cast<DatasetOp>(node), modified);
+}
+
+Status NodePass::PreRunOnNode(std::shared_ptr<BatchOp> node, bool *modified) {
+  // Fallback to base class visitor by default
+  return PreRunOnNode(std::static_pointer_cast<DatasetOp>(node), modified);
+}
+
 #ifndef ENABLE_ANDROID
 Status NodePass::RunOnNode(std::shared_ptr<MindRecordOp> node, bool *modified) {
   // Fallback to base class visitor by default
@@ -320,5 +543,6 @@ Status NodePass::PreRunOnNode(std::shared_ptr<FilterOp> node, bool *modified) {
   return PreRunOnNode(std::static_pointer_cast<DatasetOp>(node), modified);
 }
 #endif
+//////////////////////////////////
 }  // namespace dataset
 }  // namespace mindspore

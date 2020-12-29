@@ -23,7 +23,7 @@ from collections import namedtuple
 from types import FunctionType
 from mindspore import log as logger
 from mindspore._c_expression import MSContext, ms_ctx_param
-from mindspore._checkparam import args_type_check
+from mindspore._checkparam import args_type_check, Validator
 from mindspore.parallel._auto_parallel_context import _set_auto_parallel_context, _get_auto_parallel_context, \
     _reset_auto_parallel_context
 from mindspore.parallel._ps_context import _set_ps_context, _get_ps_context, _reset_ps_context
@@ -35,9 +35,9 @@ __all__ = ['GRAPH_MODE', 'PYNATIVE_MODE', 'set_context', 'get_context', 'set_aut
 
 GRAPH_MODE = 0
 PYNATIVE_MODE = 1
-# The max memory size of graph plus variable.
-_DEVICE_APP_MEMORY_SIZE = 31
-
+_DEVICE_APP_MEMORY_SIZE = 31 # The max memory size of graph plus variable.
+_re_pattern = r'[1-9][0-9]*(\.)?[0-9]*GB|0\.[0-9]*GB'
+_k_context = None
 
 def _make_directory(path):
     """Make directory."""
@@ -214,19 +214,16 @@ class _Context:
         self.set_param(ms_ctx_param.max_call_depth, max_call_depth)
 
     def set_profiling_options(self, option):
-        options = ["training_trace", "task_trace",
-                   "task_trace:training_trace", "training_trace:task_trace", "op_trace"]
-        if option not in options:
-            raise ValueError("Profiling options must be in 'training_trace' 'task_trace' "
-                             "'task_trace:training_trace' 'training_trace:task_trace' or 'op_trace'.")
+        if not isinstance(option, str):
+            raise TypeError("The parameter option must be str.")
         self.set_param(ms_ctx_param.profiling_options, option)
 
     def set_variable_memory_max_size(self, variable_memory_max_size):
         """set values of variable_memory_max_size and graph_memory_max_size"""
-        if not _check_input_format(variable_memory_max_size):
+        if not Validator.check_str_by_regular(variable_memory_max_size, _re_pattern):
             raise ValueError("Context param variable_memory_max_size should be in correct format! Such as \"5GB\"")
-        if int(variable_memory_max_size[:-2]) >= _DEVICE_APP_MEMORY_SIZE:
-            raise ValueError("Context param variable_memory_max_size should be less than 31GB.")
+        if int(variable_memory_max_size[:-2]) > _DEVICE_APP_MEMORY_SIZE:
+            raise ValueError("Context param variable_memory_max_size should be not greater than 31GB.")
         variable_memory_max_size_ = variable_memory_max_size[:-2] + " * 1024 * 1024 * 1024"
         graph_memory_max_size = _DEVICE_APP_MEMORY_SIZE - int(variable_memory_max_size[:-2])
         graph_memory_max_size_ = str(graph_memory_max_size) + " * 1024 * 1024 * 1024"
@@ -235,7 +232,7 @@ class _Context:
         self.set_param(ms_ctx_param._graph_memory_max_size, graph_memory_max_size_)
 
     def set_max_device_memory(self, max_device_memory):
-        if not _check_input_format(max_device_memory):
+        if not Validator.check_str_by_regular(max_device_memory, _re_pattern):
             raise ValueError("Context param max_device_memory should be in correct format! Such as \"3.5GB\"")
         max_device_memory_value = float(max_device_memory[:-2])
         if max_device_memory_value == 0:
@@ -292,16 +289,6 @@ class _Context:
     def enable_debug_runtime(self, enable):
         thread_info = self._thread_local_info
         thread_info.debug_runtime = enable
-
-
-def _check_input_format(x):
-    import re
-    pattern = r'[1-9][0-9]*(\.)?[0-9]*GB|0\.[0-9]*GB'
-    result = re.match(pattern, x)
-    return result is not None
-
-
-_k_context = None
 
 
 def _context():
@@ -387,23 +374,26 @@ def set_auto_parallel_context(**kwargs):
                      - recursive_programming: Recursive programming search mode.
 
                      - dynamic_programming: Dynamic programming search mode.
-        parameter_broadcast (bool): A developing feature. Whether to broadcast parameters before training.
-                       "stand_alone", "semi_auto_parallel" and "auto_parallel" do not support parameter
-                       broadcast. Default: False.
+        parameter_broadcast (bool): Whether to broadcast parameters before training. Before training, in order to have
+                     the same network initialization parameter values for all devices, broadcast the parameters
+                     on device 0 to other devices. Parameter broadcasting in different parallel modes is different,
+                     data_parallel mode, all parameters are broadcast except for the prameter whose attribute
+                     layerwise_parallel is True. Hybrid_parallel, semi_auto_parallel and auto_parallel mode, the
+                     segmented parameters do not participate in broadcasting. Default: False.
         strategy_ckpt_load_file (str): The path to load parallel strategy checkpoint. Default: ''
         strategy_ckpt_save_file (str): The path to save parallel strategy checkpoint. Default: ''
         full_batch (bool): If you load whole batch datasets in auto_parallel mode, this parameter
                        should be set with True. Default: False.
         enable_parallel_optimizer (bool): This is a developing feature, which shards the weight update computation for
-                       data parallel training in the benefit of time and memory saving. For now, auto parallel mode
-                       supports all optimizers. Data parallel mode only supports `Lamb` and `AdamWeightDecay`.
-                       Default: False.
+                       data parallel training in the benefit of time and memory saving. Currently, auto and semi auto
+                       parallel mode support all optimizers in both Ascend and GPU. Data parallel mode only supports
+                       `Lamb` and `AdamWeightDecay` in Ascend . Default: False.
         all_reduce_fusion_config (list): Set allreduce fusion strategy by parameters indices. Only support ReduceOp.SUM
                        and HCCL_WORLD_GROUP/NCCL_WORLD_GROUP. No Default, if it is not set, the fusion is closed.
         pipeline_stages (int): Set the stage information for pipeline parallel. This indicates how
                         the devices are distributed alone the pipeline. The total devices will be divided into
                         'pipeline_stags' stages. This currently could only be used when
-                        parall mode semi_auto_parallel is enabled.
+                        parallel mode semi_auto_parallel is enabled. Default: 1.
 
     Raises:
         ValueError: If input key is not attribute in auto parallel context.
@@ -456,6 +446,7 @@ def reset_auto_parallel_context():
     - strategy_ckpt_save_file: ''.
     - full_batch: False.
     - enable_parallel_optimizer: False.
+    - pipeline_stages: 1.
     """
     _reset_auto_parallel_context()
 
@@ -515,7 +506,7 @@ def set_context(**kwargs):
     ===========================  ===========================  =================
     Common(CPU/GPU/Ascend)       Ascend                       GPU
     ===========================  ===========================  =================
-    check_bprop                  enable_auto_mixed_precision  max_device_memory
+    check_bprop                  print_file_path              max_device_memory
     device_id                    enable_dump                  enable_graph_kernel
     device_target                save_dump_path
     enable_sparse                enable_graph_kernel
@@ -523,7 +514,7 @@ def set_context(**kwargs):
     mode                         enable_profiling
     reserve_class_name_in_scope  profiling_options
     save_graphs                  variable_memory_max_size
-    save_graphs_path             print_file_path
+    save_graphs_path
     ===========================  ===========================  =================
 
     Args:
@@ -533,7 +524,6 @@ def set_context(**kwargs):
                     while device_num_per_host should be no more than 4096. Default: 0.
         save_graphs (bool): Whether to save graphs. Default: False.
         save_graphs_path (str): Path to save graphs. Default: "."
-        enable_auto_mixed_precision (bool): Whether to enable auto mixed precision. Default: False.
         enable_graph_kernel (bool): Whether to enable composition of basic primitives. These primitives would be
             compiled into a fused kernel automatically. Default: False.
         reserve_class_name_in_scope (bool) : Whether to save the network class name in the scope. Default: True.
@@ -550,11 +540,10 @@ def set_context(**kwargs):
             - training_trace: collect iterative trajectory data, that is, the training task and software information of
               the AI software stack, to achieve performance analysis of the training task, focusing on data
               enhancement, forward and backward calculation, gradient aggregation update and other related data.
-
             - task_trace: collect task trajectory data, that is, the hardware information of the HWTS/AICore of
               the Ascend 910 processor, and analyze the information of beginning and ending of the task.
-
             - op_trace: collect single operator performance data.
+
             The profiling can choose the combination of `training_trace`, `task_trace`,
             `training_trace` and `task_trace` combination, and eparated by colons;
             a single operator can choose `op_trace`, `op_trace` cannot be combined with
@@ -582,8 +571,8 @@ def set_context(**kwargs):
         >>> context.set_context(reserve_class_name_in_scope=True)
         >>> context.set_context(variable_memory_max_size="6GB")
         >>> context.set_context(mode=context.GRAPH_MODE,
-        >>>                     device_target="Ascend",device_id=0, save_graphs=True,
-        >>>                     save_graphs_path="/mindspore")
+        ...                     device_target="Ascend",device_id=0, save_graphs=True,
+        ...                     save_graphs_path="/mindspore")
         >>> context.set_context(enable_profiling=True, profiling_options="training_trace")
         >>> context.set_context(max_device_memory="3.5GB")
         >>> context.set_context(print_file_path="print.pb")

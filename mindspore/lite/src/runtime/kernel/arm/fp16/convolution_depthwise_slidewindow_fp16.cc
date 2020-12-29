@@ -35,13 +35,13 @@ ConvolutionDepthwiseSWFp16CPUKernel::~ConvolutionDepthwiseSWFp16CPUKernel() {
     sliding_ = nullptr;
   }
   if (packed_weight_ != nullptr) {
-    delete packed_weight_;
+    free(packed_weight_);
     packed_weight_ = nullptr;
   }
 }
 
-int ConvolutionDepthwiseSWFp16CPUKernel::InitBuffer() {
-  if (conv_param_->input_channel_ % C4NUM != 0) {
+int ConvolutionDepthwiseSWFp16CPUKernel::InitPackedInputOutput() {
+  if (conv_param_->input_channel_ % C8NUM != 0) {
     need_align_ = true;
     int C8 = UP_DIV(conv_param_->input_channel_, C8NUM);
     int pack_input_size = conv_param_->input_batch_ * conv_param_->input_h_ * conv_param_->input_w_ * C8NUM * C8;
@@ -55,6 +55,7 @@ int ConvolutionDepthwiseSWFp16CPUKernel::InitBuffer() {
     packed_output_ = reinterpret_cast<float16_t *>(context_->allocator->Malloc(pack_output_size * sizeof(float16_t)));
     if (packed_output_ == nullptr) {
       MS_LOG(ERROR) << "Malloc buffer failed.";
+      context_->allocator->Free(packed_input_);
       return RET_ERROR;
     }
   }
@@ -63,7 +64,7 @@ int ConvolutionDepthwiseSWFp16CPUKernel::InitBuffer() {
 
 int ConvolutionDepthwiseSWFp16CPUKernel::InitWeightBias() {
   // init weight: o, h, w, i; o == group, i == 1
-  auto weight_tensor = in_tensors_[kWeightIndex];
+  auto weight_tensor = in_tensors_.at(kWeightIndex);
   int OC8 = UP_DIV(weight_tensor->Batch(), C8NUM);
   auto origin_weight = reinterpret_cast<float *>(weight_tensor->MutableData());
   int pack_weight_size = C8NUM * OC8 * weight_tensor->Height() * weight_tensor->Width();
@@ -86,6 +87,7 @@ int ConvolutionDepthwiseSWFp16CPUKernel::InitWeightBias() {
   if (in_tensors_.size() == kInputSize2) {
     auto bias_tensor = in_tensors_.at(kBiasIndex);
     auto ori_bias = reinterpret_cast<float *>(bias_tensor->MutableData());
+    MS_ASSERT(ori_bias);
     for (int i = 0; i < bias_tensor->ElementsNum(); i++) {
       bias_fp16[i] = (float16_t)ori_bias[i];
     }
@@ -140,25 +142,18 @@ static int ConvDwSWFp16Run(void *cdata, int task_id) {
 }
 
 int ConvolutionDepthwiseSWFp16CPUKernel::Run() {
-  if (conv_param_->input_channel_ != conv_param_->output_channel_) {
-    MS_LOG(ERROR) << "Only support input channel equals output channel.";
-    return RET_ERROR;
-  }
-
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare failed.";
-    return RET_ERROR;
-  }
-  ret = InitBuffer();
+  auto ret = InitPackedInputOutput();
   if (ret != 0) {
-    MS_LOG(ERROR) << "Convolution depthwise fp16 InitBuffer failed.";
-    return RET_ERROR;
+    MS_LOG(ERROR) << "Convolution depthwise fp16 InitPackedInputOutput failed.";
+    FreePackedInputOutput();
+    return ret;
   }
 
   ret = ConvolutionBaseFP16CPUKernel::GetExecuteTensor();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Get Execute tensor failed.";
+    FreePackedInputOutput();
+    ConvolutionBaseFP16CPUKernel::FreeTmpBuffer();
     return ret;
   }
   if (need_align_) {
@@ -166,25 +161,29 @@ int ConvolutionDepthwiseSWFp16CPUKernel::Run() {
                         conv_param_->input_h_ * conv_param_->input_w_, conv_param_->input_channel_);
   } else {
     packed_input_ = execute_input_;
-  }
-  if (!need_align_) {
     packed_output_ = execute_output_;
   }
 
   ret = ParallelLaunch(this->context_->thread_pool_, ConvDwSWFp16Run, this, conv_param_->thread_num_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "ConvDwSWFp16Run error: error_code[" << ret << "]";
-    return RET_ERROR;
   }
   if (need_align_) {
     PackNHWC8ToNHWCFp16(packed_output_, execute_output_, conv_param_->output_batch_,
                         conv_param_->output_h_ * conv_param_->output_w_, conv_param_->output_channel_);
-    context_->allocator->Free(packed_input_);
-    context_->allocator->Free(packed_output_);
   }
   ConvolutionBaseFP16CPUKernel::IfCastOutput();
   ConvolutionBaseFP16CPUKernel::FreeTmpBuffer();
-  return RET_OK;
+  FreePackedInputOutput();
+  return ret;
 }
 
+void ConvolutionDepthwiseSWFp16CPUKernel::FreePackedInputOutput() {
+  if (need_align_) {
+    context_->allocator->Free(packed_input_);
+    context_->allocator->Free(packed_output_);
+    packed_input_ = nullptr;
+    packed_output_ = nullptr;
+  }
+}
 }  // namespace mindspore::kernel

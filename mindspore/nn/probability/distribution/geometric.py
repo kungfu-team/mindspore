@@ -16,9 +16,10 @@
 import numpy as np
 from mindspore.ops import operations as P
 from mindspore.ops import composite as C
+from mindspore._checkparam import Validator
 from mindspore.common import dtype as mstype
 from .distribution import Distribution
-from ._utils.utils import check_prob, check_type, check_distribution_name
+from ._utils.utils import check_prob, check_distribution_name
 from ._utils.custom_ops import exp_generic, log_generic
 
 
@@ -29,85 +30,99 @@ class Geometric(Distribution):
     when the first success is achieved.
 
     Args:
-        probs (float, list, numpy.ndarray, Tensor, Parameter): The probability of success.
+        probs (float, list, numpy.ndarray, Tensor): The probability of success.
         seed (int): The seed used in sampling. Global seed is used if it is None. Default: None.
         dtype (mindspore.dtype): The type of the event samples. Default: mstype.int32.
         name (str): The name of the distribution. Default: 'Geometric'.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Note:
         `probs` must be a proper probability (0 < p < 1).
         `dist_spec_args` is `probs`.
 
     Examples:
-        >>> # To initialize a Geometric distribution of the probability 0.5.
+        >>> import mindspore
+        >>> import mindspore.nn as nn
         >>> import mindspore.nn.probability.distribution as msd
-        >>> n = msd.Geometric(0.5, dtype=mstype.int32)
-        >>>
-        >>> # The following creates two independent Geometric distributions.
-        >>> n = msd.Geometric([0.5, 0.5], dtype=mstype.int32)
-        >>>
-        >>> # A Geometric distribution can be initilized without arguments.
+        >>> from mindspore import Tensor
+        >>> # To initialize a Geometric distribution of the probability 0.5.
+        >>> g1 = msd.Geometric(0.5, dtype=mindspore.int32)
+        >>> # A Geometric distribution can be initialized without arguments.
         >>> # In this case, `probs` must be passed in through arguments during function calls.
-        >>> n = msd.Geometric(dtype=mstype.int32)
+        >>> g2 = msd.Geometric(dtype=mindspore.int32)
         >>>
-        >>> # To use a Geometric distribution in a network.
-        >>> class net(Cell):
-        >>>     def __init__(self):
-        >>>         super(net, self).__init__():
-        >>>         self.g1 = msd.Geometric(0.5, dtype=mstype.int32)
-        >>>         self.g2 = msd.Geometric(dtype=mstype.int32)
+        >>> # Here are some tensors used below for testing
+        >>> value = Tensor([1, 0, 1], dtype=mindspore.int32)
+        >>> probs_a = Tensor([0.6], dtype=mindspore.float32)
+        >>> probs_b = Tensor([0.2, 0.5, 0.4], dtype=mindspore.float32)
         >>>
-        >>>     # The following calls are valid in construct.
-        >>>     def construct(self, value, probs_b, probs_a):
-        >>>
-        >>>         # Private interfaces of probability functions corresponding to public interfaces, including
-        >>>         # `prob`, `log_prob`, `cdf`, `log_cdf`, `survival_function`, and `log_survival`, have the same arguments as follows.
-        >>>         # Args:
-        >>>         #     value (Tensor): the value to be evaluated.
-        >>>         #     probs1 (Tensor): the probability of success of a Bernoulli trail. Default: self.probs.
-        >>>
-        >>>         # Examples of `prob`.
-        >>>         # Similar calls can be made to other probability functions
-        >>>         # by replacing `prob` by the name of the function.
-        >>>         ans = self.g1.prob(value)
-        >>>         # Evaluate with respect to distribution b.
-        >>>         ans = self.g1.prob(value, probs_b)
-        >>>         # `probs` must be passed in during function calls.
-        >>>         ans = self.g2.prob(value, probs_a)
-        >>>
-        >>>
-        >>>         # Functions `mean`, `sd`, `var`, and `entropy` have the same arguments.
-        >>>         # Args:
-        >>>         #     probs1 (Tensor): the probability of success of a Bernoulli trail. Default: self.probs.
-        >>>
-        >>>         # Examples of `mean`. `sd`, `var`, and `entropy` are similar.
-        >>>         ans = self.g1.mean() # return 1.0
-        >>>         ans = self.g1.mean(probs_b)
-        >>>         # Probs must be passed in during function calls
-        >>>         ans = self.g2.mean(probs_a)
-        >>>
-        >>>
-        >>>         # Interfaces of 'kl_loss' and 'cross_entropy' are the same.
-        >>>         # Args:
-        >>>         #     dist (str): the name of the distribution. Only 'Geometric' is supported.
-        >>>         #     probs1_b (Tensor): the probability of success of a Bernoulli trail of distribution b.
-        >>>         #     probs1_a (Tensor): the probability of success of a Bernoulli trail of distribution a. Default: self.probs.
-        >>>
-        >>>         # Examples of `kl_loss`. `cross_entropy` is similar.
-        >>>         ans = self.g1.kl_loss('Geometric', probs_b)
-        >>>         ans = self.g1.kl_loss('Geometric', probs_b, probs_a)
-        >>>         # An additional `probs` must be passed in.
-        >>>         ans = self.g2.kl_loss('Geometric', probs_b, probs_a)
-        >>>
-        >>>
-        >>>         # Examples of `sample`.
-        >>>         # Args:
-        >>>         #     shape (tuple): the shape of the sample. Default: ()
-        >>>         #     probs1 (Tensor): the probability of success of a Bernoulli trail. Default: self.probs.
-        >>>         ans = self.g1.sample()
-        >>>         ans = self.g1.sample((2,3))
-        >>>         ans = self.g1.sample((2,3), probs_b)
-        >>>         ans = self.g2.sample((2,3), probs_a)
+        >>> # Private interfaces of probability functions corresponding to public interfaces, including
+        >>> # `prob`, `log_prob`, `cdf`, `log_cdf`, `survival_function`, and `log_survival`, have the same arguments as follows.
+        >>> # Args:
+        >>> #     value (Tensor): the value to be evaluated.
+        >>> #     probs1 (Tensor): the probability of success of a Bernoulli trail. Default: self.probs.
+        >>> # Examples of `prob`.
+        >>> # Similar calls can be made to other probability functions
+        >>> # by replacing `prob` by the name of the function.
+        >>> ans = g1.prob(value)
+        >>> print(ans.shape)
+        (3,)
+        >>> # Evaluate with respect to distribution b.
+        >>> ans = g1.prob(value, probs_b)
+        >>> print(ans.shape)
+        (3,)
+        >>> # `probs` must be passed in during function calls.
+        >>> ans = g2.prob(value, probs_a)
+        >>> print(ans.shape)
+        (3,)
+        >>> # Functions `mean`, `sd`, `var`, and `entropy` have the same arguments.
+        >>> # Args:
+        >>> #     probs1 (Tensor): the probability of success of a Bernoulli trail. Default: self.probs.
+        >>> # Examples of `mean`. `sd`, `var`, and `entropy` are similar.
+        >>> ans = g1.mean() # return 1.0
+        >>> print(ans.shape)
+        ()
+        >>> ans = g1.mean(probs_b)
+        >>> print(ans.shape)
+        (3,)
+        >>> # Probs must be passed in during function calls
+        >>> ans = g2.mean(probs_a)
+        >>> print(ans.shape)
+        (1,)
+        >>> # Interfaces of 'kl_loss' and 'cross_entropy' are the same.
+        >>> # Args:
+        >>> #     dist (str): the name of the distribution. Only 'Geometric' is supported.
+        >>> #     probs1_b (Tensor): the probability of success of a Bernoulli trail of distribution b.
+        >>> #     probs1_a (Tensor): the probability of success of a Bernoulli trail of distribution a. Default: self.probs.
+        >>> # Examples of `kl_loss`. `cross_entropy` is similar.
+        >>> ans = g1.kl_loss('Geometric', probs_b)
+        >>> print(ans.shape)
+        (3,)
+        >>> ans = g1.kl_loss('Geometric', probs_b, probs_a)
+        >>> print(ans.shape)
+        (3,)
+        >>> # An additional `probs` must be passed in.
+        >>> ans = g2.kl_loss('Geometric', probs_b, probs_a)
+        >>> print(ans.shape)
+        (3,)
+        >>> # Examples of `sample`.
+        >>> # Args:
+        >>> #     shape (tuple): the shape of the sample. Default: ()
+        >>> #     probs1 (Tensor): the probability of success of a Bernoulli trail. Default: self.probs.
+        >>> ans = g1.sample()
+        >>> print(ans.shape)
+        ()
+        >>> ans = g1.sample((2,3))
+        >>> print(ans.shape)
+        (2, 3)
+        >>> ans = g1.sample((2,3), probs_b)
+        >>> print(ans.shape)
+        (2, 3, 3)
+        >>> ans = g2.sample((2,3), probs_a)
+        >>> print(ans.shape)
+        (2, 3, 1)
     """
 
     def __init__(self,
@@ -121,7 +136,7 @@ class Geometric(Distribution):
         param = dict(locals())
         param['param_dict'] = {'probs': probs}
         valid_dtype = mstype.int_type + mstype.uint_type + mstype.float_type
-        check_type(dtype, valid_dtype, type(self).__name__)
+        Validator.check_type_name("dtype", dtype, valid_dtype, type(self).__name__)
         super(Geometric, self).__init__(seed, dtype, name, param)
 
         self._probs = self._add_parameter(probs, 'probs')
@@ -149,17 +164,28 @@ class Geometric(Distribution):
 
     def extend_repr(self):
         if self.is_scalar_batch:
-            str_info = f'probs = {self.probs}'
+            s = f'probs = {self.probs}'
         else:
-            str_info = f'batch_shape = {self._broadcast_shape}'
-        return str_info
+            s = f'batch_shape = {self._broadcast_shape}'
+        return s
 
     @property
     def probs(self):
         """
-        Return the probability of success of the Bernoulli trail.
+        Return the probability of success of the Bernoulli trail,
+        after casting to dtype.
         """
         return self._probs
+
+    def _get_dist_type(self):
+        return "Geometric"
+
+    def _get_dist_args(self, probs1=None):
+        if probs1 is not None:
+            self.checktensor(probs1, 'probs')
+        else:
+            probs1 = self.probs
+        return (probs1,)
 
     def _mean(self, probs1=None):
         r"""

@@ -24,7 +24,6 @@
 #include "runtime/device/kernel_runtime.h"
 #include "backend/session/kernel_graph.h"
 #include "backend/session/session_basic.h"
-#include "runtime/device/cpu/cpu_resource_manager.h"
 #include "backend/session/anf_runtime_algorithm.h"
 #include "utils/any.h"
 namespace mindspore {
@@ -35,11 +34,11 @@ class CPUKernelRuntime : public KernelRuntime {
   CPUKernelRuntime() = default;
   ~CPUKernelRuntime() override = default;
 
-  bool Init() override { return true; }
-  bool Run(session::KernelGraph *graph, bool is_task_sink, Debugger *debugger = nullptr) override;
+  bool Init();
+  bool Run(session::KernelGraph *graph, bool is_task_sink) override;
   void AssignKernelAddress(session::KernelGraph *kernel_graph);
   void CreateOutputTensors(session::KernelGraph *kernel_graph, const std::vector<tensor::TensorPtr> &inputs,
-                           VectorRef *outputs);
+                           VectorRef *outputs, std::map<tensor::TensorPtr, session::KernelWithIndex> *tensor_to_node);
   void BindInputOutput(session::KernelGraph *kernel_graph, const std::vector<tensor::TensorPtr> &inputs,
                        VectorRef *outputs);
   void IncreaseSummaryRefCount(const session::NamedSummaryOutputs &summary_outputs);
@@ -53,17 +52,19 @@ class CPUKernelRuntime : public KernelRuntime {
                                        TypeId type_id) override;
 
  private:
-  tensor::TensorPtr CreatTensorForOutput(session::KernelGraph *kernel_graph, const CNodePtr &node, size_t index);
-  BaseRef CreatTensorForOutput(session::KernelGraph *kernel_graph, const session::KernelWithIndex &kernel_with_index);
+  tensor::TensorPtr CreatTensorForOutput(session::KernelGraph *kernel_graph, const CNodePtr &node, size_t index,
+                                         std::map<tensor::TensorPtr, session::KernelWithIndex> *tensor_to_node);
+  BaseRef CreatTensorForOutput(session::KernelGraph *kernel_graph, const session::KernelWithIndex &kernel_with_index,
+                               std::map<tensor::TensorPtr, session::KernelWithIndex> *tensor_to_node);
   void BindInputTensorAddressPtr(const session::KernelGraph &graph, const std::vector<tensor::TensorPtr> &inputs);
   void BindOutputTensorAddressPtr(const VectorRef *outputs);
   void AssignValueNodeAddress(session::KernelGraph *kernel_graph);
   void AssignInputNodeAddress(const session::KernelGraph *kernel_graph);
   void AssignKernelOutputAddress(const session::KernelGraph *kernel_graph);
   void AddRuntimeAddress(DeviceAddress *address, std::vector<kernel::AddressPtr> *input_list);
-  CPUResourceManager resource_manager_;
   std::set<DeviceAddressPtr> bound_addresses_;
   std::map<AnfNodePtr, tensor::TensorPtr> input_param_tensor_map_;
+  bool initialized_{false};
 };
 }  // namespace cpu
 }  // namespace device

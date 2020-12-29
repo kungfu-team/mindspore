@@ -13,21 +13,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #ifndef MINDSPORE_LITE_NNACL_L2NORM_PARAMETER_H_
 #define MINDSPORE_LITE_NNACL_L2NORM_PARAMETER_H_
 
 #include "nnacl/op_base.h"
+#include "nnacl/quantization/quantize.h"
 
 typedef struct L2NormParameter {
+  // Primitive parameter
   OpParameter op_parameter_;
-  int *axis_;
-  size_t axis_num_;
   float epsilon_;
+  int axis_[8];
+  // shape correlative
+  size_t axis_num_;
   int data_num_;
   int *shape_;
   size_t shape_num_;
+  // other parameter
   ActType act_type_;
 } L2NormParameter;
+
+typedef struct {
+  QuantArg in_;
+  QuantArg out_;
+} L2NormQuantArg;
 
 #endif  // MINDSPORE_LITE_NNACL_L2NORM_PARAMETER_H_

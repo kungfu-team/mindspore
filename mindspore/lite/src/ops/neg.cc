@@ -16,9 +16,37 @@
 
 #include "src/ops/neg.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
-#ifndef PRIMITIVE_WRITEABLE
+#ifdef PRIMITIVE_WRITEABLE
+int Neg::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
+  if (this->primitive_ == nullptr) {
+    this->primitive_ = new (std::nothrow) schema::PrimitiveT;
+    if (this->primitive_ == nullptr) {
+      MS_LOG(ERROR) << "new primitiveT failed";
+      return RET_ERROR;
+    }
+    this->primitive_->value.type = schema::PrimitiveType_Neg;
+  }
+  if (this->primitive_->value.type != schema::PrimitiveType_Neg) {
+    MS_LOG(ERROR) << "Primitive type is error :" << this->primitive_->value.type;
+    return RET_ERROR;
+  }
+  if (this->primitive_->value.value == nullptr) {
+    this->primitive_->value.value = new (std::nothrow) schema::NegT();
+    if (this->primitive_->value.value == nullptr) {
+      MS_LOG(ERROR) << "new primitiveT value failed";
+      return RET_ERROR;
+    }
+  }
+  return RET_OK;
+}
+
+#else
 int Neg::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) {
   MS_ASSERT(primitive != nullptr);
   MS_ASSERT(fbb != nullptr);
@@ -28,6 +56,9 @@ int Neg::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::Fl
   return RET_OK;
 }
 
+PrimitiveC *NegCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Neg>(primitive); }
+Registry NegRegistry(schema::PrimitiveType_Neg, NegCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

@@ -31,7 +31,10 @@ namespace pipeline {
 struct ExecutorInfo {
   FuncGraphPtr func_graph;
   ResourcePtr resource;
+  // The num of input data.
   std::size_t arg_list_size;
+  // The all args of graph,including input data and weight.
+  VectorRef arg_list;
 };
 using ExecutorInfoPtr = std::shared_ptr<ExecutorInfo>;
 
@@ -43,7 +46,7 @@ inline std::string GetPhasePrefix(const std::string &phase) {
   return phase.substr(0, pos);
 }
 
-inline std::string GetFilePathName(const std::string &file_name) {
+inline std::string GetSaveGraphsPathName(const std::string &file_name) {
   std::ostringstream oss;
   auto ms_context = MsContext::GetInstance();
   if (ms_context == nullptr) {

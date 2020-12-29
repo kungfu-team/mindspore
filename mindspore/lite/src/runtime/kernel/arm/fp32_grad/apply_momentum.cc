@@ -20,7 +20,6 @@
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
 #include "src/runtime/runtime_api.h"
-#include "src/runtime/kernel/arm/fp32/nchw2nhwc.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
@@ -29,7 +28,6 @@ using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_ApplyMomentum;
 
 namespace mindspore::kernel {
-
 int ApplyMomentumCPUKernel::ReSize() { return RET_OK; }
 
 int ApplyMomentumCPUKernel::Execute(int task_id) {
@@ -55,6 +53,7 @@ int ApplyMomentumCPUKernel::Execute(int task_id) {
 }
 
 int ApplyMomentumRun(void *cdata, int task_id) {
+  MS_ASSERT(cdata != nullptr);
   auto applyMomentum_kernel = reinterpret_cast<ApplyMomentumCPUKernel *>(cdata);
   auto error_code = applyMomentum_kernel->Execute(task_id);
   if (error_code != RET_OK) {
@@ -65,12 +64,6 @@ int ApplyMomentumRun(void *cdata, int task_id) {
 }
 
 int ApplyMomentumCPUKernel::Run() {
-  auto prepare_ret = Prepare();
-  if (prepare_ret != RET_OK) {
-    MS_LOG(ERROR) << "ApplyMomentumCPUKernel Prepare fail!ret: " << prepare_ret;
-    return prepare_ret;
-  }
-
   int error_code = ParallelLaunch(this->context_->thread_pool_, ApplyMomentumRun, this, 1);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "Apply Momentum function error error_code[" << error_code << "]";
@@ -79,14 +72,7 @@ int ApplyMomentumCPUKernel::Run() {
   return RET_OK;
 }
 
-int ApplyMomentumCPUKernel::Init() {
-  // Only for test with uninitialized Data
-  size_t elem_num = in_tensors_[0]->ElementsNum();
-  auto accumulate = reinterpret_cast<float *>(in_tensors_[1]->MutableData());
-  for (size_t i = 0; i < elem_num; i++) accumulate[i] = 0.0;
-
-  return RET_OK;
-}
+int ApplyMomentumCPUKernel::Init() { return RET_OK; }
 
 kernel::LiteKernel *CpuApplyMomentumFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
                                                       const std::vector<lite::Tensor *> &outputs,
@@ -95,16 +81,19 @@ kernel::LiteKernel *CpuApplyMomentumFp32KernelCreator(const std::vector<lite::Te
                                                       const lite::PrimitiveC *primitive) {
   MS_ASSERT(desc.type == schema::PrimitiveType_ApplyMomentum);
   auto *kernel = new (std::nothrow) ApplyMomentumCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  MS_ASSERT(kernel != nullptr);
+  if (kernel == nullptr) {
+    MS_LOG(ERROR) << "new ApplyMomentumCPUKernel fail!";
+    free(opParameter);
+    return nullptr;
+  }
 
   auto ret = kernel->Init();
-  if (0 != ret) {
+  if (ret != RET_OK) {
     MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
                   << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
     delete kernel;
     return nullptr;
   }
-
   return kernel;
 }
 

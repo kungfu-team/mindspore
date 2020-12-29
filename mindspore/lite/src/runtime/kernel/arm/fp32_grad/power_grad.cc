@@ -18,7 +18,7 @@
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
-#include "nnacl/fp32/arithmetic.h"
+#include "nnacl/fp32/arithmetic_fp32.h"
 #include "src/runtime/runtime_api.h"
 
 using mindspore::lite::KernelRegistrar;
@@ -28,11 +28,11 @@ using mindspore::schema::PrimitiveType_PowerGrad;
 
 namespace mindspore::kernel {
 int PowerGradCPUKernel::Init() {
-  if (2 != in_tensors_.size()) {
+  if (in_tensors_.size() != 2) {
     MS_LOG(ERROR) << "Power Grad Filter should have 2 inputs";
     return RET_ERROR;
   }
-  if (1 != out_tensors_.size()) {
+  if (out_tensors_.size() != 1) {
     MS_LOG(ERROR) << "Power Grad Filter should have one output";
     return RET_ERROR;
   }
@@ -69,11 +69,6 @@ int PowerGradRun(void *cdata, int task_id) {
 }
 
 int PowerGradCPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "PowerGradCPUKernel Prepare failed.";
-    return RET_ERROR;
-  }
   int error_code = ParallelLaunch(this->context_->thread_pool_, PowerGradRun, this, 1);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "power grad function error error_code[" << error_code << "]";
@@ -91,6 +86,7 @@ kernel::LiteKernel *CpuPowerGradFp32KernelCreator(const std::vector<lite::Tensor
   auto *kernel = new (std::nothrow) PowerGradCPUKernel(opParameter, inputs, outputs, ctx, primitive);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "new PowerGradCPUKernel fail!";
+    free(opParameter);
     return nullptr;
   }
 

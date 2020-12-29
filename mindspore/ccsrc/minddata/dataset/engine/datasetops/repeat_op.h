@@ -78,7 +78,7 @@ class RepeatOp : public PipelineOp {
   // However, the RepeatOp is defined as a inlined operator, so it is invalid to launch the
   // functor since this op runs inlined inside another operator.  The function is overloaded to
   // ensure that it is not called by mistake (it will generate an error).
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status operator()() override;
 
   // This function returns the buffer that is at the top of our output connector. The caller is
@@ -90,7 +90,7 @@ class RepeatOp : public PipelineOp {
   // @param p_buffer - output pointer to the buffer that it will fetch.
   // @param worker_id - The worker id
   // @param retry_if_eoe Set this flag to true to allow calling pop() again after the first pop() returns EOE.
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status GetNextBuffer(std::unique_ptr<DataBuffer> *p_buffer, int32_t worker_id, bool retry_if_eoe) override;
 
   // Base-class override for handling cases when an eoe is received.
@@ -128,6 +128,18 @@ class RepeatOp : public PipelineOp {
   /// \brief Getter function
   /// \return The number of repeats that the user requested
   int32_t num_repeats() { return num_repeats_; }
+
+  /// \brief reset Op
+  /// \@return Status The status code returned
+  Status Reset() override;
+
+  int64_t GetTreeRepeatCount() override;
+
+  // \brief Adds an operator to the repeat ops list of tracked leaf/eoe nodes
+  // \param[in] eoe_op The input leaf/eoe operator to add to the list
+  void AddToEoeList(std::shared_ptr<DatasetOp> eoe_op) { eoe_ops_.push_back(std::move(eoe_op)); }
+
+  std::vector<std::shared_ptr<DatasetOp>> eoe_ops_;  // List of operators that can generate EOE underneath this repeat.
 
  protected:
   // The number of repeats that the user requested.

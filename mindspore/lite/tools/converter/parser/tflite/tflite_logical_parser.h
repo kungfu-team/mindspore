@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_LITE_TOOLS_CONVERTER_PARSER_TFLITE_AND_PARSER_H
-#define MINDSPORE_LITE_TOOLS_CONVERTER_PARSER_TFLITE_AND_PARSER_H
+#ifndef MINDSPORE_LITE_TOOLS_CONVERTER_PARSER_TFLITE_LOGICAL_PARSER_H
+#define MINDSPORE_LITE_TOOLS_CONVERTER_PARSER_TFLITE_LOGICAL_PARSER_H
 
 #include <memory>
 #include <vector>
@@ -23,31 +23,14 @@
 #include "tools/converter/parser/tflite/tflite_node_parser.h"
 #include "tools/converter/parser/tflite/tflite_node_parser_registry.h"
 
-namespace mindspore {
-namespace lite {
+namespace mindspore::lite {
 class TfliteLogicalParser : public TfliteNodeParser {
  public:
   TfliteLogicalParser() : TfliteNodeParser("node_name") {}
 
-  STATUS Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-               const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) override;
+  PrimitiveC *ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                 const std::unique_ptr<tflite::ModelT> &tflite_model) override;
 };
+}  // namespace mindspore::lite
 
-class TfliteLogicalAndParser : public TfliteLogicalParser {
- public:
-  TfliteLogicalAndParser() : TfliteLogicalParser() {}
-};
-
-class TfliteLogicalNotParser : public TfliteLogicalParser {
- public:
-  TfliteLogicalNotParser() : TfliteLogicalParser() {}
-};
-
-class TfliteLogicalOrParser : public TfliteLogicalParser {
- public:
-  TfliteLogicalOrParser() : TfliteLogicalParser() {}
-};
-}  // namespace lite
-}  // namespace mindspore
-
-#endif  // MINDSPORE_LITE_TOOLS_CONVERTER_PARSER_TFLITE_LOGICAL_AND_PARSER_H
+#endif  // MINDSPORE_LITE_TOOLS_CONVERTER_PARSER_TFLITE_LOGICAL_PARSER_H

@@ -20,7 +20,7 @@
 #include "nnacl/pad_parameter.h"
 #include "mindspore/lite/src/kernel_registry.h"
 #include "schema/ops_generated.h"
-#include "nnacl/fp32/scale.h"
+#include "nnacl/fp32/scale_fp32.h"
 
 using mindspore::schema::ActivationType;
 using mindspore::schema::ActivationType_NO_ACTIVATION;
@@ -55,10 +55,10 @@ class TestScaleFp32 : public mindspore::CommonTest {
 };
 
 void TestScaleFp32::TearDown() {
-  in_tensor_.SetData(nullptr);
-  scale_tensor_.SetData(nullptr);
-  offset_tensor_.SetData(nullptr);
-  out_tensor_.SetData(nullptr);
+  in_tensor_.set_data(nullptr);
+  scale_tensor_.set_data(nullptr);
+  offset_tensor_.set_data(nullptr);
+  out_tensor_.set_data(nullptr);
 }
 
 void TestScaleFp32::Prepare(const std::vector<int> &input_shape, const std::vector<int> &scale_shape,
@@ -66,21 +66,21 @@ void TestScaleFp32::Prepare(const std::vector<int> &input_shape, const std::vect
                             float *input_data, float *scale_data, float *offset_data, float *output_data, int axis,
                             ActivationType act_type, const int thread_num) {
   in_tensor_.set_data_type(kNumberTypeFloat32);
-  in_tensor_.SetFormat(Format_NHWC);
+  in_tensor_.set_format(Format_NHWC);
   in_tensor_.set_shape(input_shape);
   scale_tensor_.set_data_type(kNumberTypeFloat32);
-  scale_tensor_.SetFormat(Format_NHWC);
+  scale_tensor_.set_format(Format_NHWC);
   scale_tensor_.set_shape(scale_shape);
   offset_tensor_.set_data_type(kNumberTypeFloat32);
-  offset_tensor_.SetFormat(Format_NHWC);
+  offset_tensor_.set_format(Format_NHWC);
   offset_tensor_.set_shape(offset_shape);
   out_tensor_.set_data_type(kNumberTypeFloat32);
   out_tensor_.set_shape(output_shape);
 
-  in_tensor_.SetData(input_data);
-  scale_tensor_.SetData(scale_data);
-  offset_tensor_.SetData(offset_data);
-  out_tensor_.SetData(output_data);
+  in_tensor_.set_data(input_data);
+  scale_tensor_.set_data(scale_data);
+  offset_tensor_.set_data(offset_data);
+  out_tensor_.set_data(output_data);
 
   param_.activation_type_ = act_type;
   param_.axis_ = axis;
@@ -112,7 +112,7 @@ TEST_F(TestScaleFp32, ScaleNoAct) {
 
   std::vector<float> expect{1.0, 3.0, 7.0, 4.0, 9.0, 16.0, 7.0, 15.0, 25.0, 10.0, 21.0, 34.0};
 
-  CompareOutputData(out_data, expect.data(), 12, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out_data, expect.data(), 12, err_tol));
 }
 
 TEST_F(TestScaleFp32, ScaleRelu) {
@@ -134,7 +134,7 @@ TEST_F(TestScaleFp32, ScaleRelu) {
 
   std::vector<float> expect{0.0, 0.0, 1.0, 0.0, 3.0, 10.0, 1.0, 9.0, 19.0, 4.0, 15.0, 28.0};
 
-  CompareOutputData(out_data, expect.data(), 12, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out_data, expect.data(), 12, err_tol));
 }
 TEST_F(TestScaleFp32, ScaleRelu6) {
   std::vector<int> input_shape{1, 2, 2, 3};
@@ -155,6 +155,6 @@ TEST_F(TestScaleFp32, ScaleRelu6) {
 
   std::vector<float> expect{0.0, 0.0, 1.0, 0.0, 3.0, 6.0, 1.0, 6.0, 6.0, 4.0, 6.0, 6.0};
 
-  CompareOutputData(out_data, expect.data(), 12, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out_data, expect.data(), 12, err_tol));
 }
 }  // namespace mindspore

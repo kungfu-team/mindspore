@@ -54,7 +54,7 @@ bool GetBatchNormOutputs(const FuncGraphPtr &func_graph, const AnfNodePtr &bn, s
     MS_EXCEPTION_IF_NULL(index_node);
     auto value_node = index_node->cast<ValueNodePtr>();
     MS_EXCEPTION_IF_NULL(value_node);
-    int index = GetValue<int>(value_node->value());
+    int index = static_cast<int>(GetValue<int64_t>(value_node->value()));
     if (std::find(kOutputIndex.begin(), kOutputIndex.end(), index) == kOutputIndex.end()) {
       return false;
     }
@@ -110,6 +110,41 @@ void ReplaceOutput(const FuncGraphPtr &graph, const AnfNodePtr &bn_grad, const A
   manager->Replace(relu_grad, bn_add_relu_grad_output[kBNAddReluGradOutputNum - 1]);
   return;
 }
+
+bool PatternCheck(const FuncGraphPtr &graph, const AnfNodePtr &node) {
+  MS_EXCEPTION_IF_NULL(graph);
+  MS_EXCEPTION_IF_NULL(node);
+  auto format_attr = AnfAlgo::GetCNodePrimitive(node)->GetAttr("data_format");
+  MS_EXCEPTION_IF_NULL(format_attr);
+  auto format = GetValue<std::string>(format_attr);
+  if (AnfAlgo::GetInputFormat(node, 0) != kOpFormat_NHWC && format != "NHWC") {
+    return false;
+  }
+  auto shape = AnfAlgo::GetInputDeviceShape(node, 0);
+  if (shape.back() % kBNChannelMultipleFactor != 0) {
+    return false;
+  }
+
+  auto relu_grad = AnfAlgo::GetInputNode(utils::cast<CNodePtr>(node), 0);
+  MS_EXCEPTION_IF_NULL(relu_grad);
+  auto relu_users = GetRealNodeUsedList(graph, relu_grad);
+  if (relu_users->size() != 2) {
+    return false;
+  }
+
+  // process pattern as Relu(TensorAdd(BN#0, BN#1))
+  auto tuple_getitem = AnfAlgo::GetInputNode(utils::cast<CNodePtr>(node), 5);
+  MS_EXCEPTION_IF_NULL(tuple_getitem);
+  if (!utils::isa<CNodePtr>(tuple_getitem) || AnfAlgo::GetCNodeName(tuple_getitem) != prim::kPrimTupleGetItem->name()) {
+    return false;
+  }
+  auto forward_node = AnfAlgo::GetInputNode(utils::cast<CNodePtr>(tuple_getitem), 0);
+  if (AnfAlgo::GetCNodeName(forward_node) != kFusedBatchNormExWithAddAndActivation) {
+    return false;
+  }
+
+  return true;
+}
 }  // namespace
 
 const BaseRef BatchNormAddReluGradFusion::DefinePattern() const {
@@ -124,25 +159,12 @@ const AnfNodePtr BatchNormAddReluGradFusion::Process(const FuncGraphPtr &graph, 
   MS_EXCEPTION_IF_NULL(graph);
   MS_EXCEPTION_IF_NULL(node);
 
-  if (AnfAlgo::GetInputFormat(node, 0) != kOpFormat_NHWC) {
+  if (!PatternCheck(graph, node)) {
     return nullptr;
   }
 
   auto relu_grad = AnfAlgo::GetInputNode(utils::cast<CNodePtr>(node), 0);
   MS_EXCEPTION_IF_NULL(relu_grad);
-  auto relu_users = GetRealNodeUsedList(graph, relu_grad);
-  if (relu_users->size() != 2) {
-    return nullptr;
-  }
-
-  // process pattern as Relu(TensorAdd(BN#0, BN#1))
-  auto tuple_getitem = AnfAlgo::GetInputNode(utils::cast<CNodePtr>(node), 5);
-  MS_EXCEPTION_IF_NULL(tuple_getitem);
-  auto forward_node = AnfAlgo::GetInputNode(utils::cast<CNodePtr>(tuple_getitem), 0);
-  if (AnfAlgo::GetCNodeName(forward_node) != kFusedBatchNormExWithAddAndActivation) {
-    return nullptr;
-  }
-
   auto dy = AnfAlgo::GetInputNode(utils::cast<CNodePtr>(relu_grad), 0);
   MS_EXCEPTION_IF_NULL(dy);
   auto y = AnfAlgo::GetInputNode(utils::cast<CNodePtr>(relu_grad), 1);

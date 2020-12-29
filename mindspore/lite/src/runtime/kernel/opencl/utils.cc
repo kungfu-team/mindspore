@@ -20,8 +20,16 @@
 #include <vector>
 #include "src/kernel_registry.h"
 #include "src/runtime/opencl/opencl_runtime.h"
+#include "src/runtime/kernel/opencl/opencl_kernel.h"
+#include "src/common/file_utils.h"
 
 using mindspore::lite::KernelRegistrar;
+using mindspore::lite::opencl::MemType;
+using mindspore::schema::ActivationType_LEAKY_RELU;
+using mindspore::schema::ActivationType_RELU;
+using mindspore::schema::ActivationType_RELU6;
+using mindspore::schema::ActivationType_SIGMOID;
+using mindspore::schema::ActivationType_TANH;
 
 namespace mindspore::lite {
 kernel::LiteKernel *GetOpenCLKernel(const std::vector<Tensor *> &in_tensors, const std::vector<Tensor *> &out_tensors,
@@ -36,6 +44,52 @@ kernel::LiteKernel *GetOpenCLKernel(const std::vector<Tensor *> &in_tensors, con
 }  // namespace mindspore::lite
 
 namespace mindspore::kernel {
+
+const std::set<schema::PrimitiveType> ArithmeticPrimitives = {schema::PrimitiveType_Mul,
+                                                              schema::PrimitiveType_Add,
+                                                              schema::PrimitiveType_Sub,
+                                                              schema::PrimitiveType_Div,
+                                                              schema::PrimitiveType_LogicalAnd,
+                                                              schema::PrimitiveType_LogicalOr,
+                                                              schema::PrimitiveType_Maximum,
+                                                              schema::PrimitiveType_Minimum,
+                                                              schema::PrimitiveType_FloorDiv,
+                                                              schema::PrimitiveType_FloorMod,
+                                                              schema::PrimitiveType_SquaredDifference,
+                                                              schema::PrimitiveType_Equal,
+                                                              schema::PrimitiveType_NotEqual,
+                                                              schema::PrimitiveType_Less,
+                                                              schema::PrimitiveType_LessEqual,
+                                                              schema::PrimitiveType_Greater,
+                                                              schema::PrimitiveType_GreaterEqual,
+                                                              schema::PrimitiveType_Eltwise};
+
+const std::set<schema::PrimitiveType> ArithmeticSelfPrimitives = {
+  schema::PrimitiveType_Abs,        schema::PrimitiveType_Ceil,  schema::PrimitiveType_Cos,
+  schema::PrimitiveType_Exp,        schema::PrimitiveType_Floor, schema::PrimitiveType_Log,
+  schema::PrimitiveType_LogicalNot, schema::PrimitiveType_Round, schema::PrimitiveType_Rsqrt,
+  schema::PrimitiveType_Sin,        schema::PrimitiveType_Neg,   schema::PrimitiveType_Sqrt,
+  schema::PrimitiveType_Square};
+
+std::string GetActDefines() {
+  static std::string act_defines = "#define ActivationType_RELU " + std::to_string(ActivationType_RELU) +
+                                   "\n#define ActivationType_RELU6 " + std::to_string(ActivationType_RELU6) +
+                                   "\n#define ActivationType_LEAKY_RELU " + std::to_string(ActivationType_LEAKY_RELU) +
+                                   "\n#define ActivationType_TANH " + std::to_string(ActivationType_TANH) +
+                                   "\n#define ActivationType_SIGMOID " + std::to_string(ActivationType_SIGMOID) + "\n";
+  return act_defines;
+}
+
+int GetUpPow2(int n) {
+  int i = 0;
+  int j = 0;
+  while (n > 0) {
+    j += n & 1;
+    n = n >> 1;
+    i++;
+  }
+  return 1 << (i - (j == 1));
+}
 
 int GetMaxDivisor(int x, int divisor) {
   int i = divisor;
@@ -73,6 +127,7 @@ int GetMaxDivisorStrategy1(int x, int divisor) {
 }
 
 std::vector<size_t> GetCommonGlobalSize(const std::vector<size_t> &local, const std::vector<size_t> &global) {
+  MS_ASSERT(local.size() == global.size() && local.size() == 3);
   std::vector<size_t> result(3);
   for (int i = 0; i < 3; ++i) {
     result[i] = UP_ROUND(global[i], local[i]);
@@ -81,6 +136,7 @@ std::vector<size_t> GetCommonGlobalSize(const std::vector<size_t> &local, const 
 }
 
 std::vector<size_t> GetCommonLocalSize(const std::vector<size_t> &global, int max_size) {
+  MS_ASSERT(global.size() == 3);
   size_t local_z = GetMaxDivisorStrategy0(global[2], 8);
   if (local_z == 0) {
     MS_LOG(ERROR) << "Divide by zero";
@@ -224,57 +280,81 @@ std::string CLErrorCode(cl_int error_code) {
   }
 }
 
-void Write2File(void *mem, const std::string &file_name, int size) {
-  std::fstream os;
-  os.open(file_name, std::ios::out | std::ios::binary);
-  os.write(static_cast<char *>(mem), size);
-  os.close();
+int WriteToBin(const std::string &file_path, void *data, size_t size) {
+  MS_ASSERT(data);
+  std::ofstream out_file;
+
+  out_file.open(file_path.c_str(), std::ios::binary);
+  if (!out_file.good()) {
+    MS_LOG(ERROR) << "file is bad";
+    return -1;
+  }
+
+  if (!out_file.is_open()) {
+    MS_LOG(ERROR) << "file open failed";
+    return -1;
+  }
+  out_file.write(reinterpret_cast<char *>(data), size);
+  return 0;
 }
 
-void PrintTensor(lite::Tensor *tensor, int num, const std::string &out_file) {
-  if (tensor->data_c() == nullptr) {
+void PrintTensor(const lite::Tensor *tensor, MemType mem_type, int n, const std::string &out_file) {
+  if (tensor == nullptr || tensor->data_c() == nullptr) {
     return;
   }
+
+  GpuTensorInfo img_info(tensor);
+  auto size = mem_type == MemType::BUF ? img_info.OriginSize : img_info.Image2DSize;
+  std::vector<char> data(size);
   auto runtime_wrapper = lite::opencl::OpenCLRuntimeWrapper();
   auto runtime = runtime_wrapper.GetInstance();
-  runtime->SyncCommandQueue();
-
   auto allocator = runtime->GetAllocator();
-  auto origin_data = tensor->data_c();
-  allocator->MapBuffer(origin_data, CL_MAP_READ | CL_MAP_WRITE, nullptr, true);
-  tensor->SetData(origin_data);
-
-  auto Batch = tensor->Batch();
-  auto Height = tensor->shape().size() == 4 ? tensor->Height() : 1;
-  auto Width = tensor->shape().size() == 4 ? tensor->Width() : 1;
-  auto SLICES = UP_DIV(tensor->Channel(), C4NUM);
-  auto alignment = runtime->GetImagePitchAlignment();
-  auto dtype_size = tensor->data_type() == kNumberTypeFloat16 ? sizeof(cl_half4) : sizeof(cl_float4);
-  auto row_pitch = (Width * SLICES + alignment - 1) / alignment * alignment * dtype_size;
-  auto row_size = Width * SLICES * dtype_size;
-  std::vector<char> data(tensor->Size());
-  for (int i = 0; i < Batch * Height; ++i) {
-    memcpy(static_cast<char *>(data.data()) + i * row_size, static_cast<char *>(origin_data) + i * row_pitch, row_size);
+  runtime->SyncCommandQueue();
+  allocator->MapBuffer(tensor->data_c(), CL_MAP_READ, nullptr, true);
+  if (mem_type == MemType::BUF) {
+    memcpy(data.data(), tensor->data_c(), img_info.OriginSize);
+  } else {
+    auto row_size = img_info.width * img_info.FLT4_size;
+    for (int i = 0; i < img_info.height; ++i) {
+      memcpy(reinterpret_cast<char *>(data.data()) + i * row_size,
+             static_cast<char *>(tensor->data_c()) + i * img_info.RowPitch(), row_size);
+    }
   }
+  allocator->UnmapBuffer(tensor->data_c());
 
-  std::cout << "shape=(";
-  for (auto x : tensor->shape()) {
-    printf("%3d,", x);
+  printf("shape=(");
+  auto shape = tensor->shape();
+  for (int i = 0; i < shape.size(); ++i) {
+    printf("%4d", shape[i]);
+    if (i + 1 < shape.size()) {
+      printf(",");
+    }
   }
-  printf("): ");
+  printf(") ");
 
-  for (size_t i = 0; i < num && i < tensor->ElementsNum(); ++i) {
-    if (tensor->data_type() == kNumberTypeFloat16)
-      printf("%zu %6.3f | ", i, (reinterpret_cast<float16_t *>(data.data()))[i]);
-    else
-      printf("%zu %6.3f | ", i, (reinterpret_cast<float *>(data.data()))[i]);
+  auto num = mem_type == MemType::BUF ? img_info.ElementsNum : img_info.ElementsC4Num;
+  for (int i = 0; i < n && i < num; ++i) {
+    if (tensor->data_type() == kNumberTypeFloat16) {
+      printf("%d %7.3f | ", i, reinterpret_cast<float16_t *>(data.data())[i]);
+    } else {
+      printf("%d %7.3f | ", i, reinterpret_cast<float *>(data.data())[i]);
+    }
   }
   printf("\n");
 
   if (!out_file.empty()) {
-    Write2File(data.data(), out_file, tensor->Size());
+    (void)WriteToBin(out_file, data.data(), data.size());
   }
-  allocator->UnmapBuffer(origin_data);
+}
+
+void PrintKernelOutput(OpenCLKernel *kernel, int n, const std::string &out_file) {
+  if (kernel == nullptr) {
+    return;
+  }
+  printf("%-30s", kernel->name().c_str());
+  if (!kernel->out_tensors().empty()) {
+    PrintTensor(kernel->out_tensors()[0], kernel->GetMemType(), n, out_file);
+  }
 }
 
 std::vector<int> GetNHWCShape(const std::vector<int> &tensor_shape) {

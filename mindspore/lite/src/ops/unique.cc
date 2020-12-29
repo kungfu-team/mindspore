@@ -16,16 +16,13 @@
 
 #include "src/ops/unique.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
-#ifdef PRIMITIVE_WRITEABLE
-int Unique::GetOutType() const { return this->primitive_->value.AsUnique()->outType; }
-
-void Unique::SetOutType(int out_type) { this->primitive_->value.AsUnique()->outType = out_type; }
-
-#else
-
-int Unique::GetOutType() const { return this->primitive_->value_as_Unique()->outType(); }
+#ifndef PRIMITIVE_WRITEABLE
 int Unique::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) {
   MS_ASSERT(nullptr != primitive);
   MS_ASSERT(nullptr != fbb);
@@ -39,6 +36,9 @@ int Unique::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers:
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *UniqueCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Unique>(primitive); }
+Registry UniqueRegistry(schema::PrimitiveType_Unique, UniqueCreator);
 #endif
 
 int Unique::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
@@ -55,10 +55,10 @@ int Unique::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
   MS_ASSERT(output1 != nullptr);
   output0->set_data_type(input->data_type());
   output1->set_data_type(kNumberTypeInt32);
-  output1->SetFormat(input->GetFormat());
-  output0->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output1->set_format(input->format());
+  output0->set_format(input->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   output0->set_shape(input->shape());
   output1->set_shape(input->shape());

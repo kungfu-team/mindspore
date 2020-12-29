@@ -16,6 +16,10 @@
 
 #include "src/ops/rsqrt.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -29,6 +33,9 @@ int Rsqrt::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+PrimitiveC *RsqrtCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Rsqrt>(primitive); }
+Registry RsqrtRegistry(schema::PrimitiveType_Rsqrt, RsqrtCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

@@ -17,8 +17,11 @@
 
 #include <random>
 
-#include "minddata/dataset/core/cv_tensor.h"
+#ifndef ENABLE_ANDROID
 #include "minddata/dataset/kernels/image/image_utils.h"
+#else
+#include "minddata/dataset/kernels/image/lite_image_utils.h"
+#endif
 #include "minddata/dataset/util/status.h"
 
 namespace mindspore {
@@ -41,7 +44,7 @@ Status NormalizeOp::Compute(const std::shared_ptr<Tensor> &input, std::shared_pt
 }
 
 void NormalizeOp::Print(std::ostream &out) const {
-  out << "NormalizeOp, mean: " << mean_ << std::endl << "std: " << std_ << std::endl;
+  out << "NormalizeOp, mean: " << *(mean_.get()) << std::endl << "std: " << *(std_.get()) << std::endl;
 }
 }  // namespace dataset
 }  // namespace mindspore

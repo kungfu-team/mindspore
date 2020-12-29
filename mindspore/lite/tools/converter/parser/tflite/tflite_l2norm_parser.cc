@@ -18,44 +18,31 @@
 #include "tools/converter/parser/tflite/tflite_l2norm_parser.h"
 #include <vector>
 #include <memory>
-#include <map>
 
 namespace mindspore {
 namespace lite {
-STATUS TfliteL2NormParser::Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                 const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TfliteL2NormParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
+PrimitiveC *TfliteL2NormParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                   const std::unique_ptr<tflite::ModelT> &tflite_model) {
   std::unique_ptr<schema::L2NormT> attr = std::make_unique<schema::L2NormT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
   const auto &tflite_attr = tflite_op->builtin_options.AsL2NormOptions();
   attr->axis = {-1};
   attr->epsilon = 1e-6f;
   attr->activationType = GetActivationFunctionType(tflite_attr->fused_activation_function);
 
-  op->primitive->value.type = schema::PrimitiveType_L2Norm;
-  op->primitive->value.value = attr.release();
-
-  // set input and output
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "primitive is null";
+    return nullptr;
+  }
+  primitive->value.type = schema::PrimitiveType_L2Norm;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteL2NormParser("L2_NORMALIZATION", new TfliteL2NormParser());
+TfliteNodeRegister g_tfliteL2NormParser(tflite::BuiltinOperator_L2_NORMALIZATION, new TfliteL2NormParser());
 }  // namespace lite
 }  // namespace mindspore

@@ -17,44 +17,47 @@
 #include "tools/converter/parser/tflite/tflite_range_parser.h"
 #include <vector>
 #include <memory>
-#include <map>
 
 namespace mindspore {
 namespace lite {
-STATUS TfliteRangeParser::Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TfliteRangeParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
+PrimitiveC *TfliteRangeParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                  const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  auto &tflite_subgraph = tflite_model->subgraphs.front();
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "primitive is null";
+    return nullptr;
   }
 
   std::unique_ptr<schema::RangeT> attr = std::make_unique<schema::RangeT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   attr->dType = 0;
-  //  attr->start
-  //  attr->limit
-  //  attr->delta
-
-  op->primitive->value.type = schema::PrimitiveType_Range;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  std::vector<int> limit;
+  std::vector<int> delta;
+  int status = GetTfliteData(tflite_op->inputs[1], tflite_subgraph->tensors, tflite_model->buffers, limit);
+  if (status != RET_OK && status != RET_NO_CHANGE) {
+    MS_LOG(ERROR) << "range -> limit get failed";
+    return nullptr;
+  } else if (status == RET_OK) {
+    status = GetTfliteData(tflite_op->inputs[2], tflite_subgraph->tensors, tflite_model->buffers, delta);
+    if (status != RET_OK && status != RET_NO_CHANGE) {
+      MS_LOG(ERROR) << "stridedSlice -> end get failed";
+      return nullptr;
+    }
+  }
+  if (status == RET_OK) {
+    attr->limit = limit.front();
+    attr->delta = delta.front();
+  }
+  primitive->value.type = schema::PrimitiveType_Range;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteRangeParser("Range", new TfliteRangeParser());
+TfliteNodeRegister g_tfliteRangeParser(tflite::BuiltinOperator_RANGE, new TfliteRangeParser());
 }  // namespace lite
 }  // namespace mindspore

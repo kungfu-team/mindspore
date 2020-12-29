@@ -18,13 +18,11 @@ import argparse
 import numpy as np
 
 import mindspore
-from mindspore import Tensor
-from mindspore import context
-from mindspore.train.serialization import load_checkpoint, load_param_into_net
-from mindspore.train.quant import quant
+from mindspore import Tensor, context, load_checkpoint, load_param_into_net, export
+from mindspore.compression.quant import QuantizationAwareTraining
 
 from src.mobilenetV2 import mobilenetV2
-from src.config import config_ascend_quant
+from src.config import config_quant
 
 parser = argparse.ArgumentParser(description='Image classification')
 parser.add_argument('--checkpoint_path', type=str, default=None, help='Checkpoint file path')
@@ -32,17 +30,15 @@ parser.add_argument('--device_target', type=str, default=None, help='Run device 
 args_opt = parser.parse_args()
 
 if __name__ == '__main__':
-    cfg = None
-    if args_opt.device_target == "Ascend":
-        cfg = config_ascend_quant
-        context.set_context(mode=context.GRAPH_MODE, device_target="Ascend", save_graphs=False)
-    else:
-        raise ValueError("Unsupported device target: {}.".format(args_opt.device_target))
-
+    cfg = config_quant(args_opt.device_target)
+    context.set_context(mode=context.GRAPH_MODE, device_target=cfg.device_target, save_graphs=False)
     # define fusion network
     network = mobilenetV2(num_classes=cfg.num_classes)
     # convert fusion network to quantization aware network
-    network = quant.convert_quant_network(network, bn_fold=True, per_channel=[True, False], symmetric=[True, False])
+    quantizer = QuantizationAwareTraining(bn_fold=True,
+                                          per_channel=[True, False],
+                                          symmetric=[True, False])
+    network = quantizer.quantize(network)
     # load checkpoint
     param_dict = load_checkpoint(args_opt.checkpoint_path)
     load_param_into_net(network, param_dict)
@@ -50,5 +46,5 @@ if __name__ == '__main__':
     # export network
     print("============== Starting export ==============")
     inputs = Tensor(np.ones([1, 3, cfg.image_height, cfg.image_width]), mindspore.float32)
-    quant.export(network, inputs, file_name="mobilenet_quant", file_format='MINDIR')
+    export(network, inputs, file_name="mobilenet_quant", file_format='MINDIR', quant_mode='AUTO')
     print("============== End export ==============")

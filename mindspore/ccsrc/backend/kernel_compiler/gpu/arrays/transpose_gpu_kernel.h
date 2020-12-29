@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2020 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 #define MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_TRANSPOSE_H_
 
 #include <vector>
+#include <algorithm>
 #include "backend/kernel_compiler/gpu/gpu_kernel.h"
 #include "backend/kernel_compiler/gpu/gpu_kernel_factory.h"
 #include "backend/kernel_compiler/gpu/cuda_impl/transpose_impl.cuh"
@@ -26,7 +27,7 @@ namespace kernel {
 template <typename T>
 class TransposeGpuFwdKernel : public GpuKernel {
  public:
-  TransposeGpuFwdKernel() : shape_size_(0), input_size_(0), output_size_(0), workspace_size_(0) {}
+  TransposeGpuFwdKernel() { ResetResource(); }
   ~TransposeGpuFwdKernel() = default;
 
   const std::vector<size_t> &GetInputSizeList() const override { return input_size_list_; }
@@ -39,10 +40,12 @@ class TransposeGpuFwdKernel : public GpuKernel {
     T *output = GetDeviceAddress<T>(outputs, 0);
     size_t *input_shape = GetDeviceAddress<size_t>(workspace, 0);
     size_t *input_axis = GetDeviceAddress<size_t>(workspace, 1);
-    CHECK_CUDA_RET_WITH_EXCEPT(cudaMemcpyAsync(input_shape, &input_shape_[0], workspace_size_, cudaMemcpyHostToDevice,
+    CHECK_CUDA_RET_WITH_EXCEPT(kernel_node_,
+                               cudaMemcpyAsync(input_shape, &input_shape_[0], workspace_size_, cudaMemcpyHostToDevice,
                                                reinterpret_cast<cudaStream_t>(stream_ptr)),
                                "cudaMemcpyAsync input_shape failed");
-    CHECK_CUDA_RET_WITH_EXCEPT(cudaMemcpyAsync(input_axis, &input_axis_[0], workspace_size_, cudaMemcpyHostToDevice,
+    CHECK_CUDA_RET_WITH_EXCEPT(kernel_node_,
+                               cudaMemcpyAsync(input_axis, &input_axis_[0], workspace_size_, cudaMemcpyHostToDevice,
                                                reinterpret_cast<cudaStream_t>(stream_ptr)),
                                "cudaMemcpyAsync input_axis failed");
     size_t size = input_size_ / sizeof(T);
@@ -51,6 +54,7 @@ class TransposeGpuFwdKernel : public GpuKernel {
   }
 
   bool Init(const CNodePtr &kernel_node) override {
+    kernel_node_ = kernel_node;
     size_t input_num = AnfAlgo::GetInputTensorNum(kernel_node);
     if (input_num != 1) {
       MS_LOG(ERROR) << "Input number is " << input_num << ", but transpose needs 1 input.";
@@ -61,7 +65,7 @@ class TransposeGpuFwdKernel : public GpuKernel {
       MS_LOG(ERROR) << "Output number is " << output_num << ", but transpose needs 1 output.";
       return false;
     }
-    auto input_shape = AnfAlgo::GetInputDeviceShape(kernel_node, 0);
+    auto input_shape = AnfAlgo::GetInputRealDeviceShapeIfExist(kernel_node, 0);
     shape_size_ = input_shape.size();
     if (shape_size_ > TRANSPOSE_MAX_DIMENSION) {
       MS_LOG(EXCEPTION) << "Input is " << shape_size_ << "-D, but transpose supports max " << TRANSPOSE_MAX_DIMENSION
@@ -75,12 +79,24 @@ class TransposeGpuFwdKernel : public GpuKernel {
     }
     input_size_ *= sizeof(T);
     output_size_ = input_size_;
-    auto perm = GetAttr<std::vector<int>>(kernel_node, "perm");
+    std::vector<int64_t> perm = GetAttr<std::vector<int64_t>>(kernel_node, "perm");
     for (size_t j = 0; j < perm.size(); j++) {
       input_axis_.push_back(perm[j]);
     }
     InitSizeLists();
     return true;
+  }
+
+  void ResetResource() noexcept override {
+    shape_size_ = 0;
+    input_size_ = 0;
+    output_size_ = 0;
+    workspace_size_ = 0;
+    input_shape_.clear();
+    input_axis_.clear();
+    input_size_list_.clear();
+    output_size_list_.clear();
+    workspace_size_list_.clear();
   }
 
  protected:

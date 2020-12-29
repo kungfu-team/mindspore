@@ -115,13 +115,13 @@ class GeneratorOp : public PipelineOp {
   // Class functor operator () override.
   // All DatasetOps operate by launching a thread (see ExecutionTree). This class functor will
   // provide the master loop that drives the logic for performing the work.
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status operator()() override;
 
   // Overrides base class reset method.  When an operator does a reset, it cleans up any state
   // info from it's previous execution and then initializes itself so that it can be executed
   // again.
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status Reset() override;
 
   // Base-class override for NodePass visitor acceptor.
@@ -134,6 +134,8 @@ class GeneratorOp : public PipelineOp {
   // @return Name of the current Op
   std::string Name() const override { return "GeneratorOp"; }
 
+  Status Init();
+
  private:
   py::function generator_function_;
   std::vector<std::string> column_names_;
@@ -144,7 +146,7 @@ class GeneratorOp : public PipelineOp {
   py::object generator_;
   int32_t buffer_id_;
 
-  Status Init();
+  WaitPost wp_;
 
   void Dealloc() noexcept;
 

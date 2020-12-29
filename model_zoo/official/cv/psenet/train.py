@@ -19,7 +19,8 @@ import mindspore.nn as nn
 from mindspore import context
 from mindspore.communication.management import init, get_rank
 from mindspore.train.callback import ModelCheckpoint, CheckpointConfig, TimeMonitor
-from mindspore.train.model import Model, ParallelMode
+from mindspore.train.model import Model
+from mindspore.context import ParallelMode
 from mindspore.train.serialization import load_checkpoint, load_param_into_net
 from mindspore.common import set_seed
 
@@ -50,7 +51,7 @@ def train():
         rank_id = get_rank()
 
     # dataset/network/criterion/optim
-    ds = train_dataset_creator(args.device_id, args.device_num)
+    ds = train_dataset_creator(rank_id, args.device_num)
     step_size = ds.get_dataset_size()
     print('Create dataset done!')
 

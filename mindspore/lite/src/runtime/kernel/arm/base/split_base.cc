@@ -15,8 +15,7 @@
  */
 #include "src/runtime/kernel/arm/base/split_base.h"
 #include <vector>
-#include "src/runtime/kernel/arm/int8/split_int8.h"
-#include "src/runtime/kernel/arm/fp32/split.h"
+#include "src/runtime/kernel/arm/fp32/split_fp32.h"
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
@@ -38,28 +37,32 @@ int SplitBaseCPUKernel::ReSize() {
   auto in_tensor = in_tensors_.front();
   auto input_shape = in_tensor->shape();
 
+  MS_ASSERT(param);
+  MS_ASSERT(input_shape.size() >= 1 && input_shape.size() <= SPLIT_STRIDES_SIZE);
   param->strides_[input_shape.size() - 1] = 1;
   for (int i = input_shape.size() - 2; i >= 0; i--) {
-    param->strides_[i] = param->strides_[i + 1] * input_shape[i + 1];
+    param->strides_[i] = param->strides_[i + 1] * input_shape.at(i + 1);
   }
 
+  MS_ASSERT(static_cast<size_t>(param->split_dim_) < input_shape.size());
   param->split_count_ =
-    param->strides_[0] * input_shape[0] / (input_shape[param->split_dim_] * param->strides_[param->split_dim_]);
+    param->strides_[0] * input_shape.at(0) / (input_shape.at(param->split_dim_) * param->strides_[param->split_dim_]);
   param->n_dims_ = input_shape.size();
 
   if (param->split_sizes_[0] == 0) {
+    MS_ASSERT(param->num_split_ > 0 && static_cast<int>(param->num_split_) <= input_shape[param->split_dim_]);
     if (input_shape[param->split_dim_] % param->num_split_ != 0) {
       MS_LOG(ERROR) << "Default split size is not usable.";
       return RET_ERROR;
     }
-    int split_size = input_shape[param->split_dim_] / param->num_split_;
+    int split_size = input_shape.at(param->split_dim_) / param->num_split_;
     for (int i = 0; i < param->num_split_; i++) {
       param->split_sizes_[i] = split_size;
     }
   }
 
   if (param->split_sizes_[param->num_split_ - 1] == -1) {
-    int split_shape_end = input_shape[param->split_dim_];
+    int split_shape_end = input_shape.at(param->split_dim_);
     for (int i = 0; i < param->num_split_ - 1; i++) {
       split_shape_end -= param->split_sizes_[i];
     }
@@ -68,83 +71,8 @@ int SplitBaseCPUKernel::ReSize() {
 
   num_unit_ = param->split_count_ * param->num_split_;
   thread_n_num_ = MSMIN(thread_count_, num_unit_);
+  MS_ASSERT(thread_n_num_);
   thread_n_stride_ = UP_DIV(num_unit_, thread_n_num_);
   return RET_OK;
 }
-
-kernel::LiteKernel *CpuSplitInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                              const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                              const InnerContext *ctx, const kernel::KernelKey &desc,
-                                              const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Split);
-  auto *kernel = new (std::nothrow) SplitInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new SplitCPUKernel fail!";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    delete kernel;
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    return nullptr;
-  }
-  return kernel;
-}
-
-kernel::LiteKernel *CpuSplitInt32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                               const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                               const InnerContext *ctx, const kernel::KernelKey &desc,
-                                               const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Split);
-  auto *kernel = new (std::nothrow) SplitCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new SplitCPUKernel fail!";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    delete kernel;
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    return nullptr;
-  }
-  return kernel;
-}
-
-kernel::LiteKernel *CpuSplitFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                              const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                              const InnerContext *ctx, const kernel::KernelKey &desc,
-                                              const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == schema::PrimitiveType_Split);
-  auto *kernel = new (std::nothrow) SplitCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new SplitCPUKernel fail!";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    delete kernel;
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Split, CpuSplitInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Split, CpuSplitInt32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Split, CpuSplitFp32KernelCreator)
 }  // namespace mindspore::kernel

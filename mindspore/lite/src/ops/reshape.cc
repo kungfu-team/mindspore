@@ -20,6 +20,9 @@
 #include "include/errorcode.h"
 #include "src/common/log_adapter.h"
 #include "src/tensor.h"
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
 
 namespace mindspore {
 namespace lite {
@@ -44,8 +47,8 @@ int Reshape::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &in
   }
   if (this->primitive_->value.value == nullptr) {
     auto attr = new (std::nothrow) schema::ReshapeT();
-    MS_ASSERT(inputs.size() == kAnfPopulaterThree - 1);
-    auto inputNode = inputs[kAnfPopulaterTwo - 1];
+    MS_ASSERT(inputs.size() == kAnfPopulaterInputNumThree - 1);
+    auto inputNode = inputs.at(kAnfPopulaterInputNumTwo - 1);
     if (inputNode->isa<ValueNode>()) {
       auto valueNode = inputNode->cast<ValueNodePtr>();
       MS_ASSERT(valueNode != nullptr);
@@ -55,10 +58,13 @@ int Reshape::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &in
         auto tuple = val->cast<ValueTuplePtr>();
         MS_ASSERT(tuple != nullptr);
         for (size_t i = 0; i < tuple->size(); ++i) {
-          auto elem = tuple->value()[i]->cast<Int32ImmPtr>();
+          auto elem = tuple->value().at(i);
           MS_ASSERT(elem != nullptr);
-          attr->shape.emplace_back(static_cast<int>(elem->value()));
+          attr->shape.emplace_back(CastToInt(elem).front());
         }
+      } else {
+        int dim = CastToInt(val).front();
+        attr->shape = {dim};
       }
     }
     if (attr == nullptr) {
@@ -100,12 +106,15 @@ int Reshape::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *ReshapeCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Reshape>(primitive); }
+Registry ReshapeRegistry(schema::PrimitiveType_Reshape, ReshapeCreator);
 #endif
 
 int Reshape::CalNewShape(const Tensor *in_tensor, std::vector<int> *out_shape) const {
   size_t in_shape_size = 1;
   for (size_t i = 0; i < in_tensor->shape().size(); i++) {
-    in_shape_size *= in_tensor->shape()[i];
+    in_shape_size *= in_tensor->shape().at(i);
   }
   int64_t inferIndex = -1;
   size_t out_shapeSize = 1;
@@ -145,14 +154,14 @@ void CalShape(const T *data, const std::vector<Tensor *> &inputs, std::vector<in
     if (static_cast<int>(data[i]) == -1) {
       index = i;
     } else if (static_cast<int>(data[i]) == 0) {
-      size *= inputs[0]->shape()[i];
+      size *= inputs[0]->shape().at(i);
     } else {
       size *= data[i];
     }
     out_shape->push_back(data[i]);
   }
   if (static_cast<int>(data[index]) == -1) {
-    (*out_shape)[index] = input_count / size;
+    (*out_shape).at(index) = input_count / size;
   }
 }
 int Reshape::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
@@ -162,15 +171,21 @@ int Reshape::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> out
   auto output = outputs_.front();
   MS_ASSERT(output != nullptr);
   output->set_data_type(input->data_type());
-  output->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output->set_format(input->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
 
-  MS_ASSERT(reshape_prim != nullptr);
   std::vector<int> out_shape;
   if (inputs_.size() == kDoubleNum) {
     auto shape_tensor = inputs_.at(1);
+    if (shape_tensor->IsConst()) {
+      if (shape_tensor->data_c() == nullptr || (shape_tensor->shape().size() == 1 && shape_tensor->shape()[0] == 0)) {
+        MS_LOG(DEBUG) << "reshape to a scalar.";
+        output->set_shape(out_shape);
+        return RET_OK;
+      }
+    }
     if (shape_tensor->data_c() == nullptr) {
       MS_LOG(INFO) << "Do infer shape in runtime.";
       return RET_INFER_INVALID;
@@ -204,7 +219,7 @@ int Reshape::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> out
     }
   } else if (inputs_.size() == kSingleNum) {
     for (size_t i = 0; i < GetShape().size(); ++i) {
-      out_shape.push_back(GetShape()[i]);
+      out_shape.push_back(GetShape().at(i));
     }
   } else {
     MS_LOG(ERROR) << "inputs tensor size invalid.";

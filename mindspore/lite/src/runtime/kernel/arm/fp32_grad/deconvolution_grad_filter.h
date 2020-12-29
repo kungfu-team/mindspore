@@ -33,8 +33,11 @@ class DeConvolutionGradFilterCPUKernel : public LiteKernel {
   int ReSize() override;
   int Run() override;
   int Execute(int task_id);
-};
 
+ private:
+  size_t ws_size = 0;
+  const int chunk = 1;
+};
 }  // namespace mindspore::kernel
 
 #endif  // MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_FP32_GRAD_DECONVOLUTION_GRAD_FILTER_H_

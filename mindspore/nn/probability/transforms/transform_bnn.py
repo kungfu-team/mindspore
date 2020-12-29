@@ -17,8 +17,8 @@ import mindspore.nn as nn
 from ...wrap.cell_wrapper import TrainOneStepCell
 from ....nn import optim
 from ....nn import layer
-from .bnn_loss.generate_kl_loss import gain_bnn_with_loss
 from ...probability import bnn_layers
+from ..bnn_layers.bnn_cell_wrapper import WithBNNLossCell
 from ..bnn_layers.conv_variational import ConvReparam
 from ..bnn_layers.dense_variational import DenseReparam
 
@@ -34,30 +34,33 @@ class TransformToBNN:
         dnn_factor ((int, float): The coefficient of backbone's loss, which is computed by loss function. Default: 1.
         bnn_factor (int, float): The coefficient of KL loss, which is KL divergence of Bayesian layer. Default: 1.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.conv = nn.Conv2d(3, 64, 3, has_bias=False, weight_init='normal')
-        >>>         self.bn = nn.BatchNorm2d(64)
-        >>>         self.relu = nn.ReLU()
-        >>>         self.flatten = nn.Flatten()
-        >>>         self.fc = nn.Dense(64*224*224, 12) # padding=0
-        >>>
-        >>>     def construct(self, x):
-        >>>         x = self.conv(x)
-        >>>         x = self.bn(x)
-        >>>         x = self.relu(x)
-        >>>         x = self.flatten(x)
-        >>>         out = self.fc(x)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.conv = nn.Conv2d(3, 64, 3, has_bias=False, weight_init='normal')
+        ...         self.bn = nn.BatchNorm2d(64)
+        ...         self.relu = nn.ReLU()
+        ...         self.flatten = nn.Flatten()
+        ...         self.fc = nn.Dense(64*224*224, 12) # padding=0
+        ...
+        ...     def construct(self, x):
+        ...         x = self.conv(x)
+        ...         x = self.bn(x)
+        ...         x = self.relu(x)
+        ...         x = self.flatten(x)
+        ...         out = self.fc(x)
+        ...         return out
         >>>
         >>> net = Net()
-        >>> criterion = nn.SoftmaxCrossEntropyWithLogits(is_grad=False, sparse=True)
+        >>> criterion = nn.SoftmaxCrossEntropyWithLogits(sparse=True)
         >>> optim = Momentum(params=net.trainable_params(), learning_rate=0.1, momentum=0.9)
-        >>> net_with_loss = WithLossCell(network, criterion)
+        >>> net_with_loss = WithLossCell(net, criterion)
         >>> train_network = TrainOneStepCell(net_with_loss, optim)
-        >>> bnn_transformer = TransformToBNN(train_network, 60000, 0.1)
+        >>> bnn_transformer = TransformToBNN(train_network, 60000, 0.0001)
     """
 
     def __init__(self, trainable_dnn, dnn_factor=1, bnn_factor=1):
@@ -77,7 +80,6 @@ class TransformToBNN:
         self.loss_fn = getattr(net_with_loss, "_loss_fn")
         self.dnn_factor = dnn_factor
         self.bnn_factor = bnn_factor
-        self.bnn_loss_file = None
 
     def transform_to_bnn_model(self,
                                get_dense_args=lambda dp: {"in_channels": dp.in_channels, "has_bias": dp.has_bias,
@@ -106,11 +108,14 @@ class TransformToBNN:
         Returns:
             Cell, a trainable BNN model wrapped by TrainOneStepCell.
 
+        Supported Platforms:
+        ``Ascend`` ``GPU``
+
         Examples:
             >>> net = Net()
-            >>> criterion = nn.SoftmaxCrossEntropyWithLogits(is_grad=False, sparse=True)
+            >>> criterion = nn.SoftmaxCrossEntropyWithLogits(sparse=True)
             >>> optim = Momentum(params=net.trainable_params(), learning_rate=0.1, momentum=0.9)
-            >>> net_with_loss = WithLossCell(network, criterion)
+            >>> net_with_loss = WithLossCell(net, criterion)
             >>> train_network = TrainOneStepCell(net_with_loss, optim)
             >>> bnn_transformer = TransformToBNN(train_network, 60000, 0.1)
             >>> train_bnn_network = bnn_transformer.transform_to_bnn_model()
@@ -120,15 +125,13 @@ class TransformToBNN:
         if not add_conv_args:
             add_conv_args = {}
 
-        layer_count = self._replace_all_bnn_layers(self.backbone, get_dense_args, get_conv_args, add_dense_args,
-                                                   add_conv_args)
+        self._replace_all_bnn_layers(self.backbone, get_dense_args, get_conv_args, add_dense_args, add_conv_args)
 
         # rename layers of BNN model to prevent duplication of names
         for value, param in self.backbone.parameters_and_names():
             param.name = value
 
-        bnn_with_loss, self.bnn_loss_file = gain_bnn_with_loss(layer_count, self.backbone, self.loss_fn,
-                                                               self.dnn_factor, self.bnn_factor)
+        bnn_with_loss = WithBNNLossCell(self.backbone, self.loss_fn, self.dnn_factor, self.bnn_factor)
         bnn_optimizer = self._create_optimizer_with_bnn_params()
         train_bnn_network = TrainOneStepCell(bnn_with_loss, bnn_optimizer)
         return train_bnn_network
@@ -150,11 +153,14 @@ class TransformToBNN:
             Cell, a trainable model wrapped by TrainOneStepCell, whose specific type of layer is transformed to the
             corresponding bayesian layer.
 
+        Supported Platforms:
+        ``Ascend`` ``GPU``
+
         Examples:
             >>> net = Net()
-            >>> criterion = nn.SoftmaxCrossEntropyWithLogits(is_grad=False, sparse=True)
+            >>> criterion = nn.SoftmaxCrossEntropyWithLogits(sparse=True)
             >>> optim = Momentum(params=net.trainable_params(), learning_rate=0.1, momentum=0.9)
-            >>> net_with_loss = WithLossCell(network, criterion)
+            >>> net_with_loss = WithLossCell(net, criterion)
             >>> train_network = TrainOneStepCell(net_with_loss, optim)
             >>> bnn_transformer = TransformToBNN(train_network, 60000, 0.1)
             >>> train_bnn_network = bnn_transformer.transform_to_bnn_layer(Dense, DenseReparam)
@@ -179,13 +185,11 @@ class TransformToBNN:
         if not add_args:
             add_args = {}
 
-        layer_count = self._replace_specified_dnn_layers(self.backbone, dnn_layer_type, bnn_layer_type, get_args,
-                                                         add_args)
+        self._replace_specified_dnn_layers(self.backbone, dnn_layer_type, bnn_layer_type, get_args, add_args)
         for value, param in self.backbone.parameters_and_names():
             param.name = value
 
-        bnn_with_loss, self.bnn_loss_file = gain_bnn_with_loss(layer_count, self.backbone, self.loss_fn,
-                                                               self.dnn_factor, self.bnn_factor)
+        bnn_with_loss = WithBNNLossCell(self.backbone, self.loss_fn, self.dnn_factor, self.bnn_factor)
         bnn_optimizer = self._create_optimizer_with_bnn_params()
 
         train_bnn_network = TrainOneStepCell(bnn_with_loss, bnn_optimizer)
@@ -228,32 +232,25 @@ class TransformToBNN:
 
     def _replace_all_bnn_layers(self, backbone, get_dense_args, get_conv_args, add_dense_args, add_conv_args):
         """Replace both dense layer and conv2d layer in DNN model to bayesian layers."""
-        count = 0
         for name, cell in backbone.name_cells().items():
             if isinstance(cell, nn.Dense):
                 dense_args = get_dense_args(cell)
                 new_layer = DenseReparam(**dense_args, **add_dense_args)
                 setattr(backbone, name, new_layer)
-                count += 1
             elif isinstance(cell, nn.Conv2d):
                 conv_args = get_conv_args(cell)
                 new_layer = ConvReparam(**conv_args, **add_conv_args)
                 setattr(backbone, name, new_layer)
-                count += 1
             else:
-                count += self._replace_all_bnn_layers(cell, get_dense_args, get_conv_args, add_dense_args,
-                                                      add_conv_args)
-        return count
+                self._replace_all_bnn_layers(cell, get_dense_args, get_conv_args, add_dense_args,
+                                             add_conv_args)
 
     def _replace_specified_dnn_layers(self, backbone, dnn_layer, bnn_layer, get_args, add_args):
         """Convert a specific type of layers in DNN model to corresponding bayesian layers."""
-        count = 0
         for name, cell in backbone.name_cells().items():
             if isinstance(cell, dnn_layer):
                 args = get_args(cell)
                 new_layer = bnn_layer(**args, **add_args)
                 setattr(backbone, name, new_layer)
-                count += 1
             else:
-                count += self._replace_specified_dnn_layers(cell, dnn_layer, bnn_layer, get_args, add_args)
-        return count
+                self._replace_specified_dnn_layers(cell, dnn_layer, bnn_layer, get_args, add_args)

@@ -15,6 +15,10 @@
  */
 
 #include "src/ops/conv2d_grad_input.h"
+#include "src/ops/group_conv2d_grad_input.h"
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
 
 namespace mindspore {
 namespace lite {
@@ -34,7 +38,9 @@ int Conv2DGradInput::GetPadLeft() const { return this->primitive_->value.AsConv2
 int Conv2DGradInput::GetPadRight() const { return this->primitive_->value.AsConv2DGradInput()->padRight; }
 int Conv2DGradInput::GetDilateW() const { return this->primitive_->value.AsConv2DGradInput()->dilateW; }
 int Conv2DGradInput::GetDilateH() const { return this->primitive_->value.AsConv2DGradInput()->dilateH; }
-bool Conv2DGradInput::GetHasBias() const { return this->primitive_->value.AsConv2DGradInput()->hasBias; }
+std::vector<int> Conv2DGradInput::GetInputShape() const {
+  return this->primitive_->value.AsConv2DGradInput()->input_shape;
+}
 int Conv2DGradInput::GetActivationType() const { return this->primitive_->value.AsConv2DGradInput()->activationType; }
 
 void Conv2DGradInput::SetFormat(int format) {
@@ -60,7 +66,6 @@ void Conv2DGradInput::SetPadLeft(int pad_left) { this->primitive_->value.AsConv2
 void Conv2DGradInput::SetPadRight(int pad_right) { this->primitive_->value.AsConv2DGradInput()->padRight = pad_right; }
 void Conv2DGradInput::SetDilateW(int dilate_w) { this->primitive_->value.AsConv2DGradInput()->dilateW = dilate_w; }
 void Conv2DGradInput::SetDilateH(int dilate_h) { this->primitive_->value.AsConv2DGradInput()->dilateH = dilate_h; }
-void Conv2DGradInput::SetHasBias(bool has_bias) { this->primitive_->value.AsConv2DGradInput()->hasBias = has_bias; }
 void Conv2DGradInput::SetActivationType(int activation_type) {
   this->primitive_->value.AsConv2DGradInput()->activationType = (schema::ActivationType)activation_type;
 }
@@ -85,7 +90,10 @@ int Conv2DGradInput::UnPackAttr(const Primitive &prim, const std::vector<AnfNode
       MS_LOG(ERROR) << "new primitiveT value failed";
       return RET_ERROR;
     }
-    attr->group = GetValue<int>(prim.GetAttr("group"));
+    attr->group = CastToInt(prim.GetAttr("group")).front();
+    if (attr->group > 1) {
+      this->primitive_->value.type = schema::PrimitiveType_GroupConv2DGradInput;
+    }
     auto format = GetValue<std::string>(prim.GetAttr("data_format"));
     if (format == "NCHW") {
       attr->format = schema::Format_NCHW;
@@ -94,25 +102,25 @@ int Conv2DGradInput::UnPackAttr(const Primitive &prim, const std::vector<AnfNode
     } else {
       attr->format = schema::Format_NUM_OF_FORMAT;
     }
-    auto pad_list = GetValue<std::vector<int>>(prim.GetAttr("pad_list"));
-    attr->padUp = pad_list[0];
-    attr->padDown = pad_list[1];
-    attr->padLeft = pad_list[2];
-    attr->padRight = pad_list[3];
+    auto pad_list = CastToInt(prim.GetAttr("pad_list"));
+    attr->padUp = pad_list.at(0);
+    attr->padDown = pad_list.at(1);
+    attr->padLeft = pad_list.at(2);
+    attr->padRight = pad_list.at(3);
 
-    auto dilation = GetValue<std::vector<int>>(prim.GetAttr("dilation"));
-    attr->dilateH = dilation[0];
-    attr->dilateW = dilation[1];
+    auto dilation = CastToInt(prim.GetAttr("dilation"));
+    attr->dilateH = dilation.at(2);
+    attr->dilateW = dilation.at(3);
 
-    auto kernel_size = GetValue<std::vector<int>>(prim.GetAttr("kernel_size"));
-    attr->kernelH = kernel_size[0];
-    attr->kernelW = kernel_size[1];
+    auto kernel_size = CastToInt(prim.GetAttr("kernel_size"));
+    attr->kernelH = kernel_size.at(0);
+    attr->kernelW = (kernel_size.size() > 1) ? kernel_size.at(1) : kernel_size.at(0);
 
-    auto stride = GetValue<std::vector<int>>(prim.GetAttr("stride"));
-    attr->strideH = stride[0];
-    attr->strideW = stride[1];
+    auto stride = CastToInt(prim.GetAttr("stride"));
+    attr->strideH = stride.at(0);
+    attr->strideW = stride.at(1);
 
-    attr->channelOut = GetValue<int>(prim.GetAttr("out_channel"));
+    attr->channelOut = CastToInt(prim.GetAttr("out_channel")).front();
 
     auto pad_mode = GetValue<std::string>(prim.GetAttr("pad_mode"));
     if (pad_mode == "valid") {
@@ -130,6 +138,27 @@ int Conv2DGradInput::UnPackAttr(const Primitive &prim, const std::vector<AnfNode
       attr->activationType = schema::ActivationType_NO_ACTIVATION;
     }
 
+    if (inputs.size() >= kAnfPopulaterInputNumThree) {
+      auto input_shape = inputs[kAnfPopulaterInputNumTwo];
+      MS_ASSERT(input_shape != nullptr);
+      if (input_shape->isa<ValueNode>()) {
+        auto valueNode = input_shape->cast<ValueNodePtr>();
+        MS_ASSERT(valueNode != nullptr);
+        auto value = valueNode->value();
+        MS_ASSERT(value != nullptr);
+        if (value->isa<ValueTuple>()) {
+          auto valTuplPtr = dyn_cast<ValueTuple>(value);
+          MS_ASSERT(valTuplPtr != nullptr);
+          const int nchw2nhwc[] = {0, 3, 1, 2};
+          attr->input_shape.resize(valTuplPtr->size());
+          for (size_t i = 0; i < valTuplPtr->size(); i++) {
+            auto elem = (*valTuplPtr)[i];
+            MS_ASSERT(elem != nullptr);
+            attr->input_shape[nchw2nhwc[i]] = CastToInt(elem).front();
+          }
+        }
+      }
+    }
     this->primitive_->value.value = attr;
     if (this->primitive_->value.value == nullptr) {
       MS_LOG(ERROR) << "primitive value is nullptr";
@@ -147,10 +176,16 @@ int Conv2DGradInput::UnPackToFlatBuilder(const schema::Primitive *primitive, fla
     MS_LOG(ERROR) << "value_as_Conv2DGradInput return nullptr";
     return RET_ERROR;
   }
-  auto val_offset = schema::CreateConv2DGradInput(
+  std::vector<int32_t> input_shape;
+  if (attr->input_shape() != nullptr) {
+    for (int i = 0; i < static_cast<int>(attr->input_shape()->size()); i++) {
+      input_shape.push_back(attr->input_shape()->data()[i]);
+    }
+  }
+  auto val_offset = schema::CreateConv2DGradInputDirect(
     *fbb, attr->format(), attr->group(), attr->channelIn(), attr->channelOut(), attr->kernelW(), attr->kernelH(),
     attr->strideW(), attr->strideH(), attr->padMode(), attr->padUp(), attr->padDown(), attr->padLeft(),
-    attr->padRight(), attr->dilateW(), attr->dilateH(), attr->hasBias(), attr->activationType());
+    attr->padRight(), attr->dilateW(), attr->dilateH(), attr->hasBias(), &input_shape, attr->activationType());
   auto prim_offset = schema::CreatePrimitive(*fbb, schema::PrimitiveType_Conv2DGradInput, val_offset.o);
   fbb->Finish(prim_offset);
   return RET_OK;
@@ -170,49 +205,38 @@ int Conv2DGradInput::GetPadLeft() const { return this->primitive_->value_as_Conv
 int Conv2DGradInput::GetPadRight() const { return this->primitive_->value_as_Conv2DGradInput()->padRight(); }
 int Conv2DGradInput::GetDilateW() const { return this->primitive_->value_as_Conv2DGradInput()->dilateW(); }
 int Conv2DGradInput::GetDilateH() const { return this->primitive_->value_as_Conv2DGradInput()->dilateH(); }
-bool Conv2DGradInput::GetHasBias() const { return this->primitive_->value_as_Conv2DGradInput()->hasBias(); }
+std::vector<int> Conv2DGradInput::GetInputShape() const {
+  auto fb_vector = this->primitive_->value_as_Conv2DGradInput()->input_shape();
+  return std::vector<int>(fb_vector->begin(), fb_vector->end());
+}
 int Conv2DGradInput::GetActivationType() const {
   return this->primitive_->value_as_Conv2DGradInput()->activationType();
 }
 
+PrimitiveC *Conv2DGradInputCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<Conv2DGradInput>(primitive);
+}
+Registry Conv2DGradInputRegistry(schema::PrimitiveType_Conv2DGradInput, Conv2DGradInputCreator);
 #endif
 
 int Conv2DGradInput::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outputs) {
-  if (3 != inputs.size()) {
-    MS_LOG(ERROR) << "Conv2d Grad Input should have 3 inputs";
+  if (inputs.size() < 2) {
+    MS_LOG(ERROR) << "Conv2d Grad Input should be at least two input";
     return RET_ERROR;
   }
-  if (1 != outputs.size()) {
-    MS_LOG(ERROR) << "Conv2d Grad input should have one output";
+  if (outputs.size() != 1) {
+    MS_LOG(ERROR) << "Conv2d Grad output should have one output";
     return RET_ERROR;
   }
 
   auto *in0 = inputs.at(0);
-  auto *in = inputs.at(2);
-  MS_ASSERT(out != nullptr);
-
-  std::vector<int> output_shape;
-  int *out_shape = reinterpret_cast<int *>(in->MutableData());
-  int new_size = in->ElementsNum();
-  if (in0->GetFormat() == in->GetFormat()) {
-    for (int i = 0; i < new_size; i++) output_shape.push_back(out_shape[i]);
-  } else {
-    if ((in0->GetFormat() == schema::Format_NHWC) && (in->GetFormat() == schema::Format_NCHW)) {
-      output_shape.push_back(out_shape[0]);
-      output_shape.push_back(out_shape[2]);
-      output_shape.push_back(out_shape[3]);
-      output_shape.push_back(out_shape[1]);
-    } else {
-      MS_LOG(ERROR) << "Shape covnert is not supported";
-      return RET_ERROR;
-    }
-  }
+  MS_ASSERT(in0 != nullptr);
 
   auto *out = outputs.at(0);
   MS_ASSERT(out != nullptr);
-  out->set_shape(output_shape);
+  out->set_shape(GetInputShape());
   out->set_data_type(in0->data_type());
-  out->SetFormat(in0->GetFormat());
+  out->set_format(in0->format());
 
   return RET_OK;
 }

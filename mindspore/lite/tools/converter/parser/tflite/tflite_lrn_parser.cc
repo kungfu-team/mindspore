@@ -17,49 +17,38 @@
 #include "tools/converter/parser/tflite/tflite_lrn_parser.h"
 #include <vector>
 #include <memory>
-#include <map>
 
 namespace mindspore {
 namespace lite {
-STATUS TfliteLRNParser::Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                              const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TfliteLRNParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
+PrimitiveC *TfliteLRNParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "primitive is null";
+    return nullptr;
   }
 
   std::unique_ptr<schema::LocalResponseNormalizationT> attr = std::make_unique<schema::LocalResponseNormalizationT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   const auto &tflite_attr = tflite_op->builtin_options.AsLocalResponseNormalizationOptions();
   if (tflite_attr == nullptr) {
-    MS_LOG(ERROR) << "get op: " << op->name.c_str() << " attr failed";
-    return RET_NULL_PTR;
+    MS_LOG(ERROR) << "get op LRN attr failed";
+    return nullptr;
   }
   attr->depth_radius = tflite_attr->radius;
   attr->alpha = tflite_attr->alpha;
   attr->beta = tflite_attr->beta;
   attr->bias = tflite_attr->bias;
 
-  op->primitive->value.type = schema::PrimitiveType_LocalResponseNormalization;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  primitive->value.type = schema::PrimitiveType_LocalResponseNormalization;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteLRNParser("LocalResponseNorm", new TfliteLRNParser());
+TfliteNodeRegister g_tfliteLRNParser(tflite::BuiltinOperator_LOCAL_RESPONSE_NORMALIZATION, new TfliteLRNParser());
 }  // namespace lite
 }  // namespace mindspore

@@ -19,30 +19,26 @@
 
 #include <vector>
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
-#include "nnacl/fp32/space_to_batch.h"
+#include "nnacl/fp32/space_to_batch_fp32.h"
 
 namespace mindspore::kernel {
 
 class SpaceToBatchNDOpenCLKernel : public OpenCLKernel {
  public:
-  explicit SpaceToBatchNDOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                                      const std::vector<lite::Tensor *> &outputs)
+  SpaceToBatchNDOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
+                             const std::vector<lite::Tensor *> &outputs)
       : OpenCLKernel(parameter, inputs, outputs) {}
 
-  ~SpaceToBatchNDOpenCLKernel() override{};
-
-  int Init() override;
-
-  int ReSize() override;
+  ~SpaceToBatchNDOpenCLKernel() override = default;
 
   int Run() override;
+  int Prepare() override;
 
-  int GetImageSize(size_t idx, std::vector<size_t> *img_size) override;
-
-  int InitBuffer();
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
 
  private:
-  cl::Kernel kernel_;
 };
 }  // namespace mindspore::kernel
 #endif

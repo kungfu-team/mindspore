@@ -15,6 +15,7 @@
  */
 #include "minddata/dataset/engine/datasetops/source/sampler/distributed_sampler.h"
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 
@@ -23,9 +24,9 @@
 
 namespace mindspore {
 namespace dataset {
-DistributedSampler::DistributedSampler(int64_t num_samples, int64_t num_dev, int64_t dev_id, bool shuffle,
-                                       uint32_t seed, int64_t offset, bool even_dist)
-    : Sampler(num_samples, std::numeric_limits<int64_t>::max()),
+DistributedSamplerRT::DistributedSamplerRT(int64_t num_samples, int64_t num_dev, int64_t dev_id, bool shuffle,
+                                           uint32_t seed, int64_t offset, bool even_dist)
+    : SamplerRT(num_samples, std::numeric_limits<int64_t>::max()),
       cnt_(0),
       seed_(seed == std::numeric_limits<uint32_t>::max() ? GetSeed() : seed),
       device_id_(dev_id),
@@ -33,9 +34,15 @@ DistributedSampler::DistributedSampler(int64_t num_samples, int64_t num_dev, int
       shuffle_(shuffle),
       even_dist_(even_dist),
       offset_(offset),
-      non_empty_(true) {}
+      non_empty_(true) {
+  // Update the num_shards_ in global context. this number is only used for now by auto_num_worker_pass. User discretion
+  // is advised. Auto_num_worker_pass is currently an experimental feature which can still work if the num_shards_ isn't
+  // 100% correct. The reason behind is for now, PreBuildSampler doesn't offer a way to return num_shards. Once
+  // PreBuildSampler is phased out, this can be cleaned up.
+  GlobalContext::config_manager()->set_num_shards_for_auto_num_workers(num_devices_);
+}
 
-Status DistributedSampler::InitSampler() {
+Status DistributedSamplerRT::InitSampler() {
   // Special value of 0 for num_samples means that the user wants to sample the entire set of data.
   // If the user asked to sample more rows than exists in the dataset, adjust the num_samples accordingly.
   if (num_samples_ == 0 || num_samples_ > num_rows_) {
@@ -54,7 +61,7 @@ Status DistributedSampler::InitSampler() {
   if (offset_ != -1 || !even_dist_) {
     if (offset_ == -1) offset_ = 0;
     samples_per_buffer_ = (num_rows_ + offset_) / num_devices_;
-    int remainder = (num_rows_ + offset_) % num_devices_;
+    int64_t remainder = (num_rows_ + offset_) % num_devices_;
     if (device_id_ < remainder) samples_per_buffer_++;
     if (device_id_ < offset_) samples_per_buffer_--;
   } else {
@@ -62,7 +69,7 @@ Status DistributedSampler::InitSampler() {
     samples_per_buffer_ = (num_rows_ + num_devices_ - 1) / num_devices_;  // equals to ceil(num_rows/num_devices)
   }
   samples_per_buffer_ = num_samples_ < samples_per_buffer_ ? num_samples_ : samples_per_buffer_;
-  if (shuffle_ == true) {
+  if (shuffle_) {
     shuffle_vec_.reserve(num_rows_);
     for (int64_t i = 0; i < num_rows_; i++) {
       shuffle_vec_.push_back(i);
@@ -74,7 +81,7 @@ Status DistributedSampler::InitSampler() {
   return Status::OK();
 }
 
-Status DistributedSampler::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) {
+Status DistributedSamplerRT::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) {
   if (cnt_ > samples_per_buffer_) {
     RETURN_STATUS_UNEXPECTED(
       "Number of samples(cnt) that have already been filled in to buffer should be less than or "
@@ -143,7 +150,7 @@ Status DistributedSampler::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer
   return Status::OK();
 }
 
-Status DistributedSampler::ResetSampler() {
+Status DistributedSamplerRT::ResetSampler() {
   CHECK_FAIL_RETURN_UNEXPECTED(cnt_ == samples_per_buffer_, "ERROR Reset() called early/late");
   cnt_ = 0;
 
@@ -160,10 +167,20 @@ Status DistributedSampler::ResetSampler() {
   return Status::OK();
 }
 
-void DistributedSampler::Print(std::ostream &out, bool show_all) const {
+int64_t DistributedSamplerRT::CalculateNumSamples(int64_t num_rows) {
+  int64_t child_num_rows = num_rows;
+  if (!child_.empty()) {
+    child_num_rows = child_[0]->CalculateNumSamples(num_rows);
+  }
+  int64_t num_samples = (num_samples_ > 0) ? std::min(child_num_rows, num_samples_) : child_num_rows;
+  int64_t num_per_shard = std::ceil(num_rows * 1.0 / num_devices_);
+  return std::min(num_samples, num_per_shard);
+}
+
+void DistributedSamplerRT::SamplerPrint(std::ostream &out, bool show_all) const {
   out << "\nSampler: DistributedSampler";
   if (show_all) {
-    Sampler::Print(out, show_all);
+    SamplerRT::SamplerPrint(out, show_all);
     out << "\nseed: " << seed_ << "\ndevice_id: " << device_id_ << "\nnum_devices: " << num_devices_
         << "\nshuffle: " << shuffle_;
   }

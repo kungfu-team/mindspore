@@ -110,8 +110,7 @@ class EmbeddingLookup(nn.Cell):
         self.use_one_hot_embeddings = use_one_hot_embeddings
         self.embedding_table = Parameter(initializer
                                          (TruncatedNormal(initializer_range),
-                                          [vocab_size, embedding_size]),
-                                         name='embedding_table')
+                                          [vocab_size, embedding_size]))
         self.expand = P.ExpandDims()
         self.shape_flat = (-1,)
         self.gather = P.GatherV2()
@@ -170,8 +169,7 @@ class EmbeddingPostprocessor(nn.Cell):
         self.embedding_table = Parameter(initializer
                                          (TruncatedNormal(initializer_range),
                                           [token_type_vocab_size,
-                                           embedding_size]),
-                                         name='embedding_table')
+                                           embedding_size]))
         self.shape_flat = (-1,)
         self.one_hot = P.OneHot()
         self.on_value = Tensor(1.0, mstype.float32)
@@ -187,8 +185,7 @@ class EmbeddingPostprocessor(nn.Cell):
         self.full_position_embeddings = Parameter(initializer
                                                   (TruncatedNormal(initializer_range),
                                                    [max_position_embeddings,
-                                                    embedding_size]),
-                                                  name='full_position_embeddings')
+                                                    embedding_size]))
 
     def construct(self, token_type_ids, word_embeddings):
         """embedding postprocessor"""
@@ -317,8 +314,7 @@ class RelaPosEmbeddingsGenerator(nn.Cell):
         self.use_one_hot_embeddings = use_one_hot_embeddings
         self.embeddings_table = Parameter(
             initializer(TruncatedNormal(initializer_range),
-                        [self.vocab_size, self.depth]),
-            name='embeddings_for_position')
+                        [self.vocab_size, self.depth]))
         self.relative_positions_matrix = RelaPosMatrixGenerator(length=length,
                                                                 max_relative_position=max_relative_position)
         self.reshape = P.Reshape()
@@ -964,7 +960,7 @@ class BertModelCLS(nn.Cell):
     The returned output represents the final logits as the results of log_softmax is propotional to that of softmax.
     """
     def __init__(self, config, is_training, num_labels=2, dropout_prob=0.0,
-                 use_one_hot_embeddings=False, phase_type="teacher"):
+                 use_one_hot_embeddings=False, phase_type="student"):
         super(BertModelCLS, self).__init__()
         self.bert = BertModel(config, is_training, use_one_hot_embeddings)
         self.cast = P.Cast()
@@ -992,4 +988,6 @@ class BertModelCLS(nn.Cell):
             logits = self.dense_1(cls)
         logits = self.cast(logits, self.dtype)
         log_probs = self.log_softmax(logits)
-        return seq_output, att_output, logits, log_probs
+        if self._phase == 'train' or self.phase_type == "teacher":
+            return seq_output, att_output, logits, log_probs
+        return log_probs

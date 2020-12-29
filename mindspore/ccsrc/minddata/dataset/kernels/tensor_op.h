@@ -57,11 +57,13 @@ constexpr char kCenterCropOp[] = "CenterCropOp";
 constexpr char kCutMixBatchOp[] = "CutMixBatchOp";
 constexpr char kCutOutOp[] = "CutOutOp";
 constexpr char kCropOp[] = "CropOp";
+constexpr char kDvppDecodeResizeCropJpegOp[] = "DvppDecodeResizeCropJpegOp";
 constexpr char kEqualizeOp[] = "EqualizeOp";
 constexpr char kHwcToChwOp[] = "HwcToChwOp";
 constexpr char kInvertOp[] = "InvertOp";
 constexpr char kMixUpBatchOp[] = "MixUpBatchOp";
 constexpr char kNormalizeOp[] = "NormalizeOp";
+constexpr char kNormalizePadOp[] = "NormalizePadOp";
 constexpr char kPadOp[] = "PadOp";
 constexpr char kRandomColorAdjustOp[] = "RandomColorAdjustOp";
 constexpr char kRandomCropAndResizeOp[] = "RandomCropAndResizeOp";
@@ -125,6 +127,7 @@ constexpr char kPadEndOp[] = "PadEndOp";
 constexpr char kSliceOp[] = "SliceOp";
 constexpr char kToFloat16Op[] = "ToFloat16Op";
 constexpr char kTypeCastOp[] = "TypeCastOp";
+constexpr char kUniqueOp[] = "UniqueOp";
 
 // other
 constexpr char kCFuncOp[] = "CFuncOp";

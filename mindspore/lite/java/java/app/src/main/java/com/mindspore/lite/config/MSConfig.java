@@ -23,16 +23,13 @@ public class MSConfig {
         this.msConfigPtr = 0;
     }
 
-    public long getMSConfigPtr() {
-        return msConfigPtr;
-    }
-
-    public void setMSConfigPtr(long msConfigPtr) {
-        this.msConfigPtr = msConfigPtr;
+    public boolean init(int deviceType, int threadNum, int cpuBindMode, boolean enable_float16) {
+        this.msConfigPtr = createMSConfig(deviceType, threadNum, cpuBindMode, enable_float16);
+        return this.msConfigPtr != 0;
     }
 
     public boolean init(int deviceType, int threadNum, int cpuBindMode) {
-        this.msConfigPtr = createMSConfig(deviceType, threadNum, cpuBindMode);
+        this.msConfigPtr = createMSConfig(deviceType, threadNum, cpuBindMode ,false);
         return this.msConfigPtr != 0;
     }
 
@@ -53,7 +50,11 @@ public class MSConfig {
         this.msConfigPtr = 0;
     }
 
-    private native long createMSConfig(int deviceType, int threadNum, int cpuBindMode);
+    public long getMSConfigPtr() {
+        return msConfigPtr;
+    }
+
+    private native long createMSConfig(int deviceType, int threadNum, int cpuBindMode, boolean enable_float16);
 
     private native void free(long msConfigPtr);
 }

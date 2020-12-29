@@ -75,7 +75,7 @@ class CifarOp : public ParallelOp, public RandomAccessOp {
     // Setter method
     // @param std::shared_ptr<Sampler> sampler
     // @return Builder setter method returns reference to the builder.
-    Builder &SetSampler(std::shared_ptr<Sampler> sampler) {
+    Builder &SetSampler(std::shared_ptr<SamplerRT> sampler) {
       sampler_ = std::move(sampler);
       return *this;
     }
@@ -109,12 +109,12 @@ class CifarOp : public ParallelOp, public RandomAccessOp {
     }
 
     // Check validity of input args
-    // @return - The error code return
+    // @return Status The status code returned
     Status SanityCheck();
 
     // The builder "build" method creates the final object.
     // @param std::shared_ptr<CifarOp> *op - DatasetOp
-    // @return - The error code return
+    // @return Status The status code returned
     Status Build(std::shared_ptr<CifarOp> *op);
 
    private:
@@ -123,7 +123,7 @@ class CifarOp : public ParallelOp, public RandomAccessOp {
     int32_t num_workers_;
     int32_t rows_per_buffer_;
     int32_t op_connect_size_;
-    std::shared_ptr<Sampler> sampler_;
+    std::shared_ptr<SamplerRT> sampler_;
     std::unique_ptr<DataSchema> schema_;
     CifarType cifar_type_;
   };
@@ -138,19 +138,19 @@ class CifarOp : public ParallelOp, public RandomAccessOp {
   // @param std::unique_ptr<Sampler> sampler - sampler tells ImageFolderOp what to read
   CifarOp(CifarType type, const std::string &usage, int32_t num_works, int32_t rows_per_buf,
           const std::string &file_dir, int32_t queue_size, std::unique_ptr<DataSchema> data_schema,
-          std::shared_ptr<Sampler> sampler);
+          std::shared_ptr<SamplerRT> sampler);
   // Destructor.
   ~CifarOp() = default;
 
   // Worker thread pulls a number of IOBlock from IOBlock Queue, make a buffer and push it to Connector
   // @param uint32_t workerId - id of each worker
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status WorkerEntry(int32_t worker_id) override;
 
   // Main Loop of CifarOp
   // Master thread: Fill IOBlockQueue, then goes to sleep
   // Worker thread: pulls IOBlock from IOBlockQueue, work on it then put buffer to mOutConnector
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status operator()() override;
 
   // A print method typically used for debugging
@@ -177,18 +177,18 @@ class CifarOp : public ParallelOp, public RandomAccessOp {
 
  private:
   // Initialize Sampler, calls sampler->Init() within
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status InitSampler();
 
   // Load a tensor row according to a pair
   // @param uint64_t index - index need to load
   // @param TensorRow row - image & label read into this tensor row
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status LoadTensorRow(uint64_t index, TensorRow *row);
 
   // @param const std::vector<uint64_t> &keys - keys in ioblock
   // @param std::unique_ptr<DataBuffer> db
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status LoadBuffer(const std::vector<int64_t> &keys, std::unique_ptr<DataBuffer> *db);
 
   // Read block data from cifar file
@@ -200,7 +200,7 @@ class CifarOp : public ParallelOp, public RandomAccessOp {
   Status LaunchThreadsAndInitOp();
 
   // reset Op
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status Reset() override;
 
   // Get cifar files in dir
@@ -221,7 +221,7 @@ class CifarOp : public ParallelOp, public RandomAccessOp {
 
   // Method derived from RandomAccess Op, enable Sampler to get all ids for each calss
   // @param (std::map<uint64_t, std::vector<uint64_t >> * map - key label, val all ids for this class
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status GetClassIds(std::map<int32_t, std::vector<int64_t>> *cls_ids) const override;
 
   // Private function for computing the assignment of the column name map.

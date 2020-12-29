@@ -16,6 +16,10 @@
 
 #include "src/ops/p_relu.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -46,6 +50,10 @@ int PReLU::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::
   return RET_OK;
 }
 
+PrimitiveC *PReLUCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<PReLU>(primitive); }
+Registry PReLURegistry(schema::PrimitiveType_PReLU, PReLUCreator);
+
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

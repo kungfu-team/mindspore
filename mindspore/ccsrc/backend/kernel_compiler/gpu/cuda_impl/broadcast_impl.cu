@@ -32,6 +32,25 @@ struct LessFunc {
 };
 
 template <typename T>
+struct EqualFunc {
+  __device__ __host__ __forceinline__ bool operator()(const T &lhs, const T &rhs) { return lhs == rhs ? true : false; }
+};
+
+template <>
+struct EqualFunc <half> {
+  __device__ __host__ __forceinline__ bool operator()(const half &lhs, const half &rhs) {
+    return std::abs(__half2float(lhs) - __half2float(rhs)) < 1e-9 ? true : false;
+  }
+};
+
+template <>
+struct EqualFunc <float>  {
+  __device__ __host__ __forceinline__ bool operator()(const float &lhs, const float &rhs) {
+    return std::abs(lhs - rhs) < 1e-9 ? true : false;
+  }
+};
+
+template <typename T>
 struct MinimumFunc {
   __device__ __host__ __forceinline__ T operator()(const T &lhs, const T &rhs) { return lhs < rhs ? lhs : rhs; }
 };
@@ -89,6 +108,48 @@ struct AddFunc {
   __device__ __host__ __forceinline__ T operator()(const T &lhs, const T &rhs) { return (lhs + rhs); }
 };
 
+// DivNoNan check if rhs is less than epsilon
+template <typename T>
+struct DivNoNanFunc {
+  // default T is float
+  __device__ __host__ __forceinline__ T operator()(const T &lhs, const T &rhs) {
+    return rhs < kFloatEplison && rhs > -kFloatEplison ? 0.0 : (lhs / rhs);
+  }
+};
+
+template <>
+struct DivNoNanFunc<int> {
+  __device__ __host__ __forceinline__ int operator()(const int &lhs, const int &rhs) {
+    return rhs == 0 ? 0 : (lhs / rhs);
+  }
+};
+
+template <>
+struct DivNoNanFunc<half> {
+  __device__ __host__ __forceinline__ half operator()(const half &lhs, const half &rhs) {
+    if (__half2float(rhs) < (0.00007) && __half2float(rhs) > -0.00007) {
+      return static_cast<half>(0.0);
+    }
+    return __float2half_rn(__half2float(lhs) / __half2float(rhs));
+  }
+};
+
+template <>
+struct DivNoNanFunc<half2> {
+  __device__ __host__ __forceinline__ half2 operator()(const half2 &lhs, const half2 &rhs) {
+    float2 l = __half22float2(lhs);
+    float2 r = __half22float2(rhs);
+    if ((r.x < kFloatEplison && r.x > -kFloatEplison) || (r.y < kFloatEplison && r.y > -kFloatEplison)) {
+      l.x = 0.0;
+      l.y = 0.0;
+    } else {
+      l.x = l.x / r.x;
+      l.y = l.y / r.y;
+    }
+    return __float22half2_rn(l);
+  }
+};
+
 // convert to float to fix accuracy issue
 template <typename T>
 struct FloorDivFunc {
@@ -131,6 +192,14 @@ struct AbsGradFunc<half2> {
   }
 };
 
+template <typename T>
+struct SquaredDifferenceFunc {
+  __device__ __forceinline__ T operator()(const T &lhs, const T &rhs) {
+    T diff = lhs - rhs;
+    return diff * diff;
+  }
+};
+
 // Element-wise Comparation
 template <typename T, typename Func>
 __global__ void ElewiseCmpKernel(const int nums, const T *x0, const T *x1, bool *y) {
@@ -146,6 +215,8 @@ void ElewiseCmp(const int &nums, enum BroadcastOpType op, const T *x0, const T *
       return ElewiseCmpKernel<T, GreaterFunc<T>><<<(nums + 255) / 256, 256, 0, stream>>>(nums, x0, x1, y);
     case BROADCAST_TYPE_LESS:
       return ElewiseCmpKernel<T, LessFunc<T>><<<(nums + 255) / 256, 256, 0, stream>>>(nums, x0, x1, y);
+    case BROADCAST_TYPE_EQUAL:
+      return ElewiseCmpKernel<T, EqualFunc<T>><<<(nums + 255) / 256, 256, 0, stream>>>(nums, x0, x1, y);
     default:
       break;
   }
@@ -156,6 +227,12 @@ template void ElewiseCmp(const int &nums, enum BroadcastOpType op, const float *
 template void ElewiseCmp(const int &nums, enum BroadcastOpType op, const half *x0, const half *x1, bool *y,
                          cudaStream_t stream);
 template void ElewiseCmp(const int &nums, enum BroadcastOpType op, const int *x0, const int *x1, bool *y,
+                         cudaStream_t stream);
+template void ElewiseCmp(const int &nums, enum BroadcastOpType op, const int8_t *x0, const int8_t *x1, bool *y,
+                         cudaStream_t stream);
+template void ElewiseCmp(const int &nums, enum BroadcastOpType op, const uint8_t *x0, const uint8_t *x1, bool *y,
+                         cudaStream_t stream);
+template void ElewiseCmp(const int &nums, enum BroadcastOpType op, const int64_t *x0, const int64_t *x1, bool *y,
                          cudaStream_t stream);
 
 // Element-wise ArithMetic
@@ -189,6 +266,10 @@ void ElewiseArithKernel(const int &nums, enum BroadcastOpType op, const T *x0, c
       return ElewiseArithKernel<T, AbsGradFunc<T>><<<(nums + 255) / 256, 256, 0, stream>>>(nums, x0, x1, y);
     case BROADCAST_TYPE_DIV:
       return ElewiseArithKernel<T, DivFunc<T>><<<(nums + 255) / 256, 256, 0, stream>>>(nums, x0, x1, y);
+    case BROADCAST_TYPE_DIVNONAN:
+      return ElewiseArithKernel<T, DivNoNanFunc<T>><<<(nums + 255) / 256, 256, 0, stream>>>(nums, x0, x1, y);
+    case BROADCAST_TYPE_SQUARED_DIFFERENCE:
+      return ElewiseArithKernel<T, SquaredDifferenceFunc<T>><<<(nums + 255) / 256, 256, 0, stream>>>(nums, x0, x1, y);
     default:
       break;
   }
@@ -217,16 +298,21 @@ template void ElewiseArith(const int &nums, enum BroadcastOpType op, const half 
                            cudaStream_t stream);
 template void ElewiseArith(const int &nums, enum BroadcastOpType op, const int *x0, const int *x1, int *y,
                            cudaStream_t stream);
+template void ElewiseArith(const int &nums, enum BroadcastOpType op, const int8_t *x0, const int8_t *x1, int8_t *y,
+                           cudaStream_t stream);
+template void ElewiseArith(const int &nums, enum BroadcastOpType op, const uint8_t *x0, const uint8_t *x1, uint8_t *y,
+                           cudaStream_t stream);
+template void ElewiseArith(const int &nums, enum BroadcastOpType op, const int64_t *x0, const int64_t *x1, int64_t *y,
+                           cudaStream_t stream);
 
 // Broadcast comparation
 __device__ __forceinline__ size_t Index(const size_t &index, const size_t &dim) { return dim == 1 ? 0 : index; }
 
 template <typename T, typename Func>
-__global__ void BroadcastCmpKernel(const size_t l0, const size_t l1, const size_t l2, const size_t l3,
-                                   const size_t l4, const size_t l5, const size_t l6, const size_t r0,
-                                   const size_t r1, const size_t r2, const size_t r3, const size_t r4,
-                                   const size_t r5, const size_t r6, const size_t d0, const size_t d1,
-                                   const size_t d2, const size_t d3, const size_t d4, const size_t d5,
+__global__ void BroadcastCmpKernel(const size_t l0, const size_t l1, const size_t l2, const size_t l3, const size_t l4,
+                                   const size_t l5, const size_t l6, const size_t r0, const size_t r1, const size_t r2,
+                                   const size_t r3, const size_t r4, const size_t r5, const size_t r6, const size_t d0,
+                                   const size_t d1, const size_t d2, const size_t d3, const size_t d4, const size_t d5,
                                    const size_t d6, const T *x0, const T *x1, bool *y) {
   for (size_t pos = blockIdx.x * blockDim.x + threadIdx.x; pos < d0 * d1 * d2 * d3 * d4 * d5 * d6;
        pos += blockDim.x * gridDim.x) {
@@ -258,8 +344,8 @@ __global__ void BroadcastCmpKernel(const size_t l0, const size_t l1, const size_
 
 template <typename T>
 void BroadcastCmp(const std::vector<size_t> &x0_dims, const std::vector<size_t> &x1_dims,
-                  const std::vector<size_t> &y_dims, enum BroadcastOpType op, const T *x0,
-                  const T *x1, bool *y, cudaStream_t stream) {
+                  const std::vector<size_t> &y_dims, enum BroadcastOpType op, const T *x0, const T *x1, bool *y,
+                  cudaStream_t stream) {
   size_t size = 1;
   for (auto d : y_dims) {
     size *= d;
@@ -273,6 +359,11 @@ void BroadcastCmp(const std::vector<size_t> &x0_dims, const std::vector<size_t> 
         y_dims[4], y_dims[5], y_dims[6], x0, x1, y);
     case BROADCAST_TYPE_LESS:
       return BroadcastCmpKernel<T, LessFunc<T>><<<(size + 255) / 256, 256, 0, stream>>>(
+        x0_dims[0], x0_dims[1], x0_dims[2], x0_dims[3], x0_dims[4], x0_dims[5], x0_dims[6], x1_dims[0], x1_dims[1],
+        x1_dims[2], x1_dims[3], x1_dims[4], x1_dims[5], x1_dims[6], y_dims[0], y_dims[1], y_dims[2], y_dims[3],
+        y_dims[4], y_dims[5], y_dims[6], x0, x1, y);
+    case BROADCAST_TYPE_EQUAL:
+      return BroadcastCmpKernel<T, EqualFunc<T>><<<(size + 255) / 256, 256, 0, stream>>>(
         x0_dims[0], x0_dims[1], x0_dims[2], x0_dims[3], x0_dims[4], x0_dims[5], x0_dims[6], x1_dims[0], x1_dims[1],
         x1_dims[2], x1_dims[3], x1_dims[4], x1_dims[5], x1_dims[6], y_dims[0], y_dims[1], y_dims[2], y_dims[3],
         y_dims[4], y_dims[5], y_dims[6], x0, x1, y);
@@ -290,6 +381,15 @@ template void BroadcastCmp(const std::vector<size_t> &x0_dims, const std::vector
 template void BroadcastCmp(const std::vector<size_t> &x0_dims, const std::vector<size_t> &x1_dims,
                            const std::vector<size_t> &y_dims, enum BroadcastOpType op, const int *x0, const int *x1,
                            bool *y, cudaStream_t stream);
+template void BroadcastCmp(const std::vector<size_t> &x0_dims, const std::vector<size_t> &x1_dims,
+                           const std::vector<size_t> &y_dims, enum BroadcastOpType op, const int8_t *x0,
+                           const int8_t *x1, bool *y, cudaStream_t stream);
+template void BroadcastCmp(const std::vector<size_t> &x0_dims, const std::vector<size_t> &x1_dims,
+                           const std::vector<size_t> &y_dims, enum BroadcastOpType op, const uint8_t *x0,
+                           const uint8_t *x1, bool *y, cudaStream_t stream);
+template void BroadcastCmp(const std::vector<size_t> &x0_dims, const std::vector<size_t> &x1_dims,
+                           const std::vector<size_t> &y_dims, enum BroadcastOpType op, const int64_t *x0,
+                           const int64_t *x1, bool *y, cudaStream_t stream);
 
 // Broadcast Arithmetic
 template <typename T, typename Func>
@@ -329,8 +429,8 @@ __global__ void BroadcastArithKernel(const size_t l0, const size_t l1, const siz
 
 template <typename T>
 void BroadcastArith(const std::vector<size_t> &x0_dims, const std::vector<size_t> &x1_dims,
-                    const std::vector<size_t> &y_dims, enum BroadcastOpType op, const T *x0,
-                    const T *x1, T *y, cudaStream_t stream) {
+                    const std::vector<size_t> &y_dims, enum BroadcastOpType op, const T *x0, const T *x1, T *y,
+                    cudaStream_t stream) {
   size_t size = 1;
   for (auto d : y_dims) {
     size *= d;
@@ -386,6 +486,16 @@ void BroadcastArith(const std::vector<size_t> &x0_dims, const std::vector<size_t
         x0_dims[0], x0_dims[1], x0_dims[2], x0_dims[3], x0_dims[4], x0_dims[5], x0_dims[6], x1_dims[0], x1_dims[1],
         x1_dims[2], x1_dims[3], x1_dims[4], x1_dims[5], x1_dims[6], y_dims[0], y_dims[1], y_dims[2], y_dims[3],
         y_dims[4], y_dims[5], y_dims[6], x0, x1, y);
+    case BROADCAST_TYPE_DIVNONAN:
+      return BroadcastArithKernel<T, DivNoNanFunc<T>><<<(size + 255) / 256, 256, 0, stream>>>(
+        x0_dims[0], x0_dims[1], x0_dims[2], x0_dims[3], x0_dims[4], x0_dims[5], x0_dims[6], x1_dims[0], x1_dims[1],
+        x1_dims[2], x1_dims[3], x1_dims[4], x1_dims[5], x1_dims[6], y_dims[0], y_dims[1], y_dims[2], y_dims[3],
+        y_dims[4], y_dims[5], y_dims[6], x0, x1, y);
+    case BROADCAST_TYPE_SQUARED_DIFFERENCE:
+      return BroadcastArithKernel<T, SquaredDifferenceFunc<T>><<<(size + 255) / 256, 256, 0, stream>>>(
+        x0_dims[0], x0_dims[1], x0_dims[2], x0_dims[3], x0_dims[4], x0_dims[5], x0_dims[6], x1_dims[0], x1_dims[1],
+        x1_dims[2], x1_dims[3], x1_dims[4], x1_dims[5], x1_dims[6], y_dims[0], y_dims[1], y_dims[2], y_dims[3],
+        y_dims[4], y_dims[5], y_dims[6], x0, x1, y);
     default:
       break;
   }
@@ -400,6 +510,15 @@ template void BroadcastArith(const std::vector<size_t> &x0_dims, const std::vect
 template void BroadcastArith(const std::vector<size_t> &x0_dims, const std::vector<size_t> &x1_dims,
                              const std::vector<size_t> &y_dims, enum BroadcastOpType op, const int *x0, const int *x1,
                              int *y, cudaStream_t stream);
+template void BroadcastArith(const std::vector<size_t> &x0_dims, const std::vector<size_t> &x1_dims,
+                             const std::vector<size_t> &y_dims, enum BroadcastOpType op, const int8_t *x0,
+                             const int8_t *x1, int8_t *y, cudaStream_t stream);
+template void BroadcastArith(const std::vector<size_t> &x0_dims, const std::vector<size_t> &x1_dims,
+                             const std::vector<size_t> &y_dims, enum BroadcastOpType op, const uint8_t *x0,
+                             const uint8_t *x1, uint8_t *y, cudaStream_t stream);
+template void BroadcastArith(const std::vector<size_t> &x0_dims, const std::vector<size_t> &x1_dims,
+                             const std::vector<size_t> &y_dims, enum BroadcastOpType op, const int64_t *x0,
+                             const int64_t *x1, int64_t *y, cudaStream_t stream);
 
 // BroadcastTo
 template <typename T>
@@ -419,8 +538,8 @@ __global__ void BroadcastToKernel(const size_t i0, const size_t i1, const size_t
 
 template <typename T>
 void BroadcastTo(const size_t &i0, const size_t &i1, const size_t &i2, const size_t &i3, const size_t &o0,
-                 const size_t &o1, const size_t &o2, const size_t &o3, const T *input_addr,
-                 T *output_addr, cudaStream_t stream) {
+                 const size_t &o1, const size_t &o2, const size_t &o3, const T *input_addr, T *output_addr,
+                 cudaStream_t stream) {
   size_t nums = o0 * o1 * o2 * o3;
   BroadcastToKernel<<<GET_BLOCKS(nums), GET_THREADS, 0, stream>>>(i0, i1, i2, i3, o0, o1, o2, o3, input_addr,
                                                                   output_addr);
@@ -432,3 +551,6 @@ template void BroadcastTo(const size_t &i0, const size_t &i1, const size_t &i2, 
 template void BroadcastTo(const size_t &i0, const size_t &i1, const size_t &i2, const size_t &i3, const size_t &o0,
                           const size_t &o1, const size_t &o2, const size_t &o3, const half *input_addr,
                           half *output_addr, cudaStream_t stream);
+template void BroadcastTo(const size_t &i0, const size_t &i1, const size_t &i2, const size_t &i3, const size_t &o0,
+                          const size_t &o1, const size_t &o2, const size_t &o3, const int64_t *input_addr,
+                          int64_t *output_addr, cudaStream_t stream);

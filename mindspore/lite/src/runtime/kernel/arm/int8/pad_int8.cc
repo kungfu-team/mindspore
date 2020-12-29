@@ -18,14 +18,17 @@
 #include <string>
 #include "include/errorcode.h"
 #include "nnacl/errorcode.h"
-#include "nnacl/int8/pad.h"
+#include "nnacl/int8/pad_int8.h"
 #include "src/runtime/runtime_api.h"
+#include "src/kernel_registry.h"
 
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_MEMORY_FAILED;
 using mindspore::lite::RET_NULL_PTR;
 using mindspore::lite::RET_OK;
 
+using mindspore::lite::KernelRegistrar;
+using mindspore::schema::PrimitiveType_Pad;
 namespace mindspore::kernel {
 
 namespace {
@@ -40,6 +43,10 @@ void PadInt8CPUKernel::FreeQuantParam() {
   if (pad_param_->pad_quant_arg_.out_quanr_args_ != nullptr) {
     free(pad_param_->pad_quant_arg_.out_quanr_args_);
     pad_param_->pad_quant_arg_.out_quanr_args_ = nullptr;
+  }
+  if (pad_param_->pad_quant_arg_.constant_value_ != nullptr) {
+    free(pad_param_->pad_quant_arg_.constant_value_);
+    pad_param_->pad_quant_arg_.constant_value_ = nullptr;
   }
 }
 
@@ -60,8 +67,8 @@ int PadInt8CPUKernel::SetQuantParam() {
 
   auto *input_tensor = in_tensors_.at(kInputIndex);
   auto *out_tensor = out_tensors_.at(kOutputIndex);
-  auto in_quant_arg = input_tensor->GetQuantParams();
-  auto out_quant_arg = out_tensor->GetQuantParams();
+  auto in_quant_arg = input_tensor->quant_params();
+  auto out_quant_arg = out_tensor->quant_params();
 
   pad_quant_args->in_quant_args_->zp_ = in_quant_arg.front().zeroPoint;
   pad_quant_args->in_quant_args_->scale_ = in_quant_arg.front().scale;
@@ -80,8 +87,8 @@ int PadInt8CPUKernel::SetQuantParam() {
 }
 
 int PadInt8CPUKernel::InitPadParam() {
-  auto in_dims = in_tensors_[0]->shape();
-  auto out_dims = out_tensors_[0]->shape();
+  auto in_dims = in_tensors_.at(0)->shape();
+  auto out_dims = out_tensors_.at(0)->shape();
   int ndims = in_dims.size();
 
   int in[] = {1, 1, 1, 1};
@@ -108,6 +115,7 @@ int PadInt8CPUKernel::ReSize() {
 }
 
 int PadInt8CPUKernel::Init() {
+  MS_ASSERT(pad_param_);
   auto error_code = SetQuantParam();
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "SetQuantParam failed. errorcode: " << error_code;
@@ -120,6 +128,10 @@ int PadInt8CPUKernel::Init() {
 }
 
 int PadInt8CPUKernel::RunImpl(int task_id) {
+  MS_ASSERT(in_data_);
+  MS_ASSERT(out_data_);
+  MS_ASSERT(in_dims_);
+  MS_ASSERT(out_dims_);
   return PadConstant4D(in_data_, out_data_, in_dims_, out_dims_, pad_param_->paddings_, task_id, context_->thread_num_);
 }
 
@@ -176,9 +188,13 @@ int PadInt8CPUKernel::ExtendPaddings(int *paddings, int length, const int *ori_p
 
 int PadInt8CPUKernel::RunMirrorPadImpl(int task_id) {
   auto input = in_tensors_.at(0);
+  MS_ASSERT(input);
   auto output = out_tensors_.at(0);
+  MS_ASSERT(output);
   auto input_data = reinterpret_cast<int8_t *>(input->MutableData());
+  MS_ASSERT(input_data);
   auto output_data = reinterpret_cast<int8_t *>(output->MutableData());
+  MS_ASSERT(output_data);
 
   int unit = UP_DIV(output->ElementsNum(), context_->thread_num_);
   int begin = unit * task_id;
@@ -197,7 +213,7 @@ int MirrorPadImplInt8(void *cdata, int task_id) {
   return RET_OK;
 }
 
-int PadInt8CPUKernel::CheckPaddings(int *paddings, int length, int *input_shape, int mode) {
+int PadInt8CPUKernel::CheckPaddings(const int *paddings, int length, const int *input_shape, int mode) {
   if (paddings == nullptr || input_shape == nullptr) {
     return RET_NULL_PTR;
   }
@@ -249,13 +265,8 @@ int PadInt8CPUKernel::CopyPaddingFromInput() {
 }
 
 int PadInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << ret;
-    return ret;
-  }
-  in_data_ = reinterpret_cast<int8_t *>(in_tensors_[0]->MutableData());
-  out_data_ = reinterpret_cast<int8_t *>(out_tensors_[0]->MutableData());
+  in_data_ = reinterpret_cast<int8_t *>(in_tensors_.at(0)->MutableData());
+  out_data_ = reinterpret_cast<int8_t *>(out_tensors_.at(0)->MutableData());
 
   int error_code;
   if (pad_param_->pad_mode_ == static_cast<int>(schema::PaddingMode_CONSTANT)) {
@@ -278,4 +289,6 @@ int PadInt8CPUKernel::Run() {
 
   return RET_OK;
 }
+
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Pad, LiteKernelCreator<PadInt8CPUKernel>)
 }  // namespace mindspore::kernel

@@ -56,7 +56,8 @@ class BatchNormFoldGradGpuKernel : public GpuKernel {
     T *batch_std = GetDeviceAddress<T>(inputs, 4);
     int *current_step = GetDeviceAddress<int>(inputs, 5);
     int current_step_host[1];
-    CHECK_CUDA_RET_WITH_ERROR(cudaMemcpyAsync(current_step_host, current_step, sizeof(int), cudaMemcpyDeviceToHost,
+    CHECK_CUDA_RET_WITH_ERROR(kernel_node_,
+                              cudaMemcpyAsync(current_step_host, current_step, sizeof(int), cudaMemcpyDeviceToHost,
                                               reinterpret_cast<cudaStream_t>(stream_ptr)),
                               "Copy gpu memoy failed.");
     if (d_batch_mean == nullptr) {
@@ -95,6 +96,7 @@ class BatchNormFoldGradGpuKernel : public GpuKernel {
   }
 
   bool Init(const CNodePtr &kernel_node) override {
+    kernel_node_ = kernel_node;
     size_t input_num = AnfAlgo::GetInputTensorNum(kernel_node);
     if (input_num != 6) {
       MS_LOG(ERROR) << "Input number is " << input_num << ", but BatchNormFoldGrad GpuKernel OP needs 6 input.";
@@ -109,7 +111,7 @@ class BatchNormFoldGradGpuKernel : public GpuKernel {
 
     epsilon_ = GetValue<T>(AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr("epsilon"));
     is_training_ = GetValue<bool>(AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr("is_training"));
-    freeze_bn_ = GetValue<int>(AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr("freeze_bn"));
+    freeze_bn_ = static_cast<int>(GetValue<int64_t>(AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr("freeze_bn")));
 
     auto input_shape = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 2);
     if (input_shape.size() != 4) {

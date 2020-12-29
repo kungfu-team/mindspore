@@ -22,7 +22,7 @@ from mindspore._c_expression import init_exec_dataset
 from mindspore import context
 from mindspore import log as logger
 from mindspore import nn
-from mindspore._checkparam import check_input_data, check_output_data, Validator, check_int
+from mindspore._checkparam import check_input_data, check_output_data, Validator
 from mindspore.common import dtype as mstype
 from mindspore.common.dtype import pytype_to_dtype
 from mindspore.common.tensor import Tensor
@@ -71,7 +71,7 @@ def _exec_datagraph(exec_dataset, dataset_size, phase='dataset'):
 
     # transform data format
     dataset_types, dataset_shapes = _get_types_and_shapes(exec_dataset)
-    init_exec_dataset(exec_dataset.__TRANSFER_DATASET__.queue_name,
+    init_exec_dataset(exec_dataset.__transfer_dataset__.queue_name,
                       dataset_size,
                       batch_size,
                       dataset_types,
@@ -135,7 +135,7 @@ class Model:
         >>>         return out
         >>>
         >>> net = Net()
-        >>> loss = nn.SoftmaxCrossEntropyWithLogits(is_grad=False, sparse=True)
+        >>> loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True)
         >>> optim = Momentum(params=net.trainable_params(), learning_rate=0.1, momentum=0.9)
         >>> model = Model(net, loss_fn=loss, optimizer=optim, metrics=None)
         >>> dataset = get_dataset()
@@ -307,7 +307,7 @@ class Model:
             >>> train_dataset = get_train_dataset()
             >>> valid_dataset = get_valid_dataset()
             >>> net = Net()
-            >>> loss = nn.SoftmaxCrossEntropyWithLogits(is_grad=False, sparse=True)
+            >>> loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True)
             >>> optim = Momentum(params=net.trainable_params(), learning_rate=0.1, momentum=0.9)
             >>> model = Model(net, loss_fn=loss, optimizer=optim, metrics={'acc'})
             >>> model.init(train_dataset, valid_dataset)
@@ -597,14 +597,14 @@ class Model:
         Examples:
             >>> dataset = get_dataset()
             >>> net = Net()
-            >>> loss = nn.SoftmaxCrossEntropyWithLogits(is_grad=False, sparse=True)
+            >>> loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True)
             >>> loss_scale_manager = FixedLossScaleManager()
             >>> optim = Momentum(params=net.trainable_params(), learning_rate=0.1, momentum=0.9)
             >>> model = Model(net, loss_fn=loss, optimizer=optim, metrics=None, loss_scale_manager=loss_scale_manager)
             >>> model.train(2, dataset)
         """
         dataset_sink_mode = Validator.check_bool(dataset_sink_mode)
-        check_int(sink_size)
+        Validator.check_is_int(sink_size)
         if sink_size < -1 or sink_size == 0:
             raise ValueError("The sink_size must be -1 or positive, but got sink_size {}.".format(sink_size))
 
@@ -714,7 +714,7 @@ class Model:
         Examples:
             >>> dataset = get_dataset()
             >>> net = Net()
-            >>> loss = nn.SoftmaxCrossEntropyWithLogits(is_grad=False, sparse=True)
+            >>> loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True)
             >>> model = Model(net, loss_fn=loss, optimizer=None, metrics={'acc'})
             >>> model.eval(dataset)
         """

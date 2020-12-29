@@ -23,8 +23,11 @@ from mindspore.common.dtype import dtype_to_nptype, pytype_to_dtype
 from mindspore.common import dtype as mstype
 from mindspore import log as logger
 from mindspore.common.api import _executor
+from mindspore.train.mind_ir_pb2 import ModelProto as mindir_model
+from mindspore.train.anf_ir_pb2 import ModelProto as anf_model
 
 from .lineage_pb2 import DatasetGraph, TrainLineage, EvaluationLineage, UserDefinedInfo
+
 
 def _convert_type(types):
     """
@@ -50,7 +53,7 @@ def _get_types_and_shapes(dataset):
     return dataset_types, dataset_shapes
 
 
-def _exec_datagraph(exec_dataset, dataset_size, phase='dataset'):
+def _exec_datagraph(exec_dataset, dataset_size, phase='dataset', create_data_info_queue=False):
     """Initialize and execute the dataset graph."""
     batch_size = exec_dataset.get_batch_size()
     input_indexs = exec_dataset.input_indexs
@@ -58,7 +61,7 @@ def _exec_datagraph(exec_dataset, dataset_size, phase='dataset'):
     # transform data format
     dataset_types, dataset_shapes = _get_types_and_shapes(exec_dataset)
     send_epoch_end = bool(dataset_size == -1)
-    exec_dataset = exec_dataset.device_que(send_epoch_end=send_epoch_end)
+    exec_dataset = exec_dataset.device_que(send_epoch_end=send_epoch_end, create_data_info_queue=create_data_info_queue)
 
     _executor.init_dataset(exec_dataset.queue_name,
                            dataset_size,
@@ -73,20 +76,16 @@ def _exec_datagraph(exec_dataset, dataset_size, phase='dataset'):
 
 def _make_directory(path: str):
     """Make directory."""
-    real_path = None
     if path is None or not isinstance(path, str) or path.strip() == "":
         logger.error("The path(%r) is invalid type.", path)
         raise TypeError("Input path is invaild type")
 
-    # convert the relative paths
     path = os.path.realpath(path)
     logger.debug("The abs path is %r", path)
 
-    # check the path is exist and write permissions?
     if os.path.exists(path):
         real_path = path
     else:
-        # All exceptions need to be caught because create directory maybe have some limit(permissions)
         logger.debug("The directory(%s) doesn't exist, will create it", path)
         try:
             os.makedirs(path, exist_ok=True)
@@ -155,6 +154,7 @@ def _construct_input_tensors(dataset_types, dataset_shapes, device_number=1):
 def _check_to_numpy(plugin, tensor):
     """Check the tensor and return a numpy.ndarray."""
     np_value = tensor.asnumpy()
+    np_value = np_value.copy()
     if plugin == 'scalar':
         if np_value.size == 1:
             return np_value
@@ -203,3 +203,32 @@ def check_value_type(arg_name, arg_value, valid_types):
     if not is_valid:
         raise TypeError(f'For `{arg_name}` the type should be a valid type of {[t.__name__ for t in valid_types]}, '
                         f'bug got {type(arg_value).__name__}.')
+
+
+def read_proto(file_name, proto_format="MINDIR"):
+    """
+    Read protobuf file.
+
+    Args:
+        file_name (str): File name.
+        proto_format (str): Proto format.
+
+    Returns:
+        Object, proto object.
+    """
+
+    if proto_format == "MINDIR":
+        model = mindir_model()
+    elif model_format == "ANF":
+        model = anf_model()
+    else:
+        raise ValueError("Unsupported proto format.")
+
+    try:
+        with open(file_name, "rb") as f:
+            pb_content = f.read()
+            model.ParseFromString(pb_content)
+    except BaseException as e:
+        logger.error("Failed to read the file `%s`, please check the correct of the file.", file_name)
+        raise ValueError(e.__str__())
+    return model

@@ -17,6 +17,10 @@
 #include "src/ops/return.h"
 #include <memory>
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -47,6 +51,9 @@ int Return::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inp
   }
   return RET_OK;
 }
+#else
+PrimitiveC *ReturnCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Return>(primitive); }
+Registry ReturnRegistry(schema::PrimitiveType_Return, ReturnCreator);
 #endif
 
 namespace {
@@ -63,16 +70,16 @@ int Return::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
     return RET_NULL_PTR;
   }
   output->set_data_type(input->data_type());
-  output->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output->set_format(input->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   if (this->primitive_ == nullptr) {
     return RET_NULL_PTR;
   }
   output->set_data_type(input->data_type());
   output->set_shape(input->shape());
-  output->SetFormat(input->GetFormat());
+  output->set_format(input->format());
   return RET_OK;
 }
 }  // namespace lite

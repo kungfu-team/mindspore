@@ -28,6 +28,7 @@
 #include "utils/log_adapter.h"
 #include "utils/hashing.h"
 #include "utils/any.h"
+#include "utils/flags.h"
 #include "base/base.h"
 #include "ir/dtype.h"
 #include "ir/value.h"
@@ -102,6 +103,7 @@ class AbstractScalar : public AbstractBase {
   explicit AbstractScalar(const ValuePtr &value, const TypePtr &type) : AbstractBase(value, type) {}
   explicit AbstractScalar(const ValuePtr &value) : AbstractBase(value, value->type()) {}
   explicit AbstractScalar(int value) : AbstractBase(MakeValue(value), kInt32) {}
+  explicit AbstractScalar(int64_t value) : AbstractBase(MakeValue(value), kInt64) {}
   explicit AbstractScalar(float value) : AbstractBase(MakeValue(value), kFloat32) {}
   explicit AbstractScalar(double value) : AbstractBase(MakeValue(value), kFloat64) {}
   explicit AbstractScalar(bool value) : AbstractBase(MakeValue(value), kBool) {}
@@ -258,6 +260,13 @@ class AbstractUndetermined : public AbstractBase {
     }
     set_shape(std::make_shared<Shape>(shape));
   }
+  explicit AbstractUndetermined(const TypePtr &element_type, const BaseShapePtr &shape = std::make_shared<Shape>())
+      : AbstractBase(kAnyValue), element_(std::make_shared<AbstractScalar>(kAnyValue, element_type)) {
+    if (element_type == nullptr) {
+      MS_LOG(EXCEPTION) << "element_type is nullptr";
+    }
+    set_shape(shape);
+  }
   ~AbstractUndetermined() override = default;
   MS_DECLARE_PARENT(AbstractUndetermined, AbstractBase)
   TypePtr BuildType() const override { return std::make_shared<UndeterminedType>(); }
@@ -276,8 +285,17 @@ class AbstractTensor : public AbstractUndetermined {
       : AbstractUndetermined(element, shape) {}
   AbstractTensor(const TypePtr &element_type, const ShapeVector &shape) : AbstractUndetermined(element_type, shape) {}
   explicit AbstractTensor(const tensor::TensorPtr &tensor) : AbstractUndetermined(tensor->Dtype(), tensor->shape()) {}
+  explicit AbstractTensor(const TypePtr &element_type, const BaseShapePtr &shape = std::make_shared<Shape>())
+      : AbstractUndetermined(element_type, shape) {}
   ~AbstractTensor() override = default;
   MS_DECLARE_PARENT(AbstractTensor, AbstractUndetermined)
+
+  void set_value_range(const ValuePtr &min_value, const ValuePtr &max_value) {
+    min_value_ = min_value;
+    max_value_ = max_value;
+  }
+  const ValuePtr &get_min_value() const { return min_value_; }
+  const ValuePtr &get_max_value() const { return max_value_; }
 
   TypePtr BuildType() const override;
   BaseShapePtr BuildShape() const override;
@@ -294,7 +312,7 @@ class AbstractTensor : public AbstractUndetermined {
     if (value != nullptr) {
       auto tensor = value->cast<tensor::TensorPtr>();
       if (tensor != nullptr) {
-        hash_sum = hash_combine(hash_sum, IntToSize(tensor->DataSize()));
+        hash_sum = hash_combine(hash_sum, LongToSize(tensor->DataSize()));
       }
     }
     return hash_sum;
@@ -302,6 +320,8 @@ class AbstractTensor : public AbstractUndetermined {
 
  protected:
   bool equal_to(const AbstractTensor &other) const;
+  ValuePtr min_value_ = nullptr;
+  ValuePtr max_value_ = nullptr;
 };
 using AbstractTensorPtr = std::shared_ptr<AbstractTensor>;
 using AbstractTensorPtrList = std::vector<AbstractTensorPtr>;

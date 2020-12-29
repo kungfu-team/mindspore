@@ -17,34 +17,28 @@
 #include "tools/converter/parser/tflite/tflite_strided_slice_parser.h"
 #include <vector>
 #include <memory>
-#include <map>
 
 namespace mindspore {
 namespace lite {
-STATUS TfliteStridedSliceParser::Parse(TfliteTensorsInfo *tensors_info,
-                                       const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                       const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TfliteStridedSliceParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
+PrimitiveC *TfliteStridedSliceParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                         const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  auto &tflite_subgraph = tflite_model->subgraphs.front();
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "primitive is null";
+    return nullptr;
   }
 
   std::unique_ptr<schema::StridedSliceT> attr = std::make_unique<schema::StridedSliceT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   const auto &tflite_attr = tflite_op->builtin_options.AsStridedSliceOptions();
   if (tflite_attr == nullptr) {
-    MS_LOG(ERROR) << "get op: %s attr failed", op->name.c_str();
-    return RET_NULL_PTR;
+    MS_LOG(ERROR) << "get op strideslice attr failed";
+    return nullptr;
   }
   attr->beginMask = tflite_attr->begin_mask;
   attr->endMask = tflite_attr->end_mask;
@@ -52,31 +46,31 @@ STATUS TfliteStridedSliceParser::Parse(TfliteTensorsInfo *tensors_info,
   attr->newAxisMask = tflite_attr->new_axis_mask;
   attr->shrinkAxisMask = tflite_attr->shrink_axis_mask;
 
-  if (GetTfliteData(tflite_op->inputs[1], tflite_model->subgraphs[0]->tensors, tflite_model->buffers, attr->begin)) {
+  int status = GetTfliteData(tflite_op->inputs[1], tflite_subgraph->tensors, tflite_model->buffers, attr->begin);
+  if (status != RET_OK && status != RET_NO_CHANGE) {
     MS_LOG(ERROR) << "stridedSlice -> begin get failed";
-    return RET_ERROR;
+    return nullptr;
+  } else if (status == RET_OK) {
+    status = GetTfliteData(tflite_op->inputs[2], tflite_subgraph->tensors, tflite_model->buffers, attr->end);
+    if (status != RET_OK && status != RET_NO_CHANGE) {
+      MS_LOG(ERROR) << "stridedSlice -> end get failed";
+      return nullptr;
+    } else if (status == RET_OK) {
+      status = GetTfliteData(tflite_op->inputs[3], tflite_subgraph->tensors, tflite_model->buffers, attr->stride);
+      if (status != RET_OK && status != RET_NO_CHANGE) {
+        MS_LOG(ERROR) << "stridedSlice -> stride get failed";
+        return nullptr;
+      }
+    }
   }
-  if (GetTfliteData(tflite_op->inputs[2], tflite_model->subgraphs[0]->tensors, tflite_model->buffers, attr->end)) {
-    MS_LOG(ERROR) << "stridedSlice -> end get failed";
-    return RET_ERROR;
-  }
-  if (GetTfliteData(tflite_op->inputs[3], tflite_model->subgraphs[0]->tensors, tflite_model->buffers, attr->stride)) {
-    MS_LOG(ERROR) << "stridedSlice -> stride get failed";
-    return RET_ERROR;
-  }
-  attr->isScale.assign(tflite_model->subgraphs[0]->tensors[tflite_op->inputs[0]]->shape.begin(),
-                       tflite_model->subgraphs[0]->tensors[tflite_op->inputs[0]]->shape.end());
+  attr->isScale.assign(tflite_subgraph->tensors[tflite_op->inputs[0]]->shape.begin(),
+                       tflite_subgraph->tensors[tflite_op->inputs[0]]->shape.end());
 
-  op->primitive->value.type = schema::PrimitiveType_StridedSlice;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  primitive->value.type = schema::PrimitiveType_StridedSlice;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteStridedSliceParser("StridedSlice", new TfliteStridedSliceParser());
+TfliteNodeRegister g_tfliteStridedSliceParser(tflite::BuiltinOperator_STRIDED_SLICE, new TfliteStridedSliceParser());
 }  // namespace lite
 }  // namespace mindspore

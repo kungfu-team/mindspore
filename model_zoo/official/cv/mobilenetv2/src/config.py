@@ -19,6 +19,8 @@ import os
 from easydict import EasyDict as ed
 
 def set_config(args):
+    if not args.run_distribute:
+        args.run_distribute = False
     config_cpu = ed({
         "num_classes": 26,
         "image_height": 224,
@@ -38,7 +40,7 @@ def set_config(args):
         "keep_checkpoint_max": 20,
         "save_checkpoint_path": "./",
         "platform": args.platform,
-        "run_distribute": False,
+        "run_distribute": args.run_distribute,
         "activation": "Softmax"
     })
     config_gpu = ed({
@@ -60,7 +62,6 @@ def set_config(args):
         "keep_checkpoint_max": 200,
         "save_checkpoint_path": "./",
         "platform": args.platform,
-        "ccl": "nccl",
         "run_distribute": args.run_distribute,
         "activation": "Softmax"
     })
@@ -83,7 +84,6 @@ def set_config(args):
         "keep_checkpoint_max": 200,
         "save_checkpoint_path": "./",
         "platform": args.platform,
-        "ccl": "hccl",
         "device_id": int(os.getenv('DEVICE_ID', '0')),
         "rank_id": int(os.getenv('RANK_ID', '0')),
         "rank_size": int(os.getenv('RANK_SIZE', '1')),

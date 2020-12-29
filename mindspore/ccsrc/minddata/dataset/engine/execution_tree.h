@@ -21,16 +21,22 @@
 #include <stack>
 #include <string>
 #include <vector>
+#ifndef ENABLE_ANDROID
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__APPLE__)
+#include <sys/sysinfo.h>
+#include <opencv2/imgproc/imgproc.hpp>
+#endif
+#endif
 #include "minddata/dataset/engine/datasetops/dataset_op.h"
 #include "minddata/dataset/util/status.h"
 #include "mindspore/ccsrc/minddata/dataset/engine/perf/profiling.h"
-
 namespace mindspore {
 namespace dataset {
 // Forward declares
 class TaskGroup;
 class DatasetOp;
-
+class Pass;
+using OptPass = std::vector<std::unique_ptr<Pass>>;
 class ExecutionTree {
  public:
   // Prepare flags used during tree prepare phase
@@ -109,16 +115,16 @@ class ExecutionTree {
   // provides it with a link to the tree. A node cannot form any relationships (parent/child) with
   // other nodes unless they are associated with the same tree.
   // @param op - The operator to associate
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status AssociateNode(const std::shared_ptr<DatasetOp> &op);
 
   // Sets the root node of the tree
   // @param op - The operator to assign as root
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status AssignRoot(const std::shared_ptr<DatasetOp> &op);
 
   // Start the execution of the tree
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status Launch();
 
   /// A print method typically used for debugging
@@ -149,8 +155,8 @@ class ExecutionTree {
   // wrapper for the TaskGroup handling that is stored inside the execution tree.
   // @param num_workers - The number of workers to launch
   // @param func - The function entry point that workers will execute
-  // @return Status - The error code return
-  Status LaunchWorkers(int32_t num_workers, std::function<Status(uint32_t)> func);
+  // @return Status The status code returned
+  Status LaunchWorkers(int32_t num_workers, std::function<Status(uint32_t)> func, std::string name = "");
 
   // Getter method
   // @return shared_ptr to the root operator
@@ -163,7 +169,7 @@ class ExecutionTree {
   // The driver of the prepare phase of the execution tree.
   // Prepare phase consists of three sub phases
   //
-  // 1. PrepareTreePreAction()
+  // 1. PreAction()
   //    Compulsory transformation/action pre optimization.
   //    For example, CacheOp Insertion
   //
@@ -171,36 +177,36 @@ class ExecutionTree {
   //    Optimization transformation/action, optional
   //    For example, MapOp Fusion
   //
-  // 3. PrepareTreePostAction()
+  // 3. PostAction()
   //    Compulsory transformation/action post optimization.
   //    For example, repeatOp inlining
   //
-  // @return Status - The error code return
-  Status Prepare(int num_epochs = -1);
+  // @return Status The status code returned
+  Status Prepare(int num_epochs = -1, bool partial = false);
 
   // Compulsory transformation/action pre optimization.
-  // @return Status - The error code return
-  Status PrepareTreePreAction();
+  // @return Status The status code returned
+  Status PreAction();
 
   // Compulsory transformation/action post optimization.
-  // @return Status - The error code return
-  Status PrepareTreePostAction();
+  // @return Status The status code returned
+  Status PostAction();
 
   // Optimization transformation/action, optional.
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status Optimize();
 
   // The DEPRECATED driver of the prepare phase of the execution tree. The prepare phase will recursively
   // walk the tree to perform modifications to the tree or specific nodes within the tree to get
   // it ready for execution.
   // @param Total number of epochs that will be run on this tree
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status PrepareDeprecated();
 
   // Recursive function used during prepare phase to visit a node and drive any pre- and post-
   // node actions during a tree walk.
   // @param op - The dataset op to work on
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status PrepareNode(const std::shared_ptr<DatasetOp> &dataset_op);
 
   // Return the pointer to the TaskGroup
@@ -253,6 +259,10 @@ class ExecutionTree {
   // @return total number of epochs
   int32_t num_epochs() { return num_epochs_; }
 
+  // set the function ptr that overrides the pre-pass which allows caller to adjust the existing pre_pass and
+  // introduce new passes. E.g. caller can override the num_epoch in EpochInjectionPass
+  void SetPrePassOverride(std::function<OptPass(OptPass)> pre_pass_override) { pre_pass_override_ = pre_pass_override; }
+
  private:
   // A helper functions for doing the recursive printing
   // @param dataset_op - The dataset op to print
@@ -270,6 +280,14 @@ class ExecutionTree {
   int32_t num_epochs_;                                   // Total number of epochs to run for this tree
   std::unique_ptr<ProfilingManager> profiling_manager_;  // Profiling manager
   bool optimize_;                                        // Flag to enable optional optimizations
+  std::function<OptPass(OptPass)> pre_pass_override_;    // function ptr that overrides pre pass, called in PrePrepare()
+  bool partially_prepare_;                               // Temp: during migration to IR, if true, run remaining passes.
+#if defined(NUMA_ENABLED) && (defined(ENABLE_GPUQUE) || defined(ENABLE_TDTQUE))
+  // This rank_id is for numa and device_queue, one process work with only one rank_id,
+  // for standalone scenario, this rank_id may come from env 'CUDA_VISIBLE_DEVICES',
+  // but for distribute scenario, this rank_id come from _get_global_rank() in python
+  int32_t rank_id_;
+#endif
 };
 }  // namespace dataset
 }  // namespace mindspore

@@ -43,7 +43,7 @@ class GatherV2PInfo : public OperatorInfo {
   Status Init(const StrategyPtr &strategy) override;
   Status InitForCostModel(const StrategyPtr &strategy) override;
 
-  Status GenerateStrategies(int32_t stage_id) override;
+  Status GenerateStrategies(int64_t stage_id) override;
   Status SetCostUnderStrategy(const StrategyPtr &strategy) override;
   ReplaceGraphPtr replace_graph(const CNodePtr &cnode) override;
   std::shared_ptr<Strategys> GenerateBatchStrategies() override;
@@ -57,6 +57,8 @@ class GatherV2PInfo : public OperatorInfo {
   Status InferTensorInfo() override;
   Status InferDevMatrixShape() override;
   Status InferTensorMap() override;
+  void InferInputsTensorMap();
+  void InferOutputsTensorMap();
   Status GetAttrs() override;
 
   Status ComputeReplaceGraph(const CNodePtr &cnode);
@@ -68,7 +70,7 @@ class GatherV2PInfo : public OperatorInfo {
   Status InferOffset();
   Status InferGroup();
 
-  int32_t axis_;
+  int64_t axis_;
   std::string target_ = DEVICE;
   int64_t bias_;
   int64_t index_offset_;
@@ -77,6 +79,8 @@ class GatherV2PInfo : public OperatorInfo {
   Shape out_dev_matrix_shape_;
   Group group_;
   bool manual_split_ = false;
+  bool dynamic_shape_indices_ = false;
+  bool axis_split_forward_allreduce_ = false;  // when axis is split, use reducescatter as default in forward
   std::vector<int64_t> param_split_shapes_;
   std::vector<int64_t> index_offsets_;
 };

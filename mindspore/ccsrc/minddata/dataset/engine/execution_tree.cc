@@ -16,6 +16,11 @@
 #include "minddata/dataset/engine/execution_tree.h"
 #include <iostream>
 #include <string>
+#include <utility>
+#include <limits>
+#if defined(NUMA_ENABLED) && (defined(ENABLE_GPUQUE) || defined(ENABLE_TDTQUE))
+#include <numa.h>
+#endif
 #include "minddata/dataset/engine/datasetops/dataset_op.h"
 #include "minddata/dataset/engine/datasetops/shuffle_op.h"
 #include "minddata/dataset/engine/datasetops/device_queue_op.h"
@@ -25,22 +30,26 @@
 #ifndef ENABLE_ANDROID
 #include "minddata/dataset/engine/opt/pre/cache_transform_pass.h"
 #include "minddata/dataset/engine/opt/post/repeat_pass.h"
-#endif
 #include "minddata/dataset/engine/opt/pre/cache_error_pass.h"
-#include "minddata/dataset/engine/opt/pre/epoch_injection_pass.h"
 #include "mindspore/ccsrc/minddata/dataset/engine/opt/optional/tensor_op_fusion_pass.h"
+#endif
+#include "minddata/dataset/engine/opt/pre/epoch_injection_pass.h"
 #include "minddata/dataset/engine/perf/profiling.h"
 #include "minddata/dataset/engine/perf/monitor.h"
 
 namespace mindspore {
 namespace dataset {
 // Constructor
-ExecutionTree::ExecutionTree() : id_count_(0) {
+ExecutionTree::ExecutionTree() : id_count_(0), pre_pass_override_(nullptr) {
   tg_ = std::make_unique<TaskGroup>();
   tree_state_ = kDeTStateInit;
   prepare_flags_ = kDePrepNone;
   profiling_manager_ = std::make_unique<ProfilingManager>(this);
   optimize_ = common::GetEnv("OPTIMIZE") == "true" ? true : false;
+#if defined(NUMA_ENABLED) && (defined(ENABLE_GPUQUE) || defined(ENABLE_TDTQUE))
+  std::shared_ptr<ConfigManager> cfg = GlobalContext::config_manager();
+  rank_id_ = cfg->rank_id();
+#endif
 }
 
 // Destructor
@@ -133,6 +142,44 @@ void ExecutionTree::PrintNode(std::ostream &out, const std::shared_ptr<DatasetOp
 
 // Start the execution of the tree
 Status ExecutionTree::Launch() {
+  // opencv limit too many threads
+#ifndef ENABLE_ANDROID
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__APPLE__)
+#if defined(NUMA_ENABLED) && (defined(ENABLE_GPUQUE) || defined(ENABLE_TDTQUE))
+  // Here we do numa bind for performance optimization, as our test result,
+  // if we do numa bind when get_dataset_size launch a tree, we'll get a
+  // better performance than only we do numa bind at the time _To_Device
+  // launch a tree. Our numa bind work is a process level bind, bind with
+  // both cpu and memory and we choose numa_node with a polling logic:
+  // numa_bind_id = rank_id_ % (numa_max_node() + 1)
+  // Now we only test pass in GPU scenario, we've not tested D scenario,
+  // without enough test we don't suggest numa feature open in D scenario
+  int numa_node_max_id = numa_max_node();
+  if (numa_node_max_id < 0) {
+    RETURN_STATUS_UNEXPECTED("Get numa max node failed.");
+  }
+  if (rank_id_ >= 0) {
+    uint32_t numa_bind_id = static_cast<uint32_t>(rank_id_ % (numa_node_max_id + 1));
+    auto bm = numa_allocate_nodemask();
+    numa_bitmask_clearall(bm);
+    numa_bitmask_setbit(bm, numa_bind_id);
+    numa_bind(bm);
+    numa_bitmask_free(bm);
+  } else {
+    MS_LOG(INFO) << "Numa bind feature doesn't work now.";
+  }
+#endif
+  int32_t thread_num = get_nprocs();
+  if (thread_num == 0) {
+    std::string err_msg = "Invalid thread number.";
+    RETURN_STATUS_UNEXPECTED(err_msg);
+  }
+  if (thread_num > 8)
+    cv::setNumThreads(8);
+  else
+    cv::setNumThreads(thread_num);
+#endif
+#endif
   // Tree must be built and prepared before it can be launched!
   if (tree_state_ != kDeTStateReady) {
     std::string err_msg =
@@ -140,8 +187,6 @@ Status ExecutionTree::Launch() {
       " Expected state: " + std::to_string(static_cast<int>(kDeTStateReady));
     RETURN_STATUS_UNEXPECTED(err_msg);
   }
-  std::ostringstream ss;
-  ss << *this;
 
   // Profiling infrastructures need to be initialized before Op launching
   if (profiling_manager_->IsProfilingEnable()) {
@@ -151,6 +196,8 @@ Status ExecutionTree::Launch() {
     RETURN_IF_NOT_OK(profiling_manager_->LaunchMonitor());
   }
 
+  std::ostringstream ss;
+  ss << *this;
   MS_LOG(DEBUG) << "Printing the tree before launch tasks:\n" << ss.str();
   for (auto itr = this->begin(); itr != this->end(); ++itr) {
     // An inlined operator is one that has an output connector size of 0, and it does not
@@ -159,7 +206,7 @@ Status ExecutionTree::Launch() {
     // the launching tree/user thread.  Do not exec any thread for an inlined op.
     itr->state_ = DatasetOp::OpState::kDeOpRunning;
     if (!itr->inlined()) {
-      RETURN_IF_NOT_OK(tg_->CreateAsyncTask("Op launched, OperatorId:" + std::to_string(itr->id()), std::ref(*itr)));
+      RETURN_IF_NOT_OK(tg_->CreateAsyncTask(itr->NameWithID(), std::ref(*itr)));
       // Set the state of the Operator as running. This only matters in Leaf ops, CacheOp and TakeOp
     }
   }
@@ -188,10 +235,19 @@ ExecutionTree::Iterator::Iterator(const std::shared_ptr<DatasetOp> &root) : ind_
 
 // Given the number of workers, launches the worker entry function for each. Essentially a
 // wrapper for the TaskGroup handling that is stored inside the execution tree.
-Status ExecutionTree::LaunchWorkers(int32_t num_workers, std::function<Status(uint32_t)> func) {
+Status ExecutionTree::LaunchWorkers(int32_t num_workers, std::function<Status(uint32_t)> func, std::string name) {
+  int32_t num_cpu_threads = GlobalContext::Instance()->config_manager()->num_cpu_threads();
+  // this performs check that num_workers is positive and not unreasonably large which could happen
+  // for example, un-initialized variable. uint16 max is 65536 which is large enough to cover everything
+  CHECK_FAIL_RETURN_UNEXPECTED(num_workers > 0 && num_workers < std::numeric_limits<uint16_t>::max(),
+                               name + "'s num_worker=" + std::to_string(num_workers) + ", is negative or too large.");
   // Launch the workers
+  if (num_workers > num_cpu_threads) {
+    MS_LOG(WARNING) << name + " is launched with " << std::to_string(num_workers) << " worker threads which exceeds "
+                    << std::to_string(num_cpu_threads) << ", the maximum number of threads on this CPU.";
+  }
   for (int32_t i = 0; i < num_workers; ++i) {
-    RETURN_IF_NOT_OK(tg_->CreateAsyncTask("Parallel Op Worker", std::bind(func, i)));
+    RETURN_IF_NOT_OK(tg_->CreateAsyncTask(name, std::bind(func, i)));
   }
   return Status::OK();
 }
@@ -199,7 +255,7 @@ Status ExecutionTree::LaunchWorkers(int32_t num_workers, std::function<Status(ui
 // The driver of the prepare phase of the execution tree.
 // Prepare phase consists of three sub phases
 //
-// 1. PrepareTreePreAction()
+// 1. PreAction()
 //    Compulsory transformation/action pre optimization.
 //    For example, CacheOp Insertion
 //
@@ -207,41 +263,55 @@ Status ExecutionTree::LaunchWorkers(int32_t num_workers, std::function<Status(ui
 //    Optimization transformation/action, optional
 //    For example, MapOp Fusion
 //
-// 3. PrepareTreePostAction()
+// 3. PostAction()
 //    Compulsory transformation/action post optimization.
 //    For example, repeatOp inlining
 //
-// @return Status - The error code return
-Status ExecutionTree::Prepare(int32_t num_epochs) {
+// @return Status The status code returned
+Status ExecutionTree::Prepare(int32_t num_epochs, bool partial) {
   num_epochs_ = num_epochs;
+  partially_prepare_ = partial;
 
   // Pre optimization compulsory transformation
-  RETURN_IF_NOT_OK(this->PrepareTreePreAction());
+  RETURN_IF_NOT_OK(this->PreAction());
 
   // If optional optimizations are enabled
   if (optimize_) {
     RETURN_IF_NOT_OK(this->Optimize());
   }
-
   // Post optimization compulsory transformation
-  RETURN_IF_NOT_OK(this->PrepareTreePostAction());
+  RETURN_IF_NOT_OK(this->PostAction());
+
+  // The tree is ready to be prepared.
+  tree_state_ = kDeTStatePrepare;
 
   // Existing transformation implementation, will be removed later
   RETURN_IF_NOT_OK(this->PrepareDeprecated());
   return Status::OK();
 }
 
-Status ExecutionTree::PrepareTreePreAction() {
+Status ExecutionTree::PreAction() {
   bool modified = false;
   std::vector<std::unique_ptr<Pass>> pre_actions;
   // Construct pre actions
-  MS_LOG(INFO) << "Running pre pass loops.";
-  pre_actions.push_back(std::make_unique<CacheErrorPass>());
-  pre_actions.push_back(std::make_unique<EpochInjectionPass>());
-  pre_actions.push_back(std::make_unique<RemovalPass>());
+  if (!partially_prepare_) {
 #ifndef ENABLE_ANDROID
-  pre_actions.push_back(std::make_unique<CacheTransformPass>());
+    pre_actions.push_back(std::make_unique<CacheErrorPass>());
 #endif
+    pre_actions.push_back(std::make_unique<EpochInjectionPass>());
+    pre_actions.push_back(std::make_unique<RemovalPass>());
+  }
+
+  // this offers a way to override the preset optimization pass with customized ones
+  // this is used when certain nodes are removed for tree getters
+  if (pre_pass_override_) {
+    MS_LOG(INFO) << "Default pre optimization passes is being overridden,"
+                 << " number of passes before the override:" << pre_actions.size() << ".";
+    pre_actions = pre_pass_override_(std::move(pre_actions));
+  }
+
+  MS_LOG(INFO) << "Running " << pre_actions.size() << " pre pass loops.";
+
   // Apply pre action passes
   for (auto &pass : pre_actions) {
     RETURN_IF_NOT_OK(pass->Run(this, &modified));
@@ -250,15 +320,17 @@ Status ExecutionTree::PrepareTreePreAction() {
   return Status::OK();
 }
 
-Status ExecutionTree::PrepareTreePostAction() {
-  // The tree is ready to be prepared.
-  tree_state_ = kDeTStatePrepare;
-
+Status ExecutionTree::PostAction() {
   bool modified = false;
-  std::vector<std::unique_ptr<Pass>> post_actions;
+  OptPass post_actions;
   // Construct pre actions
   MS_LOG(INFO) << "Running post pass loops.";
 #ifndef ENABLE_ANDROID
+  // Calling CacheErrorPass again. This is a temporary fix until the TensorOperation is properly done in Pybind.
+  // The IR version cannot detect an invalid case of a cache on Map with random tensor operation from Python API.
+  // This is because Python API binding to TensorOperation is still in progress.
+  post_actions.push_back(std::make_unique<CacheErrorPass>());
+  post_actions.push_back(std::make_unique<CacheTransformPass>());
   post_actions.push_back(std::make_unique<RepeatPass>());
 #endif
 
@@ -273,8 +345,10 @@ Status ExecutionTree::PrepareTreePostAction() {
 
 Status ExecutionTree::Optimize() {
   // Vector of optimizations, currently only 1, add more as necessary
-  std::vector<std::unique_ptr<NodePass>> optimizations;
+  OptPass optimizations;
+#ifndef ENABLE_ANDROID
   optimizations.push_back(std::make_unique<TensorOpFusionPass>());
+#endif
   // vector of flags for each optimization
   std::vector<bool> modified(optimizations.size(), false);
   for (auto i = 0; i < optimizations.size(); i++) {
@@ -312,9 +386,6 @@ Status ExecutionTree::PrepareDeprecated() {
 // Recursive function used during prepare phase to visit a node and drive any pre- and post-
 // node actions during a tree walk.
 Status ExecutionTree::PrepareNode(const std::shared_ptr<DatasetOp> &dataset_op) {
-  // execute PreAction
-  RETURN_IF_NOT_OK(dataset_op->PrepareNodePreAction());
-
   // Before going down into children, make any prepare flags updates based on this operator.
   uint32_t op_prep_flags = dataset_op->PrepareFlags();
   BitSet(&prepare_flags_, op_prep_flags);

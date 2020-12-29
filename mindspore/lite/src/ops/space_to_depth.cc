@@ -17,6 +17,10 @@
 #include "src/ops/space_to_depth.h"
 #include "src/common/common.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -43,7 +47,13 @@ int SpaceToDepth::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbu
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *SpaceToDepthCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<SpaceToDepth>(primitive);
+}
+Registry SpaceToDepthRegistry(schema::PrimitiveType_SpaceToDepth, SpaceToDepthCreator);
 #endif
+
 namespace {
 constexpr int kSpaceToDepthOutputNum = 1;
 constexpr int kSpaceToDepthInputNum = 1;
@@ -53,37 +63,45 @@ int SpaceToDepth::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lit
   MS_ASSERT(this->primitive_ != nullptr);
   if (outputs.size() != kSpaceToDepthOutputNum || inputs.size() != kSpaceToDepthInputNum) {
     MS_LOG(ERROR) << "Invalid output/input size! output size: " << outputs.size() << ",input size: " << inputs.size();
-    return 1;
+    return RET_ERROR;
   }
 
   auto input = inputs.at(0);
-  if (input->GetFormat() != schema::Format::Format_NHWC) {
+  if (input->format() != schema::Format::Format_NHWC) {
     MS_LOG(ERROR) << "space_to_depth only support NHWC now!";
-    return 1;
+    return RET_ERROR;
   }
-  outputs[0]->SetFormat(input->GetFormat());
-  outputs[0]->set_data_type(input->data_type());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  outputs.at(0)->set_format(input->format());
+  outputs.at(0)->set_data_type(input->data_type());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   auto input_shape = input->shape();
   if (input_shape.size() != kDimension_4d) {
     MS_LOG(ERROR) << "input shape dimension size should == " << kDimension_4d;
-    return 1;
+    return RET_ERROR;
   }
 
   int32_t block_size = GetBlockSize();
-  if (input_shape[NHWC_H] % block_size != 0 || input_shape[NHWC_H] == 0 || input_shape[NHWC_W] % block_size != 0 ||
-      input_shape[NHWC_W] == 0) {
+  if (block_size == 0) {
+    MS_LOG(ERROR) << "block_size is zero";
+    return RET_ERROR;
+  }
+  if (input_shape.at(NHWC_H) % block_size != 0 || input_shape.at(NHWC_H) == 0 ||
+      input_shape.at(NHWC_W) % block_size != 0 || input_shape.at(NHWC_W) == 0) {
     MS_LOG(ERROR) << "input dimension h or w size error!";
-    return 1;
+    return RET_ERROR;
   }
   std::vector<int32_t> output_shape(input_shape.size());
-  output_shape[NHWC_N] = input_shape[NHWC_N];
-  output_shape[NHWC_H] = input_shape[NHWC_H] / block_size;
-  output_shape[NHWC_W] = input_shape[NHWC_W] / block_size;
-  output_shape[NHWC_C] = input_shape[NHWC_C] * (block_size * block_size);
-  outputs[0]->set_shape(output_shape);
+  output_shape.at(NHWC_N) = input_shape.at(NHWC_N);
+  output_shape.at(NHWC_H) = input_shape.at(NHWC_H) / block_size;
+  output_shape.at(NHWC_W) = input_shape.at(NHWC_W) / block_size;
+  if (block_size * block_size > std::numeric_limits<int32_t>::max() / input_shape.at(NHWC_C)) {
+    MS_LOG(ERROR) << "The value of block_size * block_size is too big";
+    return RET_ERROR;
+  }
+  output_shape.at(NHWC_C) = input_shape.at(NHWC_C) * (block_size * block_size);
+  outputs.at(0)->set_shape(output_shape);
   return RET_OK;
 }
 }  // namespace lite

@@ -235,14 +235,6 @@ std::string GetMaketupleNodeTarget(const CNodePtr &cnode) {
   std::string default_target = context_ptr->get_param<std::string>(MS_CTX_DEVICE_TARGET);
   return default_target;
 }
-
-std::string GetTupleGetItemTarget(const CNodePtr &cnode, const PrimitivePtr &primitive) {
-  MS_EXCEPTION_IF_NULL(cnode);
-  MS_EXCEPTION_IF_NULL(primitive);
-  auto input_target = GetCNodeTarget(cnode->input(1));
-  primitive->set_attr("primitive_target", MakeValue(input_target));
-  return input_target;
-}
 }  // namespace
 
 std::string GetCNodeTarget(const AnfNodePtr &node) {
@@ -289,12 +281,32 @@ std::string GetCNodeTarget(const AnfNodePtr &node) {
     }
     return target;
   }
-  if (IsPrimitiveCNode(node, prim::kPrimMakeTuple)) {
+  if (IsPrimitiveCNode(node, prim::kPrimDepend)) {
+    auto &inputs = cnode->inputs();
+    if (inputs.size() == 3 && !IsPrimitiveCNode(inputs[1], prim::kPrimMakeTuple)) {
+      return GetCNodeTarget(inputs[1]);
+    }
+  } else if (IsPrimitiveCNode(node, prim::kPrimMakeTuple)) {
     return GetMaketupleNodeTarget(cnode);
-  }
-  if (IsPrimitiveCNode(node, prim::kPrimTupleGetItem)) {
-    return GetTupleGetItemTarget(cnode, primitive);
+  } else if (IsPrimitiveCNode(node, prim::kPrimTupleGetItem)) {
+    return GetCNodeTarget(cnode->input(1));
   }
   return default_target;
+}
+
+bool ContainMultiTarget(const std::vector<AnfNodePtr> &nodes) {
+  auto context_ptr = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(context_ptr);
+  std::string last_target = context_ptr->get_param<std::string>(MS_CTX_DEVICE_TARGET);
+  for (auto &node : nodes) {
+    if (node->isa<CNode>()) {
+      std::string cur_target = GetCNodeTarget(node);
+      if (last_target != cur_target) {
+        return true;
+      }
+      last_target = cur_target;
+    }
+  }
+  return false;
 }
 }  // namespace mindspore

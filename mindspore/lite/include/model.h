@@ -20,7 +20,7 @@
 
 namespace mindspore::lite {
 class PrimitiveC;
-struct Model {
+struct MS_API Model {
   struct Node {
     String name_;
     NodeType node_type_;
@@ -29,13 +29,20 @@ struct Model {
     Uint32Vector output_indices_;
   };
   using NodePtrVector = std::vector<Node *>;
+  struct SubGraph {
+    String name_;
+    Uint32Vector input_indices_;
+    Uint32Vector output_indices_;
+    Uint32Vector node_indices_;
+    Uint32Vector tensor_indices_;
+  };
+  using SubGraphPtrVector = std::vector<SubGraph *>;
   String name_;
   String version_;
   TensorPtrVector all_tensors_;
-  Uint32Vector input_indices_;
-  Uint32Vector output_indices_;
-  NodePtrVector nodes_;
+  NodePtrVector all_nodes_;
   char *buf;
+  SubGraphPtrVector sub_graphs_;
 
   /// \brief Static method to create a Model pointer.
   ///
@@ -46,13 +53,13 @@ struct Model {
   static Model *Import(const char *model_buf, size_t size);
 
   /// \brief Free meta graph temporary buffer
-  virtual void Free();
+  virtual void Free() = 0;
 
   /// \brief Free all temporay buffer.EG: nodes in the model.
-  void Destroy();
+  virtual void Destroy() = 0;
 
   /// \brief Model destruct, free all memory
-  virtual ~Model();
+  virtual ~Model() = default;
 };
 }  // namespace mindspore::lite
 

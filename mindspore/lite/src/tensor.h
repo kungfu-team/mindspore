@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_LITE_SRC_IR_TENSOR_H_
-#define MINDSPORE_LITE_SRC_IR_TENSOR_H_
+#ifndef MINDSPORE_LITE_SRC_TENSOR_H_
+#define MINDSPORE_LITE_SRC_TENSOR_H_
 
 #include <memory>
 #include <vector>
@@ -33,32 +33,41 @@ namespace lite {
 struct QuantArg {
   double scale;
   int32_t zeroPoint;
-  double var_corr{1};
-  double mean_corr{0};
+  float var_corr{1};
+  float mean_corr{0};
+  bool inited;
+  std::vector<float> clusters{};
+  int bitNum;
 };
 
 class Tensor : public mindspore::tensor::MSTensor {
  public:
   enum Category {
-    CONST,  // weight tensor
-    VAR     // activation tensor
+    CONST_TENSOR,  // weight tensor
+    CONST_SCALAR,  // weight scalar
+    VAR,           // activation tensor
+    GRAPH_INPUT,
   };
   Tensor() = default;
 
-  Tensor(const TypeId data_type, const std::vector<int> &shape,
-         const schema::Format &format = schema::Format::Format_NHWC, Category category = VAR);
+  Tensor(TypeId data_type, std::vector<int> shape, const schema::Format &format = schema::Format::Format_NHWC,
+         Category category = VAR);
 
   Tensor(const Tensor &tensor);
 
-  virtual ~Tensor();
+  ~Tensor() override;
 
   int CopyTensorData(const Tensor &srcTensor);
 
   int CopyTensor(const Tensor &srcTensor, bool copyData = false);
 
-  virtual Tensor &operator=(const Tensor &tensor);
+  Tensor &operator=(const Tensor &tensor);
 
   virtual bool operator==(const Tensor &tensor);
+
+  void set_tensor_name(std::string name) { tensor_name_ = name; }
+
+  std::string tensor_name() const { return tensor_name_; }
 
   TypeId data_type() const override { return data_type_; }
 
@@ -68,19 +77,9 @@ class Tensor : public mindspore::tensor::MSTensor {
 
   void set_shape(const std::vector<int> &shape) { shape_ = shape; }
 
-  int DimensionSize(size_t index) const override {
-    int dim_size = -1;
-    if (index < shape_.size()) {
-      dim_size = shape_[index];
-    } else {
-      MS_LOG(ERROR) << "Dimension index is wrong: " << index;
-    }
-    return dim_size;
-  }
+  int DimensionSize(size_t index) const override;
 
-  int ElementsNum() const override {
-    return std::accumulate(shape_.begin(), shape_.end(), 1LL, std::multiplies<int>());
-  }
+  int ElementsNum() const override;
 
   int32_t Batch() const;
 
@@ -92,128 +91,59 @@ class Tensor : public mindspore::tensor::MSTensor {
 
   int32_t ElementsC4Num() const;
 
-  size_t Size() const override {
-    size_t size = 0;
-    switch (this->data_type_) {
-      case kNumberTypeFloat64:
-        size = sizeof(double);
-        break;
-      case kNumberTypeFloat:
-      case kNumberTypeFloat32:
-        size = sizeof(float);
-        break;
-      case kNumberTypeInt8:
-        size = sizeof(int8_t);
-        break;
-      case kNumberTypeUInt8:
-        size = sizeof(uint8_t);
-        break;
-      case kNumberTypeFloat16:
-        size = sizeof(int16_t);
-        break;
-      case kNumberTypeInt16:
-        size = sizeof(int16_t);
-        break;
-      case kNumberTypeInt32:
-        size = sizeof(int32_t);
-        break;
-      case kNumberTypeInt64:
-        size = sizeof(int64_t);
-        break;
-      case kNumberTypeUInt16:
-        size = sizeof(uint16_t);
-        break;
-      case kNumberTypeUInt32:
-        size = sizeof(uint32_t);
-        break;
-      case kNumberTypeUInt64:
-        size = sizeof(uint64_t);
-        break;
-      case kNumberTypeBool:
-        size = sizeof(bool);
-        break;
-      case kObjectTypeString:
-        size = sizeof(char);
-        break;
-      default:
-        MS_LOG(ERROR) << "Not support the type: " << this->data_type_;
-        return 0;
-    }
-    size *= (format_ == schema::Format::Format_NC4HW4 || format_ == schema::Format::Format_NHWC4) ? ElementsC4Num()
-                                                                                                  : ElementsNum();
-
-    return size;
-  }
+  size_t Size() const override;
 
   void set_allocator(mindspore::lite::Allocator *allocator) { allocator_ = allocator; }
 
-  int MallocData(mindspore::lite::Allocator *allocator = nullptr) {
-    if (nullptr != this->data_) {
-      return 0;
-    }
-    if (allocator != nullptr) {
-      allocator_ = allocator;
-    }
-    if (allocator_ == nullptr) {
-      this->data_ = malloc(this->Size());
-    } else {
-      this->data_ = allocator_->Malloc(this->Size());
-    }
-    if (nullptr == this->data_) {
-      MS_LOG(ERROR) << "Malloc tensor data failed, size=" << this->Size();
-      return -1;
-    }
+  mindspore::lite::Allocator *allocator() const { return this->allocator_; }
 
-    return 0;
-  }
+  virtual int MallocData(const mindspore::lite::Allocator *allocator = nullptr);
 
-  int FreeData() {
-    if (nullptr == this->data_) {
-      return 0;
-    }
-    if (nullptr == allocator_) {
-      free(this->data_);
-      this->data_ = nullptr;
-    } else {
-      allocator_->Free(this->data_);
-      this->data_ = nullptr;
-    }
+  virtual int FreeData();
 
-    return 0;
-  }
+  void *MutableData() override;
 
-  void *MutableData() override {
-    if (this->data_ == nullptr) {
-      auto ret = this->MallocData();
-      if (ret != 0) {
-        MS_LOG(WARNING) << "Malloc data failed";
-      }
-    }
-    Prepare();
-    return this->data_;
-  }
+  virtual void *data_c() const { return data_; }
 
-  void *data_c() const { return data_; }
+  virtual void set_data(void *data) { this->data_ = data; }
 
-  void SetData(void *data) { this->data_ = data; }
+  Category category() const { return this->category_; }
 
-  Category category() { return this->category_; }
+  void set_category(Category category) { this->category_ = category; }
 
-  void SetFormat(schema::Format format) { this->format_ = format; }
+  void set_format(schema::Format format) { this->format_ = format; }
 
-  schema::Format GetFormat() { return this->format_; }
+  schema::Format format() const { return this->format_; }
 
-  size_t RefCount() { return this->refCount; }
+  size_t ref_count() const { return this->ref_count_; }
 
-  void SetRefCount(size_t refCount) { this->refCount = refCount; }
+  size_t init_ref_count() const { return this->init_ref_count_; }
 
-  void decRefCount() { this->refCount--; }
+  void set_ref_count(size_t ref_count) { this->ref_count_ = ref_count; }
+
+  void set_init_ref_count(size_t ref_count) { this->init_ref_count_ = ref_count; }
+
+  void ResetRefCount() { this->ref_count_ = this->init_ref_count_; }
+
+  void DecRefCount() { this->ref_count_--; }
 
   std::string ToString() const;
 
   void AddQuantParam(const QuantArg &quant_arg);
 
-  std::vector<QuantArg> GetQuantParams() const;
+  std::vector<QuantArg> quant_params() const;
+
+  std::vector<float> quant_clusters() const;
+
+  void set_quant_clusters(const std::vector<float> &clusters);
+
+  virtual bool IsConst() const {
+    return (this->category_ == CONST_TENSOR || this->category_ == CONST_SCALAR) && this->data_ != nullptr;
+  }
+
+  bool IsScalar() const { return this->category_ == CONST_SCALAR && this->data_ != nullptr; }
+
+  bool IsGraphInput() const { return this->category_ == GRAPH_INPUT; }
 
   void Prepare() {
     if (allocator_ != nullptr) {
@@ -221,27 +151,92 @@ class Tensor : public mindspore::tensor::MSTensor {
     }
   }
 
+ private:
+  template <typename T>
+  std::string DataToString(void *data, size_t data_number) const {
+    if (data == nullptr) {
+      return "Data of tensor is nullptr";
+    }
+    std::ostringstream oss;
+    auto casted_data = static_cast<T *>(data);
+    for (size_t i = 0; i < 40 && i < data_number; i++) {
+      oss << " " << casted_data[i];
+    }
+    return oss.str();
+  }
+
  protected:
+  std::string tensor_name_;
   void *data_ = nullptr;
   void *device_data_ = nullptr;
   TypeId data_type_;
   std::vector<int> shape_;
   schema::Format format_;
   Category category_;
-  size_t refCount = 0;
+  size_t ref_count_ = 0;
+  size_t init_ref_count_ = 0;
   std::vector<QuantArg> quant_params_;
+  std::vector<float> quant_clusters_;
   mindspore::lite::Allocator *allocator_ = nullptr;
 };
 
+inline size_t DataTypeSize(const TypeId type) {
+  switch (type) {
+    case kNumberTypeFloat64:
+      return sizeof(double);
+    case kNumberTypeFloat:
+    case kNumberTypeFloat32:
+      return sizeof(float);
+    case kNumberTypeInt8:
+      return sizeof(int8_t);
+    case kNumberTypeUInt8:
+      return sizeof(uint8_t);
+    case kNumberTypeFloat16:
+    case kNumberTypeInt16:
+      return sizeof(int16_t);
+    case kNumberTypeInt32:
+      return sizeof(int32_t);
+    case kNumberTypeInt64:
+      return sizeof(int64_t);
+    case kNumberTypeUInt16:
+      return sizeof(uint16_t);
+    case kNumberTypeUInt32:
+      return sizeof(uint32_t);
+    case kNumberTypeUInt64:
+      return sizeof(uint64_t);
+    case kNumberTypeBool:
+      return sizeof(bool);
+    case kObjectTypeString:
+      return sizeof(char);
+    case kObjectTypeTensorType:
+      return 0;
+    default:
+      MS_LOG(ERROR) << "Not support the type: " << type;
+      return 0;
+  }
+}
+
+inline Tensor::Category TensorCategory(const schema::NodeType node_type, const size_t shape_num, const TypeId data_type,
+                                       const size_t data_size) {
+  return (node_type == schema::NodeType::NodeType_ValueNode)
+           ? (shape_num == 0 && data_size == DataTypeSize(data_type) ? Tensor::Category::CONST_SCALAR
+                                                                     : Tensor::Category::CONST_TENSOR)
+           : Tensor::Category::VAR;
+}
+
 inline Tensor::Category TensorCategory(const schema::Tensor *tensor) {
-  return (tensor->nodeType() == schema::NodeType::NodeType_ValueNode) ? Tensor::Category::CONST : Tensor::Category::VAR;
+  if (tensor == nullptr) {
+    MS_LOG(ERROR) << "tensor is nullptr";
+    return Tensor::VAR;
+  }
+  auto shape_num = tensor->dims() == nullptr ? 0 : tensor->dims()->size();
+  auto data_size = tensor->data() == nullptr ? 0 : tensor->data()->size();
+  return TensorCategory(tensor->nodeType(), shape_num, TypeId(tensor->dataType()), data_size);
 }
-inline Tensor::Category TensorCategory(const schema::NodeType type) {
-  return (type == schema::NodeType::NodeType_ValueNode) ? Tensor::Category::CONST : Tensor::Category::VAR;
-}
+
 std::vector<tensor::MSTensor *> TensorVectorCast(const std::vector<Tensor *> &src);
 }  // namespace lite
 }  // namespace mindspore
 
 using TensorPtr = std::shared_ptr<mindspore::lite::Tensor>;
-#endif  // MINDSPORE_LITE_SRC_IR_TENSOR_H_
+#endif  // MINDSPORE_LITE_SRC_TENSOR_H_

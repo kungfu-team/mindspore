@@ -35,14 +35,12 @@ class KernelRegistry {
   virtual ~KernelRegistry();
 
   static KernelRegistry *GetInstance();
-  int Init();
-  void FreeCreatorArray();
+  static int Init();
   virtual kernel::KernelCreator GetCreator(const kernel::KernelKey &desc);
   const kernel::KernelCreator *GetCreatorArrays();
-  int GetCreatorFuncIndex(const kernel::KernelKey desc);
-  void RegKernel(const kernel::KernelKey desc, kernel::KernelCreator creator);
-  void RegKernel(const kernel::KERNEL_ARCH arch, const TypeId data_type, const schema::PrimitiveType type,
-                 kernel::KernelCreator creator);
+  int GetCreatorFuncIndex(kernel::KernelKey desc);
+  void RegKernel(kernel::KernelKey desc, kernel::KernelCreator creator);
+  void RegKernel(kernel::KERNEL_ARCH arch, TypeId data_type, schema::PrimitiveType type, kernel::KernelCreator creator);
   bool Merge(const std::unordered_map<kernel::KernelKey, kernel::KernelCreator> &newCreators);
   kernel::LiteKernel *GetKernel(const std::vector<Tensor *> &in_tensors, const std::vector<Tensor *> &out_tensors,
                                 const PrimitiveC *primitive, const InnerContext *ctx, const kernel::KernelKey &key);
@@ -52,8 +50,10 @@ class KernelRegistry {
   static const int data_type_length_{kNumberTypeEnd - kNumberTypeBegin + 1};
   static const int op_type_length_{PrimitiveType_MAX - PrimitiveType_MIN + 1};
   static const int array_size_{device_type_length_ * data_type_length_ * op_type_length_};
-  kernel::KernelCreator creator_arrays_[array_size_] = {0};
-  std::vector<OpParameter *> op_parameters_;
+  kernel::KernelCreator *creator_arrays_ = nullptr;
+
+ private:
+  std::mutex lock_;
 };
 
 class KernelRegistrar {
@@ -61,6 +61,7 @@ class KernelRegistrar {
   KernelRegistrar(const kernel::KernelKey &desc, kernel::KernelCreator creator) {
     KernelRegistry::GetInstance()->RegKernel(desc, creator);
   }
+  ~KernelRegistrar() = default;
 
   KernelRegistrar(const kernel::KERNEL_ARCH arch, const TypeId data_type, const schema::PrimitiveType op_type,
                   kernel::KernelCreator creator) {

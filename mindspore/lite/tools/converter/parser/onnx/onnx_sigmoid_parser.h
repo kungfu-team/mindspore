@@ -25,8 +25,9 @@ namespace lite {
 class OnnxSigmoidParser : public OnnxNodeParser {
  public:
   OnnxSigmoidParser() : OnnxNodeParser("Sigmoid") {}
+  ~OnnxSigmoidParser() override = default;
 
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 }  // namespace lite
 }  // namespace mindspore

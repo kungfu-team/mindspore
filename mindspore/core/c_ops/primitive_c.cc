@@ -1,5 +1,5 @@
 /**
- * Copyright 2019-2020 Huawei Technologies Co., Ltd
+ * Copyright 2020 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,4 +31,13 @@ AbstractBasePtr PrimitiveC::Infer(const AbstractBasePtrList &abstract_list) {
   auto infer_function = iter->second.impl_;
   return infer_function(nullptr, shared_from_base<Primitive>(), abstract_list);
 }
+
+OpPrimCRegister &OpPrimCRegister::GetInstance() {
+  static OpPrimCRegister instance;
+  return instance;
+}
+
+std::map<std::string, OpPrimCDefineFunc> OpPrimCRegister::GetPrimCMap() { return op_primc_fns_; }
+void OpPrimCRegister::SetPrimCMap(const std::string &kname, const OpPrimCDefineFunc &fn) { op_primc_fns_[kname] = fn; }
+
 }  // namespace mindspore

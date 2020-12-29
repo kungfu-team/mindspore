@@ -25,6 +25,7 @@
 #include "frontend/parallel/auto_parallel/rec_core/rec_partition.h"
 #include "frontend/parallel/ops_info/operator_info.h"
 #include "frontend/parallel/strategy.h"
+#include "frontend/parallel/step_parallel.h"
 
 namespace mindspore {
 namespace parallel {
@@ -43,6 +44,14 @@ void GenerateStrategy(const std::shared_ptr<Graph> &graph, const std::vector<std
   GenerateEliminatedOperatorStrategyForward(graph, ops, input_tensor_names, index_list, no_stra_op_list);
   GenerateEliminatedOperatorStrategyBackward(ops, input_tensor_names, no_stra_op_list);
   GenerateRemainingOperatorStrategy(graph, ops, input_tensor_names, index_list, no_stra_op_list);
+
+  for (auto &op : ops) {
+    auto attrs = op->attrs();
+    if (StrategyFound(attrs)) {
+      StrategyPtr user_defined_stra = parallel::ExtractStrategy(attrs);
+      op->SetSelectedStrategyAndCost(user_defined_stra, op->selected_cost());
+    }
+  }
 }
 
 Strategys PrepareMatMul(const std::shared_ptr<Graph> &graph, const std::vector<std::shared_ptr<OperatorInfo>> &ops,
@@ -139,14 +148,14 @@ Strategys PrepareOneHot(const std::shared_ptr<Graph> &graph, const std::vector<s
                         const size_t iter_graph, const size_t iter_ops) {
   Strategys strategies = MakeRecSearchStrategy(graph, ops, iter_graph, iter_ops);
 
-  int32_t axis = -1;
+  int64_t axis = -1;
   auto iter = ops[iter_ops]->attrs().find(AXIS);
   if (iter != ops[iter_ops]->attrs().end()) {
     MS_EXCEPTION_IF_NULL(iter->second);
-    if (iter->second->isa<Int32Imm>()) {
-      axis = iter->second->cast<Int32ImmPtr>()->value();
+    if (iter->second->isa<Int64Imm>()) {
+      axis = iter->second->cast<Int64ImmPtr>()->value();
     } else {
-      MS_LOG(EXCEPTION) << ops[iter_ops]->name() << ": The value of axis is not int.";
+      MS_LOG(EXCEPTION) << ops[iter_ops]->name() << ": The value of axis is not int64_t.";
     }
   }
   if (axis == -1) {
@@ -165,12 +174,12 @@ Strategys PrepareOneHot(const std::shared_ptr<Graph> &graph, const std::vector<s
 Strategys PrepareGatherV2(const std::vector<std::shared_ptr<OperatorInfo>> &ops, const size_t iter_ops, Dimensions s) {
   Strategys strategies;
 
-  auto axis_input = GetValue<int>(ops[iter_ops]->input_value().at(2));
+  auto axis_input = GetValue<int64_t>(ops[iter_ops]->input_value().at(2));
   if (axis_input < 0) {
-    axis_input += SizeToInt(ops[iter_ops]->inputs_tensor_info()[0].shape().size());
+    axis_input += SizeToLong(ops[iter_ops]->inputs_tensor_info()[0].shape().size());
   }
-  int32_t axis = axis_input;
-  if (axis >= SizeToInt(s.size())) {
+  int64_t axis = axis_input;
+  if (axis >= SizeToLong(s.size())) {
     MS_LOG(EXCEPTION) << "Failure: GatherV2' axis out of range.";
   }
   s[axis] = 1;
@@ -187,9 +196,10 @@ Strategys PrepareGatherV2P(const std::vector<std::shared_ptr<OperatorInfo>> &ops
   for (size_t i = 0; i < index.size(); i++) {
     index[i] = i;
   }
-  std::sort(index.begin(), index.end(),
-            [&output_shape](const int &a, const int &b) { return (output_shape[a + 1] > output_shape[b + 1]); });
-  std::transform(std::begin(index), std::end(index), std::begin(index), [](int x) { return x + 1; });
+  std::sort(index.begin(), index.end(), [&output_shape](const int64_t &a, const int64_t &b) {
+    return (output_shape[a + 1] > output_shape[b + 1]);
+  });
+  std::transform(std::begin(index), std::end(index), std::begin(index), [](int64_t x) { return x + 1; });
   index.insert(index.begin(), 0);
 
   Dimensions strategie(output_shape.size(), 1);
@@ -206,12 +216,12 @@ Strategys PrepareGatherV2P(const std::vector<std::shared_ptr<OperatorInfo>> &ops
     }
   }
 
-  auto axis_input = GetValue<int>(ops[iter_ops]->input_value().at(2));
+  auto axis_input = GetValue<int64_t>(ops[iter_ops]->input_value().at(2));
   if (axis_input < 0) {
-    axis_input += SizeToInt(ops[iter_ops]->inputs_tensor_info()[0].shape().size());
+    axis_input += SizeToLong(ops[iter_ops]->inputs_tensor_info()[0].shape().size());
   }
-  int32_t axis = axis_input;
-  if (axis >= SizeToInt(s.size())) {
+  int64_t axis = axis_input;
+  if (axis >= SizeToLong(s.size())) {
     MS_LOG(EXCEPTION) << "Failure: GatherV2' axis out of range.";
   }
   if (axis == 0) {
@@ -250,9 +260,10 @@ Dimensions PrepareGatherV2POutputStrategy(const std::vector<std::shared_ptr<Oper
   for (size_t i = 0; i < index.size(); i++) {
     index[i] = i;
   }
-  std::sort(index.begin(), index.end(),
-            [&output_shape](const int &a, const int &b) { return (output_shape[a + 1] > output_shape[b + 1]); });
-  std::transform(std::begin(index), std::end(index), std::begin(index), [](int x) { return x + 1; });
+  std::sort(index.begin(), index.end(), [&output_shape](const int64_t &a, const int64_t &b) {
+    return (output_shape[a + 1] > output_shape[b + 1]);
+  });
+  std::transform(std::begin(index), std::end(index), std::begin(index), [](int64_t x) { return x + 1; });
   index.insert(index.begin(), 0);
 
   Dimensions strategie(output_shape.size(), 1);
@@ -274,27 +285,79 @@ Dimensions PrepareGatherV2POutputStrategy(const std::vector<std::shared_ptr<Oper
 
 Strategys PrepareL2Normalize(const std::vector<std::shared_ptr<OperatorInfo>> &ops, const size_t iter_ops,
                              Dimensions s) {
-  int32_t axis = 0;
+  int64_t axis = 0;
   auto iter = ops[iter_ops]->attrs().find(AXIS);
   if (iter != ops[iter_ops]->attrs().end()) {
     MS_EXCEPTION_IF_NULL(iter->second);
-    if (iter->second->isa<Int32Imm>()) {
-      axis = iter->second->cast<Int32ImmPtr>()->value();
+    if (iter->second->isa<Int64Imm>()) {
+      axis = iter->second->cast<Int64ImmPtr>()->value();
     } else {
-      MS_LOG(EXCEPTION) << ops[iter_ops]->name() << " : The value of axis is not int.";
+      MS_LOG(EXCEPTION) << ops[iter_ops]->name() << " : The value of axis is not int64_t.";
     }
   }
 
-  int32_t axis_index = axis;
+  int64_t axis_index = axis;
   if (axis < 0) {
     size_t input_dim = ops[iter_ops]->inputs_tensor_info()[0].shape().size();
-    axis_index = static_cast<int32_t>(input_dim) + axis;
+    axis_index = static_cast<int64_t>(input_dim) + axis;
   }
 
-  s[IntToSize(axis_index)] = 1;
+  s[LongToSize(axis_index)] = 1;
 
   Strategys strategies;
   strategies.push_back(s);
+  return strategies;
+}
+
+Strategys PrepareAxisRelatedStrategy(const std::shared_ptr<Graph> &graph,
+                                     const std::vector<std::shared_ptr<OperatorInfo>> &ops, const size_t iter_graph,
+                                     const size_t iter_ops) {
+  Strategys strategies = MakeRecSearchStrategy(graph, ops, iter_graph, iter_ops);
+  if (strategies.size() < 1) {
+    MS_LOG(EXCEPTION) << ops[iter_ops]->name() << ": get empty Strategy.";
+  }
+
+  std::vector<int64_t> axis_list;
+  string axis_name = AXIS;
+  int64_t default_axis = -1;
+  if (ops[iter_ops]->type() == LAYER_NORM) {
+    axis_name = "begin_norm_axis";
+    default_axis = 1;
+  }
+
+  auto iter = ops[iter_ops]->attrs().find(axis_name);
+  if (iter != ops[iter_ops]->attrs().end()) {
+    MS_EXCEPTION_IF_NULL(iter->second);
+    if (iter->second->isa<Int64Imm>()) {
+      axis_list.push_back(iter->second->cast<Int64ImmPtr>()->value());
+    } else if (iter->second->isa<ValueTuple>()) {
+      ValueTuplePtr value_tuple = iter->second->cast<ValueTuplePtr>();
+      if (value_tuple == nullptr) {
+        MS_LOG(EXCEPTION) << ops[iter_ops]->name() << ": The value_tuple is nullptr.";
+      }
+      std::vector<ValuePtr> value_vector = value_tuple->value();
+      (void)std::transform(value_vector.begin(), value_vector.end(), std::back_inserter(axis_list),
+                           [](const ValuePtr &value) { return static_cast<int64_t>(GetValue<int64_t>(value)); });
+    } else {
+      MS_LOG(EXCEPTION) << ops[iter_ops]->name() << ": The value of axis is not int64_t or tuple int64_t.";
+    }
+  } else {
+    axis_list.push_back(default_axis);
+  }
+
+  for (auto &axis : axis_list) {
+    if (axis < 0) {
+      int64_t input_dim = SizeToLong(ops[iter_ops]->inputs_tensor_info()[0].shape().size());
+      axis = input_dim + axis;
+    }
+    if (axis >= SizeToLong(strategies[0].size()) || axis < 0) {
+      MS_LOG(EXCEPTION) << ops[iter_ops]->name() << ": axis value is out of range.";
+    }
+    if (strategies[0][axis] != 1) {
+      strategies[0][axis] = 1;
+      MS_LOG(INFO) << ops[iter_ops]->name() << ": adjust strategy to 1 on axis " << axis;
+    }
+  }
   return strategies;
 }
 
@@ -306,6 +369,9 @@ Strategys MakeRecSearchStrategy(const std::shared_ptr<Graph> &graph,
   }
   if (iter_ops >= ops.size()) {
     MS_LOG(EXCEPTION) << "Failure: Operators' elements out of range.";
+  }
+  if (graph->nodes[iter_graph].apply.op_type == kRecUnsortedSegmentOp) {
+    return MakeDataParallelStrategy(graph, ops, iter_graph, iter_ops);
   }
 
   StrategyPtr origin_strategy = ops[iter_ops]->strategy();
@@ -320,6 +386,14 @@ Strategys MakeRecSearchStrategy(const std::shared_ptr<Graph> &graph,
     if (output_size == 4) {
       s.push_back(
         static_cast<int64_t>(1.0 / graph->nodes[iter_graph].apply.arguments[iter_op_inputs].tensor_str.str_n));
+      s.push_back(
+        static_cast<int64_t>(1.0 / graph->nodes[iter_graph].apply.arguments[iter_op_inputs].tensor_str.str_c));
+      s.push_back(
+        static_cast<int64_t>(1.0 / graph->nodes[iter_graph].apply.arguments[iter_op_inputs].tensor_str.str_h));
+      s.push_back(
+        static_cast<int64_t>(1.0 / graph->nodes[iter_graph].apply.arguments[iter_op_inputs].tensor_str.str_w));
+    } else if (output_size == 3) {
+      // Experimental support for 3D data.
       s.push_back(
         static_cast<int64_t>(1.0 / graph->nodes[iter_graph].apply.arguments[iter_op_inputs].tensor_str.str_c));
       s.push_back(
@@ -366,7 +440,8 @@ Strategys MakeDataParallelStrategy(const std::shared_ptr<Graph> &graph,
     Dimensions s;
     size_t input_size = origin_strategy->GetInputDim()[iter_op_inputs].size();
     for (size_t dim = 0; dim < input_size; dim++) {
-      if (input_size == 1 || input_size == 2 || input_size == 4) {
+      // Experimental support for 3D data (input_size == 3).
+      if (input_size >= 1 && input_size <= 4) {
         if (dim == 0) {
           // Currently GPU version does not support partitioning ‘FusedBatchNormEx’ in its param tensors.
           if (ops[iter_ops]->type() == "FusedBatchNormEx" && iter_op_inputs != 0) {
@@ -385,17 +460,27 @@ Strategys MakeDataParallelStrategy(const std::shared_ptr<Graph> &graph,
     }
     strategies.push_back(s);
   }
-
+  // Set default strategy.
   graph->nodes[iter_graph].tensor_parm.tensor_str.str_n = 1.0;
   graph->nodes[iter_graph].tensor_parm.tensor_str.str_c = 1.0;
   graph->nodes[iter_graph].tensor_parm.tensor_str.str_h = 1.0;
   graph->nodes[iter_graph].tensor_parm.tensor_str.str_w = 1.0;
+
+  // Update data parallel strategy.
+  if (ops[iter_ops]->outputs_tensor_info().size() == 0) {
+    MS_LOG(EXCEPTION) << ops[iter_ops]->name() << " output tensor info is empty.";
+  }
   if (ops[iter_ops]->outputs_tensor_info()[0].shape().size() == 1) {
     graph->nodes[iter_graph].tensor_parm.tensor_str.str_w = 1.0 / std::min(max_device_num, target_tensor_batch);
   } else if (ops[iter_ops]->outputs_tensor_info()[0].shape().size() == 2) {
     graph->nodes[iter_graph].tensor_parm.tensor_str.str_h = 1.0 / std::min(max_device_num, target_tensor_batch);
+  } else if (ops[iter_ops]->outputs_tensor_info()[0].shape().size() == 3) {
+    // Experimental support for 3D data.
+    graph->nodes[iter_graph].tensor_parm.tensor_str.str_c = 1.0 / std::min(max_device_num, target_tensor_batch);
   } else if (ops[iter_ops]->outputs_tensor_info()[0].shape().size() == 4) {
     graph->nodes[iter_graph].tensor_parm.tensor_str.str_n = 1.0 / std::min(max_device_num, target_tensor_batch);
+  } else {
+    MS_LOG(EXCEPTION) << ops[iter_ops]->name() << " output tensor shape is unexpected.";
   }
 
   return strategies;
@@ -412,16 +497,14 @@ Strategys PrepareStrategy(const std::shared_ptr<Graph> &graph, const std::vector
   MS_EXCEPTION_IF_NULL(ops[iter_ops]);
 
   auto type = ops[iter_ops]->type();
-  auto idx = DictOpType.find(type);
-  if (idx == DictOpType.end()) {
-    return MakeDataParallelStrategy(graph, ops, iter_graph, iter_ops);
-  }
-
   if (type == MATMUL) {
     return PrepareMatMul(graph, ops, iter_graph, iter_ops);
   } else if (type == ONEHOT) {
     return PrepareOneHot(graph, ops, iter_graph, iter_ops);
-  } else if (type == SPARSE_SOFTMAX_CROSS_ENTROPY_WITH_LOGITS) {
+  } else if ((type == SOFTMAX) || (type == LAYER_NORM)) {
+    return PrepareAxisRelatedStrategy(graph, ops, iter_graph, iter_ops);
+  } else if ((type == SPARSE_SOFTMAX_CROSS_ENTROPY_WITH_LOGITS) || (type == "_VirtualDataset") ||
+             (type == "FusedBatchNormEx") || (type == "Dropout") || (type == BATCH_MATMUL)) {
     return MakeDataParallelStrategy(graph, ops, iter_graph, iter_ops);
   } else {
     return MakeRecSearchStrategy(graph, ops, iter_graph, iter_ops);
@@ -471,6 +554,11 @@ Dimensions CopyIncomingOperatorOutputStrategy(const std::shared_ptr<Graph> &grap
     if (input_stra_dim == 1) {
       s.push_back(1 / graph->nodes[iter_graph].tensor_parm.tensor_str.str_w);
     } else if (input_stra_dim == 2) {
+      s.push_back(1 / graph->nodes[iter_graph].tensor_parm.tensor_str.str_h);
+      s.push_back(1 / graph->nodes[iter_graph].tensor_parm.tensor_str.str_w);
+    } else if (input_stra_dim == 3) {
+      // Experimental support for 3D data.
+      s.push_back(1 / graph->nodes[iter_graph].tensor_parm.tensor_str.str_c);
       s.push_back(1 / graph->nodes[iter_graph].tensor_parm.tensor_str.str_h);
       s.push_back(1 / graph->nodes[iter_graph].tensor_parm.tensor_str.str_w);
     } else if (input_stra_dim == 4) {
@@ -523,7 +611,7 @@ Dimensions PrepareIncomingOperatorInputStrategy(const std::vector<std::shared_pt
   return s;
 }
 
-Dimensions GetAxisList(const std::vector<std::shared_ptr<OperatorInfo>> &ops, const int iter_ops) {
+Dimensions GetAxisList(const std::vector<std::shared_ptr<OperatorInfo>> &ops, const int64_t iter_ops) {
   Dimensions axis_list;
   auto axis_param = ops[iter_ops]->attrs().find(AXIS)->second;
   std::vector<ValuePtr> elements;
@@ -536,10 +624,10 @@ Dimensions GetAxisList(const std::vector<std::shared_ptr<OperatorInfo>> &ops, co
   }
 
   for (auto &element : elements) {
-    if (!element->isa<Int32Imm>()) {
+    if (!element->isa<Int64Imm>()) {
       MS_LOG(EXCEPTION) << "Failure: Dimension indexes is not Int32." << std::endl;
     }
-    auto axis = element->cast<Int32ImmPtr>()->value();
+    auto axis = element->cast<Int64ImmPtr>()->value();
     axis_list.push_back(axis);
   }
   return axis_list;
@@ -594,19 +682,19 @@ Dimensions GetDimList(const std::vector<std::shared_ptr<OperatorInfo>> &ops, con
   auto input_value = ops[iter_ops]->input_value();
   auto input_dim = ops[iter_ops]->inputs_tensor_info()[0].shape().size();
   if (input_value.back()->isa<ValueTuple>()) {
-    auto attr_axis = GetValue<std::vector<int>>(input_value.back());
+    auto attr_axis = GetValue<std::vector<int64_t>>(input_value.back());
     if (attr_axis.empty()) {
       for (size_t i = 0; i < input_dim; i++) {
-        dim_list.push_back(SizeToInt(i));
+        dim_list.push_back(SizeToLong(i));
       }
     } else {
       for (auto &axis : attr_axis) {
-        axis < 0 ? dim_list.push_back(axis + SizeToInt(input_dim)) : dim_list.push_back(axis);
+        axis < 0 ? dim_list.push_back(axis + SizeToLong(input_dim)) : dim_list.push_back(axis);
       }
     }
-  } else if (input_value.back()->isa<Int32Imm>()) {
-    int axis = GetValue<int>(input_value.back());
-    axis < 0 ? dim_list.push_back(axis + SizeToInt(input_dim)) : dim_list.push_back(axis);
+  } else if (input_value.back()->isa<Int64Imm>()) {
+    int64_t axis = GetValue<int64_t>(input_value.back());
+    axis < 0 ? dim_list.push_back(axis + SizeToLong(input_dim)) : dim_list.push_back(axis);
   } else {
     MS_LOG(EXCEPTION) << "Failure: Axis type is invalid." << std::endl;
   }
@@ -645,19 +733,19 @@ Dimensions GetDimListFromAttrs(const std::vector<std::shared_ptr<OperatorInfo>> 
   auto input_dim = ops[iter_ops]->inputs_tensor_info()[0].shape().size();
   MS_EXCEPTION_IF_NULL(iter->second);
   if (iter->second->isa<ValueTuple>()) {
-    auto attr_axis = GetValue<std::vector<int>>(iter->second);
+    auto attr_axis = GetValue<std::vector<int64_t>>(iter->second);
     if (attr_axis.empty()) {
       for (size_t i = 0; i < input_dim; ++i) {
-        dim_list.push_back(SizeToInt(i));
+        dim_list.push_back(SizeToLong(i));
       }
     } else {
       for (auto &axis : attr_axis) {
-        axis < 0 ? dim_list.push_back(axis + SizeToInt(input_dim)) : dim_list.push_back(axis);
+        axis < 0 ? dim_list.push_back(axis + SizeToLong(input_dim)) : dim_list.push_back(axis);
       }
     }
-  } else if (iter->second->isa<Int32Imm>()) {
-    int axis = GetValue<int>(iter->second);
-    axis < 0 ? dim_list.push_back(axis + SizeToInt(input_dim)) : dim_list.push_back(axis);
+  } else if (iter->second->isa<Int64Imm>()) {
+    int64_t axis = GetValue<int64_t>(iter->second);
+    axis < 0 ? dim_list.push_back(axis + SizeToLong(input_dim)) : dim_list.push_back(axis);
   } else {
     MS_LOG(EXCEPTION) << "Axis type is invalid.";
   }
@@ -791,8 +879,8 @@ Dimensions ApplyBroadcast(const std::vector<std::shared_ptr<OperatorInfo>> &ops,
                           size_t first_tensor_dim, size_t second_tensor_dim, bool broadcast_first_tensor) {
   Dimensions s_empty = {};
   Dimensions s_broadcast;
-  int target_tensor_index = 0;
-  int refer_tensor_index = 0;
+  int64_t target_tensor_index = 0;
+  int64_t refer_tensor_index = 0;
   size_t target_tensor_dim;
   size_t refer_tensor_dim;
 

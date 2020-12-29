@@ -21,7 +21,7 @@
 #include <vector>
 #include "src/lite_kernel.h"
 #include "src/runtime/kernel/arm/base/convolution_base.h"
-#include "nnacl/optimized_kernel.h"
+#include "src/common/utils.h"
 
 namespace mindspore::kernel {
 class ConvolutionBaseFP16CPUKernel : public ConvolutionBaseCPUKernel {
@@ -32,10 +32,10 @@ class ConvolutionBaseFP16CPUKernel : public ConvolutionBaseCPUKernel {
       : ConvolutionBaseCPUKernel(parameter, inputs, outputs, ctx, primitive) {}
   ~ConvolutionBaseFP16CPUKernel() override;
 
-  int Init() override { return RET_OK; }
-  int ReSize() override { return RET_OK; }
-  int Run() override { return RET_OK; }
-  int RunImpl(int task_id) { return RET_OK; }
+  int Init() override { return mindspore::lite::RET_OK; }
+  int ReSize() override { return mindspore::lite::RET_OK; }
+  int Run() override { return mindspore::lite::RET_OK; }
+  int RunImpl(int task_id) { return mindspore::lite::RET_OK; }
   virtual int GetExecuteTensor();
   virtual int GetExecuteFilter();
   virtual void IfCastOutput();

@@ -33,10 +33,12 @@
 #include "utils/ordered_map.h"
 #include "utils/ordered_set.h"
 #include "utils/utils.h"
+#include "utils/shape_utils.h"
 #include "debug/trace.h"
 #include "utils/label.h"
 #include "utils/ms_context.h"
 #include "frontend/operator/ops.h"
+#include "pipeline/jit/base.h"
 
 using mindspore::tensor::TensorPy;
 
@@ -690,19 +692,21 @@ void ExportIR(const std::string &filename, const std::string &id, const FuncGrap
     return;
   }
 
+  auto real_filename = pipeline::GetSaveGraphsPathName(filename);
   AnfExporter exporter(id);
-  ChangeFileMode(filename, S_IRWXU);
-  exporter.ExportFuncGraph(filename, func_graph);
+  ChangeFileMode(real_filename, S_IRWXU);
+  exporter.ExportFuncGraph(real_filename, func_graph);
   // set file mode to read only by user
-  ChangeFileMode(filename, S_IRUSR);
+  ChangeFileMode(real_filename, S_IRUSR);
 }
 
 void ExportIR(const std::string &filename, const std::vector<TaggedGraph> &graphs) {
+  auto real_filename = pipeline::GetSaveGraphsPathName(filename);
   AnfExporter exporter("", false);
-  ChangeFileMode(filename, S_IRWXU);
-  exporter.ExportFuncGraph(filename, graphs);
+  ChangeFileMode(real_filename, S_IRWXU);
+  exporter.ExportFuncGraph(real_filename, graphs);
   // set file mode to read only by user
-  ChangeFileMode(filename, S_IRUSR);
+  ChangeFileMode(real_filename, S_IRUSR);
 }
 #else
 void ExportIR(const std::string &, const std::string &, const FuncGraphPtr &) {
@@ -1307,7 +1311,7 @@ class IrParser {
     *ptr = std::make_shared<Tuple>(elems);
   }
 
-  void SetArrayType(TypePtr *const ptr, const TypePtr &elem_type, const std::vector<int> &) {
+  void SetArrayType(TypePtr *const ptr, const TypePtr &elem_type, const ShapeVector &) {
     if (ptr == nullptr) {
       return;
     }
@@ -1364,7 +1368,7 @@ class IrParser {
     *ptr = std::make_shared<abstract::AbstractTuple>(elems);
   }
 
-  void SetArrayType(AbstractBasePtr *const ptr, const TypePtr &elem_type, const std::vector<int> &shape) {
+  void SetArrayType(AbstractBasePtr *const ptr, const TypePtr &elem_type, const ShapeVector &shape) {
     if (ptr == nullptr) {
       return;
     }
@@ -1446,7 +1450,7 @@ class IrParser {
     }
     // process Array element type
     TypePtr elem_type = nullptr;
-    std::vector<int> shape;
+    ShapeVector shape;
     tok = ParseOneType(func_graph, lexer_.GetNextToken(), &elem_type);
     if (tok != TOK_RPARENTHESIS) {
       return TOK_ERROR;
@@ -1791,7 +1795,7 @@ class IrParser {
     }
 
     // parse shape
-    std::vector<int> shape;
+    ShapeVector shape;
     Token tok = lexer_.GetNextToken();
     if (tok != TOK_LBRACKET) {
       return TOK_ERROR;

@@ -17,7 +17,7 @@
 #include <iostream>
 #include <memory>
 #include "common/common_test.h"
-#include "mindspore/lite/nnacl/fp32/topk.h"
+#include "mindspore/lite/nnacl/fp32/topk_fp32.h"
 #include "mindspore/lite/src/kernel_registry.h"
 
 namespace mindspore {
@@ -30,16 +30,17 @@ TEST_F(TestTopKFp32, TopK) {
   lite::Tensor in_tensor(kNumberTypeFloat32, {2, 2, 3});
   lite::Tensor out_tensor0(kNumberTypeFloat32, {2, 2, 2});
   lite::Tensor out_tensor1(kNumberTypeInt32, {2, 2, 2});
+
   float input_data[] = {1, 2, 3, 6, 5, 4, 9, 8, 7, 10, 12, 11};
   float output_data0[8] = {0};
   int32_t output_data1[8] = {0};
-  in_tensor.SetData(input_data);
-  out_tensor0.SetData(output_data0);
-  out_tensor1.SetData(output_data1);
+  in_tensor.set_data(input_data);
+  out_tensor0.set_data(output_data0);
+  out_tensor1.set_data(output_data1);
   std::vector<lite::Tensor *> inputs = {&in_tensor};
   std::vector<lite::Tensor *> outputs = {&out_tensor0, &out_tensor1};
 
-  TopkParameter parameter = {{}, 3, 4, 2, true};
+  TopkParameter parameter = {{}, 2, true, 3, 4};
   kernel::KernelKey desc = {kernel::KERNEL_ARCH::kCPU, kNumberTypeFloat32, schema::PrimitiveType_TopK};
 
   auto creator = lite::KernelRegistry::GetInstance()->GetCreator(desc);
@@ -60,8 +61,8 @@ TEST_F(TestTopKFp32, TopK) {
     EXPECT_EQ(output_data1[i], expect1[i]);
   }
 
-  in_tensor.SetData(nullptr);
-  out_tensor0.SetData(nullptr);
-  out_tensor1.SetData(nullptr);
+  in_tensor.set_data(nullptr);
+  out_tensor0.set_data(nullptr);
+  out_tensor1.set_data(nullptr);
 }
 }  // namespace mindspore

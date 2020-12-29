@@ -27,19 +27,17 @@ namespace mindspore {
 namespace lite {
 class Unique : public PrimitiveC {
  public:
+  Unique() = default;
+  ~Unique() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(Unique, PrimitiveC);
-  Unique() = default;
   explicit Unique(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
-  void SetOutType(int out_type);
 
 #else
-  Unique() = default;
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 
 #endif
   int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
-  int GetOutType() const;
 };
 }  // namespace lite
 }  // namespace mindspore

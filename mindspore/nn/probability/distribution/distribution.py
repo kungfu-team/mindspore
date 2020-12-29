@@ -17,7 +17,6 @@ from mindspore import context
 from mindspore.ops import operations as P
 from mindspore.nn.cell import Cell
 from mindspore._checkparam import Validator as validator
-from mindspore.common import get_seed
 from ._utils.utils import raise_none_error, cast_to_tensor, set_param_type, cast_type_for_device,\
                           raise_not_implemented_util
 from ._utils.utils import CheckTuple, CheckTensor
@@ -29,10 +28,13 @@ class Distribution(Cell):
     Base class for all mathematical distributions.
 
     Args:
-        seed (int): The seed is used in sampling. The global seed is used if it is None.
+        seed (int): The seed is used in sampling. 0 is used if it is None.
         dtype (mindspore.dtype): The type of the event samples.
         name (str): The name of the distribution.
         param (dict): The parameters used to initialize the distribution.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Note:
         Derived class must override operations such as `_mean`, `_prob`,
@@ -59,9 +61,7 @@ class Distribution(Cell):
         """
         super(Distribution, self).__init__()
         if seed is None:
-            seed = get_seed()
-            if seed is None:
-                seed = 0
+            seed = 0
         validator.check_value_type('name', name, [str], type(self).__name__)
         validator.check_non_negative_int(seed, 'seed', name)
 
@@ -75,13 +75,12 @@ class Distribution(Cell):
             if not(k == 'self' or k.startswith('_')):
                 self._parameters[k] = param[k]
 
-        # some attributes
-        if 'distribution' in self.parameters.keys():
-            self.parameter_type = self.parameters['distribution'].parameter_type
-        else:
+        # if not a transformed distribution, set the following attribute
+        if 'distribution' not in self.parameters.keys():
             self.parameter_type = set_param_type(self.parameters['param_dict'], dtype)
-        self._broadcast_shape = self._calc_broadcast_shape()
-        self._is_scalar_batch = self._check_is_scalar_batch()
+            self._batch_shape = self._calc_batch_shape()
+            self._is_scalar_batch = self._check_is_scalar_batch()
+            self._broadcast_shape = self._batch_shape
 
         # set the function to call according to the derived class's attributes
         self._set_prob()
@@ -132,8 +131,16 @@ class Distribution(Cell):
         return self._is_scalar_batch
 
     @property
+    def batch_shape(self):
+        return self._batch_shape
+
+    @property
     def broadcast_shape(self):
         return self._broadcast_shape
+
+    def _reset_parameters(self):
+        self.default_parameters = []
+        self.parameter_names = []
 
     def _add_parameter(self, value, name):
         """
@@ -207,8 +214,6 @@ class Distribution(Cell):
         """
         Check if the parameters used during initialization are scalars.
         """
-        if 'distribution' in self.parameters.keys():
-            return self.parameters['distribution'].is_scalar_batch
         param_dict = self.parameters['param_dict']
         for value in param_dict.values():
             if value is None:
@@ -217,12 +222,10 @@ class Distribution(Cell):
                 return False
         return True
 
-    def _calc_broadcast_shape(self):
+    def _calc_batch_shape(self):
         """
         Calculate the broadcast shape of the parameters used during initialization.
         """
-        if 'distribution' in self.parameters.keys():
-            return self.parameters['distribution'].broadcast_shape
         param_dict = self.parameters['param_dict']
         broadcast_shape_tensor = None
         for value in param_dict.values():
@@ -342,6 +345,33 @@ class Distribution(Cell):
             self._call_cross_entropy = self._cross_entropy
         else:
             self._call_cross_entropy = self._raise_not_implemented_error('cross_entropy')
+
+    def _get_dist_args(self, *args, **kwargs):
+        return raise_not_implemented_util('get_dist_args', self.name, *args, **kwargs)
+
+    def get_dist_args(self, *args, **kwargs):
+        """
+        Check the availability and validity of default parameters and `dist_spec_args`.
+
+        Args:
+            *args (list): the list of positional arguments forwarded to subclasses.
+            **kwargs (dictionary): the dictionary of keyword arguments forwarded to subclasses.
+
+        Note:
+            `dist_spec_args` must be passed in through list or dictionary. The order of `dist_spec_args`
+            should follow the initialization order of default parameters through `_add_parameter`.
+            If some `dist_spec_args` is None, the corresponding default parameter is returned.
+        """
+        return self._get_dist_args(*args, **kwargs)
+
+    def _get_dist_type(self):
+        return raise_not_implemented_util('get_dist_type', self.name)
+
+    def get_dist_type(self):
+        """
+        Return the type of the distribution.
+        """
+        return self._get_dist_type()
 
     def _raise_not_implemented_error(self, func_name):
         name = self.name
@@ -684,7 +714,8 @@ class Distribution(Cell):
         Note:
             Names of supported functions include:
             'prob', 'log_prob', 'cdf', 'log_cdf', 'survival_function', 'log_survival',
-            'var', 'sd', 'mode', 'mean', 'entropy', 'kl_loss', 'cross_entropy', and 'sample'.
+            'var', 'sd', 'mode', 'mean', 'entropy', 'kl_loss', 'cross_entropy', 'sample',
+            'get_dist_args', and 'get_dist_type'.
 
         Args:
             name (str): The name of the function.
@@ -720,4 +751,8 @@ class Distribution(Cell):
             return self._call_cross_entropy(*args, **kwargs)
         if name == 'sample':
             return self._sample(*args, **kwargs)
+        if name == 'get_dist_args':
+            return self._get_dist_args(*args, **kwargs)
+        if name == 'get_dist_type':
+            return self._get_dist_type()
         return raise_not_implemented_util(name, self.name, *args, **kwargs)

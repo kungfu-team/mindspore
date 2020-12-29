@@ -15,7 +15,7 @@
  */
 #include <iostream>
 #include "common/common_test.h"
-#include "nnacl/fp32/space_to_batch.h"
+#include "nnacl/fp32/space_to_batch_fp32.h"
 #include "mindspore/lite/src/kernel_registry.h"
 
 namespace mindspore {
@@ -29,12 +29,12 @@ TEST_F(SpaceToBatchTestInt8, test1) {
   lite::Tensor out_tensor(kNumberTypeInt8, {4, 2, 2, 1});
   int8_t input_data[] = {1, 2, 3, 4};
   int8_t output_data[16] = {0};
-  in_tensor.SetData(input_data);
-  out_tensor.SetData(output_data);
+  in_tensor.set_data(input_data);
+  out_tensor.set_data(output_data);
   std::vector<lite::Tensor *> inputs = {&in_tensor};
   std::vector<lite::Tensor *> outputs = {&out_tensor};
 
-  SpaceToBatchParameter parameter = {{}, false, {2, 2}, {1, 1, 1, 1}};
+  SpaceToBatchParameter parameter = {{}, {2, 2}, {1, 1, 1, 1}, false, 2};
   kernel::KernelKey desc = {kernel::KERNEL_ARCH::kCPU, kNumberTypeInt8, schema::PrimitiveType_SpaceToBatchND};
 
   auto creator = lite::KernelRegistry::GetInstance()->GetCreator(desc);
@@ -52,7 +52,7 @@ TEST_F(SpaceToBatchTestInt8, test1) {
   for (int i = 0; i < 8; ++i) {
     EXPECT_EQ(output_data[i], expect[i]);
   }
-  in_tensor.SetData(nullptr);
-  out_tensor.SetData(nullptr);
+  in_tensor.set_data(nullptr);
+  out_tensor.set_data(nullptr);
 }
 }  // namespace mindspore

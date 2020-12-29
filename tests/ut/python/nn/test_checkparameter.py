@@ -12,57 +12,87 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ============================================================================
-""" test checkparameter """
+""" test check parameter """
 import pytest
-
-from mindspore._checkparam import check_int, check_input_format, Validator, twice
+import numpy as np
+from mindspore._checkparam import Validator, twice
 
 kernel_size = 5
 kernel_size1 = twice(kernel_size)
 assert kernel_size1 == (5, 5)
 
+def test_check_int1():
+    a = np.random.randint(-100, 100)
+    assert Validator.check_is_int(a) == a
 
-def test_check_int_1():
-    assert check_int(3) == 3
+def test_check_int2():
+    with pytest.raises(TypeError):
+        Validator.check_is_int(3.3)
 
+def test_check_int3():
+    with pytest.raises(TypeError):
+        Validator.check_is_int("str")
 
-def check_int_positive_1():
+def test_check_int4():
+    with pytest.raises(TypeError):
+        Validator.check_is_int(True)
+
+def test_check_is_int5():
+    with pytest.raises(TypeError):
+        Validator.check_is_int(True)
+    with pytest.raises(TypeError):
+        Validator.check_is_int(False)
+
+def test_check_positive_int1():
+    a = np.random.randint(1, 100)
+    assert Validator.check_positive_int(a) == a
+
+def test_check_positive_int2():
+    a = np.random.randint(-100, 0)
     with pytest.raises(ValueError):
-        Validator.check_positive_int(-1)
+        Validator.check_positive_int(a)
 
+def test_check_positive_int3():
+    with pytest.raises(TypeError):
+        Validator.check_positive_int(3.3)
 
-def test_NCHW1():
-    assert check_input_format("NCHW") == "NCHW"
+def test_check_positive_int4():
+    with pytest.raises(TypeError):
+        Validator.check_positive_int("str")
 
+def test_check_negative_int1():
+    a = np.random.randint(-100, -1)
+    assert Validator.check_negative_int(a) == a
 
-def test_NCHW3():
+def test_check_negative_int2():
+    a = np.random.randint(0, 100)
     with pytest.raises(ValueError):
-        check_input_format("rt")
+        Validator.check_negative_int(a)
 
-
-def test_check_int_2():
+def test_check_negative_int3():
     with pytest.raises(TypeError):
-        check_int(3.3)
+        Validator.check_negative_int(3.3)
 
-
-def test_check_int_3():
+def test_check_negative_int4():
     with pytest.raises(TypeError):
-        check_int("str")
+        Validator.check_negative_int("str")
 
+def test_check_non_positive_int1():
+    a = np.random.randint(-100, 0)
+    assert Validator.check_non_positive_int(a) == a
 
-def test_check_int_4():
+def test_check_non_positive_int2():
+    a = np.random.randint(1, 100)
+    with pytest.raises(ValueError):
+        Validator.check_non_positive_int(a)
+
+def test_check_non_positive_int3():
     with pytest.raises(TypeError):
-        check_int(True)
+        Validator.check_non_positive_int(3.3)
 
-
-def test_check_int_5():
-    check_int(0)
-    check_int(1)
+def test_check_non_positive_int4():
     with pytest.raises(TypeError):
-        check_int(True)
-    with pytest.raises(TypeError):
-        check_int(False)
-
+        Validator.check_non_positive_int("str")
 
 def test_check_bool_1():
     assert Validator.check_bool(True)

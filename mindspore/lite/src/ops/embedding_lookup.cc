@@ -16,6 +16,10 @@
 
 #include "src/ops/embedding_lookup.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -41,6 +45,10 @@ int EmbeddingLookup::UnPackToFlatBuilder(const schema::Primitive *primitive, fla
 }
 float EmbeddingLookup::GetMaxNorm() const { return this->primitive_->value_as_EmbeddingLookup()->maxNorm(); }
 
+PrimitiveC *EmbeddingLookupCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<EmbeddingLookup>(primitive);
+}
+Registry EmbeddingLookupRegistry(schema::PrimitiveType_EmbeddingLookup, EmbeddingLookupCreator);
 #endif
 
 int EmbeddingLookup::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
@@ -59,10 +67,10 @@ int EmbeddingLookup::InferShape(std::vector<Tensor *> inputs_, std::vector<Tenso
   MS_ASSERT(ids != nullptr);
   auto output = outputs_.front();
   MS_ASSERT(output != nullptr);
-  output->SetFormat(params_->GetFormat());
+  output->set_format(params_->format());
   output->set_data_type(params_->data_type());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
 
   auto embedding_shape = params_->shape();

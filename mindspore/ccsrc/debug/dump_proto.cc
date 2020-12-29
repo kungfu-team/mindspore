@@ -27,6 +27,7 @@
 #include "utils/ms_context.h"
 #include "utils/symbolic.h"
 #include "utils/utils.h"
+#include "pipeline/jit/base.h"
 
 namespace mindspore {
 class ProtoExporter {
@@ -184,6 +185,9 @@ void ProtoExporter::SetValueToProto(const ValuePtr &val, irpb::ValueProto *value
   } else if (val->isa<Int>()) {
     value_proto->set_dtype(irpb::DT_TYPE);
     value_proto->mutable_type_val()->set_data_type(irpb::DT_BASE_INT);
+  } else if (val->isa<UInt>()) {
+    value_proto->set_dtype(irpb::DT_TYPE);
+    value_proto->mutable_type_val()->set_data_type(irpb::DT_BASE_UINT);
   } else if (val->isa<Float>()) {
     value_proto->set_dtype(irpb::DT_TYPE);
     value_proto->mutable_type_val()->set_data_type(irpb::DT_BASE_FLOAT);
@@ -477,6 +481,9 @@ void ProtoExporter::ExportFuncGraphOutput(const FuncGraphPtr &func_graph, const 
   if (ret_node == nullptr || !ret_node->isa<CNode>()) {
     MS_LOG(EXCEPTION) << "Graph return node is illegal";
   }
+  if (ret_node->inputs().size() != 2) {
+    return;
+  }
   AnfNodePtr arg = ret_node->input(1);
   if (graph_proto == nullptr) {
     MS_LOG(EXCEPTION) << "graph_proto is nullptr";
@@ -525,16 +532,7 @@ void DumpIRProto(const FuncGraphPtr &func_graph, const std::string &suffix) {
     MS_LOG(ERROR) << "Func graph is nullptr";
     return;
   }
-  auto ms_context = MsContext::GetInstance();
-  if (ms_context == nullptr) {
-    MS_LOG(ERROR) << "ms_context is nullptr";
-    return;
-  }
-  auto save_graphs_path = ms_context->get_param<std::string>(MS_CTX_SAVE_GRAPHS_PATH);
-  if (save_graphs_path.empty()) {
-    save_graphs_path = ".";
-  }
-  std::string file_path = save_graphs_path + "/" + "ms_output_" + suffix + ".pb";
+  std::string file_path = pipeline::GetSaveGraphsPathName("ms_output_" + suffix + ".pb");
   if (file_path.size() > PATH_MAX) {
     MS_LOG(ERROR) << "File path " << file_path << " is too long.";
     return;

@@ -15,6 +15,7 @@
  */
 #include "backend/kernel_compiler/cpu/ps/embedding_look_up_proxy_kernel.h"
 #include <vector>
+#include <algorithm>
 #include "ps/worker.h"
 
 namespace mindspore {
@@ -38,13 +39,17 @@ void EmbeddingLookUpProxyKernel::InitKernel(const CNodePtr &kernel_node) {
     key_ = AnfAlgo::GetNodeAttr<size_t>(kernel_node, kAttrPsKey);
   }
   std::vector<size_t> keys{key_, key_, key_};
-  std::vector<size_t> values;
-  values.insert(values.end(), input_shape.begin(), input_shape.end());
-  values.insert(values.end(), indices_shape.begin(), indices_shape.end());
-  values.insert(values.end(), output_shape.begin(), output_shape.end());
+  std::vector<float> values;
+  std::transform(input_shape.begin(), input_shape.end(), std::back_inserter(values),
+                 [](size_t dim) -> float { return SizeToFloat(dim); });
+  std::transform(indices_shape.begin(), indices_shape.end(), std::back_inserter(values),
+                 [](size_t dim) -> float { return SizeToFloat(dim); });
+  std::transform(output_shape.begin(), output_shape.end(), std::back_inserter(values),
+                 [](size_t dim) -> float { return SizeToFloat(dim); });
   MS_LOG(INFO) << "Init embedding lookup proxy kernel, input shape:" << input_shape
                << ", indices_shape:" << indices_shape << ", output_shape:" << output_shape;
-  std::vector<int> lens{SizeToInt(input_shape.size()), SizeToInt(indices_shape.size()), SizeToInt(output_shape.size())};
+  std::vector<int64_t> lens{SizeToLong(input_shape.size()), SizeToLong(indices_shape.size()),
+                            SizeToLong(output_shape.size())};
   if (mindspore::ps::Util::IsRoleOfWorker()) {
     mindspore::ps::worker.AddEmbeddingTable(key_, input_shape[axis]);
     mindspore::ps::worker.InitPSEmbeddingTable(keys, values, lens);

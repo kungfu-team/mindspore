@@ -20,30 +20,27 @@
 #include <vector>
 #include <string>
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
-#include "nnacl/fp32/cast.h"
+#include "nnacl/fp32/cast_fp32.h"
 
 namespace mindspore::kernel {
 
 class CastOpenCLKernel : public OpenCLKernel {
  public:
-  explicit CastOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                            const std::vector<lite::Tensor *> &outputs)
+  CastOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
+                   const std::vector<lite::Tensor *> &outputs)
       : OpenCLKernel(parameter, inputs, outputs) {}
 
-  ~CastOpenCLKernel() override{};
+  ~CastOpenCLKernel() override = default;
+  int Prepare() override;
 
-  int Init() override;
-
-  int ReSize() override;
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
 
   int Run() override;
 
-  int GetKernelName(std::string *kernel_name, CastParameter *param);
-
-  int GetImageSize(size_t idx, std::vector<size_t> *img_size) override;
-
  private:
-  cl::Kernel kernel_;
+  int GetKernelName(std::string *kernel_name, CastParameter *param);
 };
 
 }  // namespace mindspore::kernel

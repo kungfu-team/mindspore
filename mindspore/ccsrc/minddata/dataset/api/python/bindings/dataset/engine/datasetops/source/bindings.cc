@@ -91,28 +91,22 @@ PYBIND_REGISTER(CocoOp, 1, ([](const py::module *m) {
 
 PYBIND_REGISTER(ImageFolderOp, 1, ([](const py::module *m) {
                   (void)py::class_<ImageFolderOp, DatasetOp, std::shared_ptr<ImageFolderOp>>(*m, "ImageFolderOp")
-                    .def_static("get_num_rows_and_classes", [](const std::string &path) {
-                      int64_t count = 0, num_classes = 0;
-                      THROW_IF_ERROR(
-                        ImageFolderOp::CountRowsAndClasses(path, std::set<std::string>{}, &count, &num_classes));
-                      return py::make_tuple(count, num_classes);
+                    .def_static("get_num_rows",
+                                [](const std::string &path) {
+                                  int64_t count = 0;
+                                  THROW_IF_ERROR(ImageFolderOp::CountRowsAndClasses(path, {}, &count, nullptr, {}));
+                                  return count;
+                                })
+                    .def_static("get_num_classes", [](const std::string &path,
+                                                      const std::map<std::string, int32_t> class_index) {
+                      int64_t num_classes = 0;
+                      THROW_IF_ERROR(ImageFolderOp::CountRowsAndClasses(path, {}, nullptr, &num_classes, class_index));
+                      return num_classes;
                     });
                 }));
 
 PYBIND_REGISTER(ManifestOp, 1, ([](const py::module *m) {
-                  (void)py::class_<ManifestOp, DatasetOp, std::shared_ptr<ManifestOp>>(*m, "ManifestOp")
-                    .def_static("get_num_rows_and_classes",
-                                [](const std::string &file, const py::dict &dict, const std::string &usage) {
-                                  int64_t count = 0, num_classes = 0;
-                                  THROW_IF_ERROR(ManifestOp::CountTotalRows(file, dict, usage, &count, &num_classes));
-                                  return py::make_tuple(count, num_classes);
-                                })
-                    .def_static("get_class_indexing", [](const std::string &file, const py::dict &dict,
-                                                         const std::string &usage) {
-                      std::map<std::string, int32_t> output_class_indexing;
-                      THROW_IF_ERROR(ManifestOp::GetClassIndexing(file, dict, usage, &output_class_indexing));
-                      return output_class_indexing;
-                    });
+                  (void)py::class_<ManifestOp, DatasetOp, std::shared_ptr<ManifestOp>>(*m, "ManifestOp");
                 }));
 PYBIND_REGISTER(MindRecordOp, 1, ([](const py::module *m) {
                   (void)py::class_<MindRecordOp, DatasetOp, std::shared_ptr<MindRecordOp>>(*m, "MindRecordOp")
@@ -167,13 +161,6 @@ PYBIND_REGISTER(TFReaderOp, 1, ([](const py::module *m) {
 
 PYBIND_REGISTER(VOCOp, 1, ([](const py::module *m) {
                   (void)py::class_<VOCOp, DatasetOp, std::shared_ptr<VOCOp>>(*m, "VOCOp")
-                    .def_static("get_num_rows",
-                                [](const std::string &dir, const std::string &task_type, const std::string &task_mode,
-                                   const py::dict &dict, int64_t numSamples) {
-                                  int64_t count = 0;
-                                  THROW_IF_ERROR(VOCOp::CountTotalRows(dir, task_type, task_mode, dict, &count));
-                                  return count;
-                                })
                     .def_static("get_class_indexing", [](const std::string &dir, const std::string &task_type,
                                                          const std::string &task_mode, const py::dict &dict) {
                       std::map<std::string, int32_t> output_class_indexing;

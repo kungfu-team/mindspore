@@ -16,6 +16,10 @@
 
 #include "src/ops/broadcast_to.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -50,24 +54,40 @@ std::vector<int> BroadcastTo::GetDstShape() const {
   return std::vector<int>(fb_vector->begin(), fb_vector->end());
 }
 
+PrimitiveC *BroadcastToCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<BroadcastTo>(primitive);
+}
+Registry BroadcastToRegistry(schema::PrimitiveType_BroadcastTo, BroadcastToCreator);
 #endif
+
 namespace {
 constexpr int kBroadcastToInputNum = 1;
+constexpr int kBroadcastToOnnxInputNum = 2;
 constexpr int kBroadcastToOutputNum = 1;
 }  // namespace
 
 int BroadcastTo::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outputs) {
-  if (inputs.size() != kBroadcastToInputNum || outputs.size() != kBroadcastToOutputNum) {
-    MS_LOG(ERROR) << "input size:" << inputs.size() << ", output size:" << outputs.size();
+  if (inputs.size() != kBroadcastToInputNum && inputs.size() != kBroadcastToOnnxInputNum) {
+    MS_LOG(ERROR) << "input size:" << inputs.size();
     return RET_PARAM_INVALID;
   }
-  auto input = inputs.at(0);
-  outputs[0]->SetFormat(input->GetFormat());
-  outputs[0]->set_data_type(input->data_type());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  if (outputs.size() != kBroadcastToOutputNum) {
+    MS_LOG(ERROR) << "output size:" << outputs.size();
+    return RET_PARAM_INVALID;
   }
-  std::vector<int32_t> dst_shape(GetDstShape().begin(), GetDstShape().end());
+
+  auto input = inputs.at(0);
+  outputs[0]->set_format(input->format());
+  outputs[0]->set_data_type(input->data_type());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
+  }
+  std::vector<int32_t> dst_shape(GetDstShape());
+  for (size_t i = 0; i < dst_shape.size(); ++i) {
+    if (dst_shape[i] == -1) {
+      dst_shape[i] = inputs[0]->shape()[i];
+    }
+  }
   auto input_shape = input->shape();
   std::vector<int> shape(dst_shape.size());
   int input_shape_index = input_shape.size() - 1;

@@ -32,19 +32,24 @@ class SplitBaseCPUKernel : public LiteKernel {
       : LiteKernel(parameter, inputs, outputs, ctx, primitive), ctx_(ctx), thread_count_(ctx->thread_num_) {
     param = reinterpret_cast<SplitParameter *>(op_parameter_);
   }
-  ~SplitBaseCPUKernel() = default;
+  ~SplitBaseCPUKernel() override {
+    if (param != nullptr && param->split_sizes_ != nullptr) {
+      free(param->split_sizes_);
+      param->split_sizes_ = nullptr;
+    }
+  }
 
   int Init() override;
   int ReSize() override;
   int Run() override { return 0; }
 
  protected:
-  const InnerContext *ctx_;
-  int thread_count_;
-  int thread_n_stride_;
-  int thread_n_num_;
-  int num_unit_;
-  SplitParameter *param;
+  const InnerContext *ctx_ = nullptr;
+  int thread_count_ = 1;
+  int thread_n_stride_ = 0;
+  int thread_n_num_ = 0;
+  int num_unit_ = 0;
+  SplitParameter *param = nullptr;
 };
 }  // namespace mindspore::kernel
 

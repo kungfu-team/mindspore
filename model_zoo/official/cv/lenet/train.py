@@ -19,7 +19,6 @@ python train.py --data_path /YourDataPath
 """
 
 import os
-import ast
 import argparse
 from src.config import mnist_cfg as cfg
 from src.dataset import create_dataset
@@ -31,25 +30,21 @@ from mindspore.train import Model
 from mindspore.nn.metrics import Accuracy
 from mindspore.common import set_seed
 
+
+parser = argparse.ArgumentParser(description='MindSpore Lenet Example')
+parser.add_argument('--device_target', type=str, default="Ascend", choices=['Ascend', 'GPU', 'CPU'],
+                    help='device where the code will be implemented (default: Ascend)')
+parser.add_argument('--data_path', type=str, default="./Data",
+                    help='path where the dataset is saved')
+parser.add_argument('--ckpt_path', type=str, default="./ckpt", help='if is test, must provide\
+                    path where the trained ckpt file')
+args = parser.parse_args()
 set_seed(1)
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='MindSpore Lenet Example')
-    parser.add_argument('--device_target', type=str, default="Ascend", choices=['Ascend', 'GPU', 'CPU'],
-                        help='device where the code will be implemented (default: Ascend)')
-    parser.add_argument('--data_path', type=str, default="./Data",
-                        help='path where the dataset is saved')
-    parser.add_argument('--ckpt_path', type=str, default="./ckpt", help='if is test, must provide\
-                        path where the trained ckpt file')
-    parser.add_argument('--dataset_sink_mode', type=ast.literal_eval, default=True,
-                        help='dataset_sink_mode is False or True')
-
-    args = parser.parse_args()
-
-
     context.set_context(mode=context.GRAPH_MODE, device_target=args.device_target)
-    ds_train = create_dataset(os.path.join(args.data_path, "train"),
-                              cfg.batch_size)
+    ds_train = create_dataset(os.path.join(args.data_path, "train"), cfg.batch_size)
     if ds_train.get_dataset_size() == 0:
         raise ValueError("Please check dataset size > 0 and batch_size <= dataset size")
 
@@ -61,11 +56,10 @@ if __name__ == "__main__":
                                  keep_checkpoint_max=cfg.keep_checkpoint_max)
     ckpoint_cb = ModelCheckpoint(prefix="checkpoint_lenet", directory=args.ckpt_path, config=config_ck)
 
-    if args.device_target == "CPU":
+    if args.device_target != "Ascend":
         model = Model(network, net_loss, net_opt, metrics={"Accuracy": Accuracy()})
     else:
         model = Model(network, net_loss, net_opt, metrics={"Accuracy": Accuracy()}, amp_level="O2")
 
     print("============== Starting Training ==============")
-    model.train(cfg['epoch_size'], ds_train, callbacks=[time_cb, ckpoint_cb, LossMonitor()],
-                dataset_sink_mode=args.dataset_sink_mode)
+    model.train(cfg['epoch_size'], ds_train, callbacks=[time_cb, ckpoint_cb, LossMonitor()])

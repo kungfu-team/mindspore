@@ -31,15 +31,6 @@ const BaseRef InsertTransOp::DefinePattern() const {
   return VectorRef({V, Xs});
 }
 
-bool IsGraphOutput(const AnfNodePtr &node, const FuncGraphPtr &func_graph) {
-  auto outputs = AnfAlgo::GetAllOutput(func_graph->output(), {prim::kPrimTupleGetItem});
-  auto iter = std::find(outputs.begin(), outputs.end(), node);
-  if (iter != outputs.end() && GetRealNodeNum(func_graph, node) == 1) {
-    return true;
-  }
-  return false;
-}
-
 const AnfNodePtr InsertTransOp::Process(const FuncGraphPtr &func_graph, const AnfNodePtr &node,
                                         const EquivPtr &) const {
   if (node == nullptr || !AnfAlgo::IsRealKernel(node)) {
@@ -51,14 +42,6 @@ const AnfNodePtr InsertTransOp::Process(const FuncGraphPtr &func_graph, const An
   auto kernel_graph = func_graph->cast<std::shared_ptr<session::KernelGraph>>();
   if (kernel_graph != nullptr && kernel_graph->IsInternalOutput(node)) {
     kernel_graph->ReplaceInternalOutput(node, new_node);
-  }
-  auto ms_context = MsContext::GetInstance();
-  MS_EXCEPTION_IF_NULL(ms_context);
-  if (ms_context->get_param<int>(MS_CTX_EXECUTION_MODE) == kPynativeMode &&
-      !ms_context->get_param<bool>(MS_CTX_ENABLE_PYNATIVE_HOOK)) {
-    if (IsGraphOutput(node, func_graph)) {
-      return new_node;
-    }
   }
   return InsertTransOpForOutput(func_graph, new_node, kernel_select_);
 }

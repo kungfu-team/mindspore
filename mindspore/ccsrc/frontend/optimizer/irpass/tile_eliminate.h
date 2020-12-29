@@ -29,8 +29,9 @@ namespace mindspore {
 namespace opt {
 namespace irpass {
 // check if node is value tuple and all one. e.g. (1, 1, 1)
-// {PrimTile, X, MultiOne}
-class TileMultiplyByOne : public AnfVisitor {
+// {PrimTile, X, MultiOne} -> X
+// {PrimTile, X, Empty} -> X
+class TileEliminater : public AnfVisitor {
  public:
   AnfNodePtr operator()(const OptimizerPtr &, const AnfNodePtr &node) override {
     Reset();
@@ -42,12 +43,12 @@ class TileMultiplyByOne : public AnfVisitor {
     }
 
     auto value = GetValueNode(tuple_);
-    auto elements = GetValue<std::vector<int>>(value);
+    auto elements = GetValue<std::vector<int64_t>>(value);
     if (elements.empty()) {
-      return nullptr;
+      return x_;
     }
 
-    auto cmp = std::all_of(elements.cbegin(), elements.cend(), [](int i) { return i == 1; });
+    auto cmp = std::all_of(elements.cbegin(), elements.cend(), [](int64_t i) { return i == 1; });
     if (cmp) {
       return x_;
     }

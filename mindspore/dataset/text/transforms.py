@@ -76,7 +76,7 @@ class Lookup(cde.LookupOp):
         >>> # Load vocabulary from list
         >>> vocab = text.Vocab.from_list(['深', '圳', '欢', '迎', '您'])
         >>> # Use Lookup operator to map tokens to ids
-        >>> lookup = text.Lookup(vocab, "<unk>")
+        >>> lookup = text.Lookup(vocab)
         >>> data1 = data1.map(operations=[lookup])
     """
 
@@ -158,6 +158,9 @@ DE_C_INTER_JIEBA_MODE = {
 class JiebaTokenizer(cde.JiebaTokenizerOp):
     """
     Tokenize Chinese string into words based on dictionary.
+
+    Note:
+        The integrity of the HMMSEgment algorithm and MPSegment algorithm files must be confirmed.
 
     Args:
         hmm_path (str): Dictionary file is used by HMMSegment algorithm.
@@ -257,7 +260,7 @@ class JiebaTokenizer(cde.JiebaTokenizerOp):
             for k, v in user_dict.items():
                 self.add_word(k, v)
         else:
-            raise ValueError("the type of user_dict must str or dict")
+            raise TypeError("The type of user_dict must str or dict.")
 
     def __add_dict_py_file(self, file_path):
         """Add user defined word by file"""
@@ -273,7 +276,7 @@ class JiebaTokenizer(cde.JiebaTokenizerOp):
         """parser user defined word by file"""
         if not os.path.exists(file_path):
             raise ValueError(
-                "user dict file {} is not exist".format(file_path))
+                "user dict file {} is not exist.".format(file_path))
         real_file_path = os.path.realpath(file_path)
         file_dict = open(real_file_path)
         data_re = re.compile('^(.+?)( [0-9]+)?$', re.U)
@@ -285,7 +288,7 @@ class JiebaTokenizer(cde.JiebaTokenizerOp):
             words = data_re.match(data).groups()
             if len(words) != 2:
                 raise ValueError(
-                    "user dict file {} format error".format(real_file_path))
+                    "user dict file {} format error.".format(real_file_path))
             words_list.append(words)
         file_dict.close()
         return words_list
@@ -295,14 +298,14 @@ class JiebaTokenizer(cde.JiebaTokenizerOp):
         try:
             data = data.decode('utf-8')
         except UnicodeDecodeError:
-            raise ValueError("user dict file must utf8")
+            raise ValueError("user dict file must be utf8 format.")
         return data.lstrip('\ufeff')
 
     def __check_path__(self, model_path):
         """check model path"""
         if not os.path.exists(model_path):
             raise ValueError(
-                " jieba mode file {} is not exist".format(model_path))
+                " jieba mode file {} is not exist.".format(model_path))
 
 
 class UnicodeCharTokenizer(cde.UnicodeCharTokenizerOp):
@@ -348,12 +351,12 @@ class WordpieceTokenizer(cde.WordpieceTokenizerOp):
         >>> import mindspore.dataset.text as text
         >>>
         >>> # If with_offsets=False, default output one column {["text", dtype=str]}
-        >>> tokenizer_op = text.WordpieceTokenizer(vocab=vocab, unknown_token=['UNK'],
+        >>> tokenizer_op = text.WordpieceTokenizer(vocab=vocab, unknown_token='[UNK]',
         >>>                                       max_bytes_per_token=100, with_offsets=False)
         >>> data1 = data1.map(operations=tokenizer_op)
         >>> # If with_offsets=False, then output three columns {["token", dtype=str], ["offsets_start", dtype=uint32],
         >>> #                                                   ["offsets_limit", dtype=uint32]}
-        >>> tokenizer_op = text.WordpieceTokenizer(vocab=vocab, unknown_token=['UNK'],
+        >>> tokenizer_op = text.WordpieceTokenizer(vocab=vocab, unknown_token='[UNK]',
         >>>                                       max_bytes_per_token=100, with_offsets=True)
         >>> data2 = data2.map(operations=tokenizer_op,
         >>>                   input_columns=["text"], output_columns=["token", "offsets_start", "offsets_limit"],
@@ -417,6 +420,9 @@ if platform.system().lower() != 'windows':
         """
         Tokenize a scalar tensor of UTF-8 string on ICU4C defined whitespaces, such as: ' ', '\\\\t', '\\\\r', '\\\\n'.
 
+        Note:
+            WhitespaceTokenizer is not supported on Windows platform yet.
+
         Args:
             with_offsets (bool, optional): If or not output offsets of tokens (default=False).
 
@@ -444,6 +450,9 @@ if platform.system().lower() != 'windows':
     class UnicodeScriptTokenizer(cde.UnicodeScriptTokenizerOp):
         """
         Tokenize a scalar tensor of UTF-8 string on Unicode script boundaries.
+
+        Note:
+            UnicodeScriptTokenizer is not supported on Windows platform yet.
 
         Args:
             keep_whitespace (bool, optional): If or not emit whitespace tokens (default=False).
@@ -473,7 +482,10 @@ if platform.system().lower() != 'windows':
 
     class CaseFold(cde.CaseFoldOp):
         """
-        Apply case fold operation on utf-8 string tensor.
+        Apply case fold operation on UTF-8 string tensor.
+
+        Note:
+            CaseFold is not supported on Windows platform yet.
 
         Examples:
             >>> import mindspore.dataset.text as text
@@ -491,9 +503,13 @@ if platform.system().lower() != 'windows':
         NormalizeForm.NFKD: cde.NormalizeForm.DE_NORMALIZE_NFKD
     }
 
+
     class NormalizeUTF8(cde.NormalizeUTF8Op):
         """
-        Apply normalize operation on utf-8 string tensor.
+        Apply normalize operation on UTF-8 string tensor.
+
+        Note:
+            NormalizeUTF8 is not supported on Windows platform yet.
 
         Args:
             normalize_form (NormalizeForm, optional): Valid values can be any of [NormalizeForm.NONE,
@@ -516,7 +532,7 @@ if platform.system().lower() != 'windows':
 
         def __init__(self, normalize_form=NormalizeForm.NFKC):
             if not isinstance(normalize_form, NormalizeForm):
-                raise TypeError("Wrong input type for normalization_form, should be NormalizeForm.")
+                raise TypeError("Wrong input type for normalization_form, should be enum of 'NormalizeForm'.")
 
             self.normalize_form = DE_C_INTER_NORMALIZE_FORM[normalize_form]
             super().__init__(self.normalize_form)
@@ -524,9 +540,12 @@ if platform.system().lower() != 'windows':
 
     class RegexReplace(cde.RegexReplaceOp):
         """
-        Replace utf-8 string tensor with 'replace' according to regular expression 'pattern'.
+        Replace UTF-8 string tensor with 'replace' according to regular expression 'pattern'.
 
         See http://userguide.icu-project.org/strings/regexp for support regex pattern.
+
+        Note:
+            RegexReplace is not supported on Windows platform yet.
 
         Args:
             pattern (str): the regex expression patterns.
@@ -555,6 +574,9 @@ if platform.system().lower() != 'windows':
         Tokenize a scalar tensor of UTF-8 string by regex expression pattern.
 
         See http://userguide.icu-project.org/strings/regexp for support regex pattern.
+
+        Note:
+            RegexTokenizer is not supported on Windows platform yet.
 
         Args:
             delim_pattern (str): The pattern of regex delimiters.
@@ -591,6 +613,9 @@ if platform.system().lower() != 'windows':
         """
         Tokenize a scalar tensor of UTF-8 string by specific rules.
 
+        Note:
+            BasicTokenizer is not supported on Windows platform yet.
+
         Args:
             lower_case (bool, optional): If True, apply CaseFold, NormalizeUTF8(NFD mode), RegexReplace operation
                 on input text to fold the text to lower case and strip accents characters. If False, only apply
@@ -607,19 +632,19 @@ if platform.system().lower() != 'windows':
             >>>
             >>> # If with_offsets=False, default output one column {["text", dtype=str]}
             >>> tokenizer_op = text.BasicTokenizer(lower_case=False,
-            >>>                                   keep_whitespace=False,
-            >>>                                   normalization_form=NormalizeForm.NONE,
-            >>>                                   preserve_unused_token=True,
-            >>>                                   with_offsets=False)
+            >>>                                    keep_whitespace=False,
+            >>>                                    normalization_form=NormalizeForm.NONE,
+            >>>                                    preserve_unused_token=True,
+            >>>                                    with_offsets=False)
             >>> data1 = data1.map(operations=tokenizer_op)
             >>> # If with_offsets=False, then output three columns {["token", dtype=str],
             >>> #                                                   ["offsets_start", dtype=uint32],
             >>> #                                                   ["offsets_limit", dtype=uint32]}
             >>> tokenizer_op = text.BasicTokenizer(lower_case=False,
-            >>>                                   keep_whitespace=False,
-            >>>                                   normalization_form=NormalizeForm.NONE,
-            >>>                                   preserve_unused_token=True,
-            >>>                                   with_offsets=True)
+            >>>                                    keep_whitespace=False,
+            >>>                                    normalization_form=NormalizeForm.NONE,
+            >>>                                    preserve_unused_token=True,
+            >>>                                    with_offsets=True)
             >>> data2 = data2.map(operations=tokenizer_op, input_columns=["text"],
             >>>                   output_columns=["token", "offsets_start", "offsets_limit"],
             >>>                   column_order=["token", "offsets_start", "offsets_limit"])
@@ -629,7 +654,7 @@ if platform.system().lower() != 'windows':
         def __init__(self, lower_case=False, keep_whitespace=False, normalization_form=NormalizeForm.NONE,
                      preserve_unused_token=True, with_offsets=False):
             if not isinstance(normalization_form, NormalizeForm):
-                raise TypeError("Wrong input type for normalization_form, should be NormalizeForm.")
+                raise TypeError("Wrong input type for normalization_form, should be enum of 'NormalizeForm'.")
 
             self.lower_case = lower_case
             self.keep_whitespace = keep_whitespace
@@ -643,6 +668,9 @@ if platform.system().lower() != 'windows':
     class BertTokenizer(cde.BertTokenizerOp):
         """
         Tokenizer used for Bert text process.
+
+        Note:
+            BertTokenizer is not supported on Windows platform yet.
 
         Args:
             vocab (Vocab): A vocabulary object.
@@ -665,17 +693,17 @@ if platform.system().lower() != 'windows':
             >>>
             >>> # If with_offsets=False, default output one column {["text", dtype=str]}
             >>> tokenizer_op = text.BertTokenizer(vocab=vocab, suffix_indicator='##', max_bytes_per_token=100,
-            >>>                                  unknown_token=100, lower_case=False, keep_whitespace=False,
-            >>>                                  normalization_form=NormalizeForm.NONE, preserve_unused_token=True,
-            >>>                                  with_offsets=False)
+            >>>                                   unknown_token='[UNK]', lower_case=False, keep_whitespace=False,
+            >>>                                   normalization_form=NormalizeForm.NONE, preserve_unused_token=True,
+            >>>                                   with_offsets=False)
             >>> data1 = data1.map(operations=tokenizer_op)
             >>> # If with_offsets=False, then output three columns {["token", dtype=str],
             >>> #                                                   ["offsets_start", dtype=uint32],
             >>> #                                                   ["offsets_limit", dtype=uint32]}
             >>> tokenizer_op = text.BertTokenizer(vocab=vocab, suffix_indicator='##', max_bytes_per_token=100,
-            >>>                                  unknown_token=100, lower_case=False, keep_whitespace=False,
-            >>>                                  normalization_form=NormalizeForm.NONE, preserve_unused_token=True,
-            >>>                                  with_offsets=True)
+            >>>                                   unknown_token='[UNK]', lower_case=False, keep_whitespace=False,
+            >>>                                   normalization_form=NormalizeForm.NONE, preserve_unused_token=True,
+            >>>                                   with_offsets=True)
             >>> data2 = data2.map(operations=tokenizer_op, input_columns=["text"],
             >>>                   output_columns=["token", "offsets_start", "offsets_limit"],
             >>>                   column_order=["token", "offsets_start", "offsets_limit"])
@@ -686,7 +714,7 @@ if platform.system().lower() != 'windows':
                      lower_case=False, keep_whitespace=False, normalization_form=NormalizeForm.NONE,
                      preserve_unused_token=True, with_offsets=False):
             if not isinstance(normalization_form, NormalizeForm):
-                raise TypeError("Wrong input type for normalization_form, should be NormalizeForm.")
+                raise TypeError("Wrong input type for normalization_form, should be enum of 'NormalizeForm'.")
 
             self.vocab = vocab
             self.suffix_indicator = suffix_indicator
@@ -706,7 +734,7 @@ class TruncateSequencePair(cde.TruncateSequencePairOp):
     """
     Truncate a pair of rank-1 tensors such that the total length is less than max_length.
 
-    This operation takes two input tensors and returns two output Tenors.
+    This operation takes two input tensors and returns two output Tensors.
 
     Args:
         max_length (int): Maximum length required.

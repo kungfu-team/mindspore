@@ -16,6 +16,10 @@
 
 #include "src/ops/detection_post_process.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -139,6 +143,10 @@ bool DetectionPostProcess::GetOutQuantized() const {
   return this->primitive_->value_as_DetectionPostProcess()->OutQuantized();
 }
 
+PrimitiveC *DetectionPostProcessCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<DetectionPostProcess>(primitive);
+}
+Registry DetectionPostProcessRegistry(schema::PrimitiveType_DetectionPostProcess, DetectionPostProcessCreator);
 #endif
 namespace {
 constexpr int kDetectionPostProcessOutputNum = 4;
@@ -161,8 +169,8 @@ int DetectionPostProcess::InferShape(std::vector<lite::Tensor *> inputs_, std::v
   const auto input_anchors_shape = anchors->shape();
   MS_ASSERT(input_scores_shape[2] >= GetNumClasses());
   MS_ASSERT(input_scores_shape[2] - GetNumClasses() <= 1);
-  MS_ASSERT(input_box_shape[1] = input_scores_shape[1]);
-  MS_ASSERT(input_box_shape[1] = input_anchors_shape[0]);
+  MS_ASSERT(input_box_shape[1] == input_scores_shape[1]);
+  MS_ASSERT(input_box_shape[1] == input_anchors_shape[0]);
 
   auto detected_boxes = outputs_.at(0);
   MS_ASSERT(detected_boxes != nullptr);
@@ -173,16 +181,16 @@ int DetectionPostProcess::InferShape(std::vector<lite::Tensor *> inputs_, std::v
   auto num_det = outputs_.at(3);
   MS_ASSERT(num_det != nullptr);
 
-  detected_boxes->SetFormat(boxes->GetFormat());
-  detected_boxes->set_data_type(boxes->data_type());
-  detected_classes->SetFormat(boxes->GetFormat());
-  detected_classes->set_data_type(boxes->data_type());
-  detected_scores->SetFormat(boxes->GetFormat());
-  detected_scores->set_data_type(boxes->data_type());
-  num_det->SetFormat(boxes->GetFormat());
-  num_det->set_data_type(boxes->data_type());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  detected_boxes->set_format(boxes->format());
+  detected_boxes->set_data_type(kNumberTypeFloat32);
+  detected_classes->set_format(boxes->format());
+  detected_classes->set_data_type(kNumberTypeFloat32);
+  detected_scores->set_format(boxes->format());
+  detected_scores->set_data_type(kNumberTypeFloat32);
+  num_det->set_format(boxes->format());
+  num_det->set_data_type(kNumberTypeFloat32);
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   const auto max_detections = GetMaxDetections();
   const auto max_classes_per_detection = GetMaxClassesPerDetection();

@@ -16,10 +16,41 @@
 
 #include "src/ops/floor.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
-#ifndef PRIMITIVE_WRITEABLE
-
+#ifdef PRIMITIVE_WRITEABLE
+int Floor::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
+  if (this->primitive_ == nullptr) {
+    this->primitive_ = new (std::nothrow) schema::PrimitiveT;
+    if (this->primitive_ == nullptr) {
+      MS_LOG(ERROR) << "new primitiveT failed";
+      return RET_ERROR;
+    }
+    this->primitive_->value.type = schema::PrimitiveType_Floor;
+  }
+  if (this->primitive_->value.type != schema::PrimitiveType_Floor) {
+    MS_LOG(ERROR) << "Primitive type is error :" << this->primitive_->value.type;
+    delete this->primitive_;
+    this->primitive_ = nullptr;
+    return RET_ERROR;
+  }
+  if (this->primitive_->value.value == nullptr) {
+    auto attr = new (std::nothrow) schema::FloorT();
+    if (attr == nullptr) {
+      delete this->primitive_;
+      this->primitive_ = nullptr;
+      MS_LOG(ERROR) << "new primitiveT value failed";
+      return RET_ERROR;
+    }
+    this->primitive_->value.value = attr;
+  }
+  return RET_OK;
+}
+#else
 int Floor::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) {
   MS_ASSERT(nullptr != primitive);
   MS_ASSERT(nullptr != fbb);
@@ -28,7 +59,9 @@ int Floor::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::
   fbb->Finish(prim_offset);
   return RET_OK;
 }
-
+PrimitiveC *FloorCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Floor>(primitive); }
+Registry FloorRegistry(schema::PrimitiveType_Floor, FloorCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

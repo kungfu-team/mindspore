@@ -27,13 +27,13 @@ namespace mindspore {
 namespace lite {
 class Sqrt : public ArithmeticSelf {
  public:
+  Sqrt() = default;
+  ~Sqrt() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(Sqrt, ArithmeticSelf);
-  Sqrt() = default;
   explicit Sqrt(schema::PrimitiveT *primitive) : ArithmeticSelf(primitive) {}
+  int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
 #else
-  Sqrt() = default;
-
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
 };

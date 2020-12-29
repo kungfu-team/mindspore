@@ -23,8 +23,7 @@
 #include "minddata/dataset/engine/db_connector.h"
 #include "minddata/dataset/engine/execution_tree.h"
 #include "minddata/dataset/engine/opt/pass.h"
-
-#include "utils/log_adapter.h"
+#include "minddata/dataset/util/log_adapter.h"
 
 namespace mindspore {
 namespace dataset {
@@ -130,5 +129,12 @@ Status SkipOp::Accept(NodePass *p, bool *modified) {
   // Downcast shared pointer then call visitor
   return p->RunOnNode(shared_from_base<SkipOp>(), modified);
 }
+
+// Visitor pre-accept method for NodePass
+Status SkipOp::PreAccept(NodePass *p, bool *modified) {
+  // Downcast shared pointer then call visitor
+  return p->PreRunOnNode(shared_from_base<SkipOp>(), modified);
+}
+
 }  // namespace dataset
 }  // namespace mindspore

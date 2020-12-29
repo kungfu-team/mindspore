@@ -27,18 +27,14 @@
 
 #include "proto/example.pb.h"
 #include "./securec.h"
-#include "utils/ms_utils.h"
 #include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/core/global_context.h"
-#include "minddata/dataset/engine/connector.h"
 #include "minddata/dataset/engine/data_schema.h"
 #include "minddata/dataset/engine/datasetops/source/io_block.h"
 #include "minddata/dataset/engine/db_connector.h"
 #include "minddata/dataset/engine/execution_tree.h"
 #include "minddata/dataset/engine/jagged_connector.h"
 #include "minddata/dataset/engine/opt/pass.h"
-#include "minddata/dataset/util/path.h"
-#include "minddata/dataset/util/queue.h"
 #include "minddata/dataset/util/random.h"
 #include "minddata/dataset/util/status.h"
 #include "minddata/dataset/util/task_manager.h"
@@ -62,7 +58,7 @@ TFReaderOp::Builder::Builder()
   builder_data_schema_ = std::make_unique<DataSchema>();
 }
 
-bool ValidateFirstRowCrc(const std::string &filename) {
+bool TFReaderOp::ValidateFirstRowCrc(const std::string &filename) {
   std::ifstream reader;
   reader.open(filename);
   if (!reader) {
@@ -138,7 +134,7 @@ TFReaderOp::TFReaderOp(int32_t num_workers, int32_t worker_connector_size, int64
                        int64_t total_num_rows, std::vector<std::string> dataset_files_list,
                        std::unique_ptr<DataSchema> data_schema, int32_t op_connector_size,
                        std::vector<std::string> columns_to_load, bool shuffle_files, int32_t num_device,
-                       int32_t device_id, bool equal_rows_per_shard, std::shared_ptr<Sampler> sampler)
+                       int32_t device_id, bool equal_rows_per_shard, std::shared_ptr<SamplerRT> sampler)
     : ParallelOp(num_workers, op_connector_size, std::move(sampler)),
       device_id_(device_id),
       num_devices_(num_device),
@@ -387,14 +383,14 @@ Status TFReaderOp::PostEndOfEpoch(int32_t queue_index) {
   return Status::OK();
 }
 
-bool TFReaderOp::NeedPushFileToblockQueue(const std::string &file_name, int64_t *start_offset, int64_t *end_offset,
+bool TFReaderOp::NeedPushFileToBlockQueue(const std::string &file_name, int64_t *start_offset, int64_t *end_offset,
                                           const int64_t &pre_count) {
   *start_offset = 0;
   *end_offset = 0;
   bool push = false;
   int64_t start_index = device_id_ * num_rows_per_shard_;
   if (device_id_ + 1 < 0) {
-    MS_LOG(ERROR) << "Device id is invalid";
+    MS_LOG(ERROR) << "Device id is invalid.";
     return false;
   }
   int64_t end_index = (static_cast<int64_t>(device_id_) + 1) * num_rows_per_shard_;
@@ -448,7 +444,7 @@ Status TFReaderOp::FillIOBlockShuffle(const std::vector<int64_t> &i_keys) {
       } else {
         // Do an index lookup using that key to get the filename.
         std::string file_name = (*filename_index_)[*it];
-        if (NeedPushFileToblockQueue(file_name, &start_offset, &end_offset, pre_count)) {
+        if (NeedPushFileToBlockQueue(file_name, &start_offset, &end_offset, pre_count)) {
           auto ioBlock = std::make_unique<FilenameBlock>(*it, start_offset, end_offset, IOBlock::kDeIoBlockNone);
           RETURN_IF_NOT_OK(PushIoBlockQueue(queue_index, std::move(ioBlock)));
           MS_LOG(DEBUG) << "File name " << *it << " start offset " << start_offset << " end_offset " << end_offset;
@@ -496,7 +492,7 @@ Status TFReaderOp::FillIOBlockNoShuffle() {
         }
       } else {
         std::string file_name = it.value();
-        if (NeedPushFileToblockQueue(file_name, &start_offset, &end_offset, pre_count)) {
+        if (NeedPushFileToBlockQueue(file_name, &start_offset, &end_offset, pre_count)) {
           auto ioBlock = std::make_unique<FilenameBlock>(it.key(), start_offset, end_offset, IOBlock::kDeIoBlockNone);
           RETURN_IF_NOT_OK(PushIoBlockQueue(queue_index, std::move(ioBlock)));
           queue_index = (queue_index + 1) % num_workers_;
@@ -642,7 +638,7 @@ Status TFReaderOp::LoadExample(const dataengine::Example *tf_file, std::unique_p
     const google::protobuf::Map<std::string, dataengine::Feature> &feature_map = example_features.feature();
     auto iter_column = feature_map.find(current_col.name());
     if (iter_column == feature_map.end()) {
-      RETURN_STATUS_UNEXPECTED("Invalid parameter, column name: " + current_col.name() + "does not exist.");
+      RETURN_STATUS_UNEXPECTED("Invalid parameter, column name: " + current_col.name() + " does not exist.");
     }
     const dataengine::Feature &column_values_list = iter_column->second;
     RETURN_IF_NOT_OK(LoadFeature(tensor_table, column_values_list, current_col, row, col));
@@ -711,7 +707,7 @@ Status TFReaderOp::LoadFeature(const std::unique_ptr<TensorQTable> *tensor_table
 // reinitializes itself so that it can be executed again, as if it was just created.
 Status TFReaderOp::Reset() {
   MS_LOG(DEBUG) << Name() << " performing a self-reset.";
-  // start workers first, otherwise IOBlokcs will fall through if workers see it before this is set to true
+  // start workers first, otherwise IOBlocks will fall through if workers see it before this is set to true
   load_jagged_connector_ = true;
 
   {
@@ -749,7 +745,13 @@ Status TFReaderOp::LoadBytesList(const ColDescriptor &current_col, const dataeng
   }
 
   uint64_t max_size = 0;
-  for (uint32_t i = 0; i < bytes_list.value_size(); ++i) max_size = std::max(max_size, bytes_list.value(i).size());
+  for (uint32_t i = 0; i < bytes_list.value_size(); ++i) {
+#if defined(__APPLE__)
+    max_size = fmax(max_size, bytes_list.value(i).size());
+#else
+    max_size = std::max(max_size, bytes_list.value(i).size());
+#endif
+  }
 
   int64_t pad_size = max_size;
 
@@ -767,6 +769,14 @@ Status TFReaderOp::LoadBytesList(const ColDescriptor &current_col, const dataeng
         new_pad_size *= cur_shape[i];
       }
       pad_size = new_pad_size;
+    } else {
+      if (cur_shape.known() && cur_shape.NumOfElements() != max_size) {
+        std::string err_msg = "Shape in schema's column '" + current_col.name() + "' is incorrect." +
+                              "\nshape received: " + cur_shape.ToString() +
+                              "\ntotal elements in shape received: " + std::to_string(cur_shape.NumOfElements()) +
+                              "\nexpected total elements in shape: " + std::to_string(max_size);
+        RETURN_STATUS_UNEXPECTED(err_msg);
+      }
     }
   }
 
@@ -1062,5 +1072,6 @@ Status TFReaderOp::PrepareNodePostAction() {
 
   return Status::OK();
 }
+
 }  // namespace dataset
 }  // namespace mindspore

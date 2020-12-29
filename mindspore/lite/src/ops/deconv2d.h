@@ -26,9 +26,10 @@ namespace mindspore {
 namespace lite {
 class DeConv2D : public PrimitiveC {
  public:
+  DeConv2D() = default;
+  ~DeConv2D() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(DeConv2D, PrimitiveC);
-  DeConv2D() = default;
   explicit DeConv2D(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
   void SetFormat(int format);
   void SetGroup(int group);
@@ -45,16 +46,12 @@ class DeConv2D : public PrimitiveC {
   void SetPadRight(int pad_right);
   void SetDilateW(int dilate_w);
   void SetDilateH(int dilate_h);
-  void SetHasBias(bool has_bias);
   void SetActivationType(int activation_type);
   void PopulaterDeConv2DSingleGroup(const Primitive &prim, schema::PrimitiveT *primitive, const int &group);
   void PopulaterConv2DMultiGroup(const Primitive &prim, schema::PrimitiveT *primitive, const int &group,
                                  const std::vector<AnfNodePtr> &inputs);
   int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
-
 #else
-  DeConv2D() = default;
-
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
   int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
@@ -73,7 +70,6 @@ class DeConv2D : public PrimitiveC {
   int GetPadRight() const;
   int GetDilateW() const;
   int GetDilateH() const;
-  bool GetHasBias() const;
   int GetActivationType() const;
 
   int PadUp() const { return this->pad_u_; }

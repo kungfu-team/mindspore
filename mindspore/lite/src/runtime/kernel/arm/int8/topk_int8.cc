@@ -33,28 +33,24 @@ int TopKInt8CPUKernel::Init() {
 
 int TopKInt8CPUKernel::ReSize() {
   TopkParameter *parameter = reinterpret_cast<TopkParameter *>(op_parameter_);
-  if (parameter->topk_node_list_ != nullptr) {
-    free(parameter->topk_node_list_);
-    parameter->topk_node_list_ = nullptr;
-  }
+  MS_ASSERT(parameter);
   lite::Tensor *input = in_tensors_.at(0);
-  parameter->last_dim_size_ = input->shape()[input->shape().size() - 1];
+  MS_ASSERT(input);
+  parameter->last_dim_size_ = input->shape().at(input->shape().size() - 1);
   parameter->loop_num_ = 1;
   for (size_t i = 0; i < input->shape().size() - 1; ++i) {
-    parameter->loop_num_ *= input->shape()[i];
+    parameter->loop_num_ *= input->shape().at(i);
   }
   return RET_OK;
 }
 
 int TopKInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare failed.";
-    return ret;
-  }
   int8_t *input_data = reinterpret_cast<int8_t *>(in_tensors_.at(0)->MutableData());
+  MS_ASSERT(input_data);
   int8_t *output_data = reinterpret_cast<int8_t *>(out_tensors_.at(0)->MutableData());
+  MS_ASSERT(output_data);
   int32_t *output_index = reinterpret_cast<int32_t *>(out_tensors_.at(1)->MutableData());
+  MS_ASSERT(output_index);
 
   MS_ASSERT(context_->allocator != nullptr);
   TopkParameter *parameter = reinterpret_cast<TopkParameter *>(op_parameter_);
@@ -68,30 +64,5 @@ int TopKInt8CPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuTopKInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                             const std::vector<lite::Tensor *> &outputs, OpParameter *parameter,
-                                             const lite::InnerContext *ctx, const KernelKey &desc,
-                                             const mindspore::lite::PrimitiveC *primitive) {
-  if (parameter == nullptr) {
-    MS_LOG(ERROR) << "input parameter is nullptr!";
-    return nullptr;
-  }
-
-  TopKInt8CPUKernel *kernel = new (std::nothrow) TopKInt8CPUKernel(parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new TopKInt8CPUKernel fail!";
-    return nullptr;
-  }
-
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << parameter->name_
-                  << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_TopK, CpuTopKInt8KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_TopK, LiteKernelCreator<TopKInt8CPUKernel>)
 }  // namespace mindspore::kernel

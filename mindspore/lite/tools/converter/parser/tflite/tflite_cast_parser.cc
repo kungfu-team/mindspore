@@ -17,52 +17,34 @@
 #include "tools/converter/parser/tflite/tflite_cast_parser.h"
 #include <vector>
 #include <memory>
-#include <map>
 
-namespace mindspore {
-namespace lite {
-STATUS TfliteCastParser::Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                               const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TfliteCastParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
+namespace mindspore::lite {
+PrimitiveC *TfliteCastParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                 const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  auto &tflite_subgraph = tflite_model->subgraphs.front();
+  auto primitive = std::make_unique<schema::PrimitiveT>();
   std::unique_ptr<schema::CastT> attr = std::make_unique<schema::CastT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
-  const auto &in_tensor = tflite_model->subgraphs[0]->tensors[tflite_op->inputs[0]];
+  const auto &in_tensor = tflite_subgraph->tensors[tflite_op->inputs[0]];
   if (in_tensor == nullptr) {
     MS_LOG(ERROR) << "tensor is null";
-    return RET_NULL_PTR;
+    return nullptr;
   }
   attr->srcT = GetTfliteDataType(in_tensor->type);
-  const auto &out_tensor = tflite_model->subgraphs[0]->tensors[tflite_op->outputs[0]];
+  const auto &out_tensor = tflite_subgraph->tensors[tflite_op->outputs[0]];
   if (out_tensor == nullptr) {
     MS_LOG(ERROR) << "tensor is null";
-    return RET_NULL_PTR;
+    return nullptr;
   }
   attr->dstT = GetTfliteDataType(out_tensor->type);
-
-  op->primitive->value.type = schema::PrimitiveType_Cast;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  primitive->value.type = schema::PrimitiveType_Cast;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteCastParser("Cast", new TfliteCastParser());
-}  // namespace lite
-}  // namespace mindspore
+TfliteNodeRegister g_tfliteCastParser(tflite::BuiltinOperator_CAST, new TfliteCastParser());
+}  // namespace mindspore::lite

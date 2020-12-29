@@ -17,22 +17,27 @@
 import os
 import re
 import json
+from json.decoder import JSONDecodeError
 
 from importlib import import_module
 
 import numpy as np
 
 from mindspore import log as logger
+from mindspore import context
 from mindspore.common.tensor import Tensor
 from mindspore.common.parameter import Parameter
 from mindspore.train.summary.summary_record import SummaryRecord
-from mindspore.train.summary.enum import PluginEnum, ModeEnum
+from mindspore.train.summary.enums import PluginEnum, ModeEnum
 from mindspore.train.callback import Callback, ModelCheckpoint
 from mindspore.train import lineage_pb2
 from mindspore.train.callback._dataset_graph import DatasetGraph
 from mindspore.nn.optim.optimizer import Optimizer
 from mindspore.nn.loss.loss import _Loss
 from mindspore.train._utils import check_value_type
+
+HYPER_CONFIG_ENV_NAME = "MINDINSIGHT_HYPER_CONFIG"
+HYPER_CONFIG_LEN_LIMIT = 100000
 
 
 class LineageMetadata:
@@ -130,13 +135,17 @@ class SummaryCollector(Callback):
 
     Examples:
         >>> # Simple usage:
+        >>> from mindspore.train import Model
         >>> summary_collector = SummaryCollector(summary_dir='./summary_dir')
-        >>> model.train(epoch, dataset, callbacks=summary_collector)
+        >>> dataset = get_dataset('/path/to/MNIST')
+        >>> network = LeNet5()
+        >>> model = Model(network)
+        >>> model.train(epoch=1, dataset=dataset, callbacks=summary_collector)
         >>>
         >>> # Do not collect metric and collect the first layer parameter, others are collected by default
         >>> specified={'collect_metric': False, 'histogram_regular': '^conv1.*'}
         >>> summary_collector = SummaryCollector(summary_dir='./summary_dir', collect_specified_data=specified)
-        >>> model.train(epoch, dataset, callbacks=summary_collector)
+        >>> model.train(epoch=1, dataset=dataset, callbacks=summary_collector)
         >>>
         >>> # Only collect metric, custom lineage data and record data that collected by the summary operator,
         >>> # others are not collected
@@ -146,7 +155,7 @@ class SummaryCollector(Callback):
         >>>                                      keep_default_action=False,
         >>>                                      custom_lineage_data={'version': 'resnet50_v1'}
         >>>                                      )
-        >>> model.train(epoch, dataset, callbacks=summary_collector)
+        >>> model.train(epoch=1, dataset=dataset, callbacks=summary_collector)
     """
 
     _DEFAULT_SPECIFIED_DATA = {
@@ -188,8 +197,7 @@ class SummaryCollector(Callback):
         msg = f"For 'collect_specified_data' the value after processing is: {self._collect_specified_data}."
         logger.info(msg)
 
-        self._check_custom_lineage_data(custom_lineage_data)
-        self._custom_lineage_data = custom_lineage_data
+        self._custom_lineage_data = self._process_custom_lineage_data(custom_lineage_data)
 
         self._temp_optimizer = None
         self._has_saved_graph = False
@@ -232,8 +240,7 @@ class SummaryCollector(Callback):
         if value <= 0:
             raise ValueError(f'For `{name}` the value should be greater than 0, but got `{value}`.')
 
-    @staticmethod
-    def _check_custom_lineage_data(custom_lineage_data):
+    def _process_custom_lineage_data(self, custom_lineage_data):
         """
         Check user custom lineage data.
 
@@ -244,12 +251,50 @@ class SummaryCollector(Callback):
             TypeError: If the type of parameters is invalid.
         """
         if custom_lineage_data is None:
-            return
+            custom_lineage_data = {}
+        self._check_custom_lineage_type('custom_lineage_data', custom_lineage_data)
 
-        check_value_type('custom_lineage_data', custom_lineage_data, [dict, type(None)])
-        for key, value in custom_lineage_data.items():
-            check_value_type(f'custom_lineage_data -> {key}', key, str)
-            check_value_type(f'the value of custom_lineage_data -> {key}', value, (int, str, float))
+        auto_custom_lineage_data = self._collect_optimizer_custom_lineage_data()
+        self._check_custom_lineage_type('auto_custom_lineage_data', auto_custom_lineage_data)
+        # the priority of user defined info is higher than auto collected info
+        auto_custom_lineage_data.update(custom_lineage_data)
+        custom_lineage_data = auto_custom_lineage_data
+
+        return custom_lineage_data
+
+    def _check_custom_lineage_type(self, param_name, custom_lineage):
+        """Check custom lineage type."""
+        check_value_type(param_name, custom_lineage, [dict, type(None)])
+        for key, value in custom_lineage.items():
+            check_value_type(f'{param_name} -> {key}', key, str)
+            check_value_type(f'the value of {param_name} -> {key}', value, (int, str, float))
+
+    def _collect_optimizer_custom_lineage_data(self):
+        """Collect custom lineage data if mindoptimizer has set the hyper config"""
+        auto_custom_lineage_data = {}
+
+        hyper_config = os.environ.get(HYPER_CONFIG_ENV_NAME)
+        if hyper_config is None:
+            logger.debug("Hyper config is not in system environment.")
+            return auto_custom_lineage_data
+        if len(hyper_config) > HYPER_CONFIG_LEN_LIMIT:
+            logger.warning("Hyper config is too long. The length limit is %s, the length of "
+                           "hyper_config is %s." % (HYPER_CONFIG_LEN_LIMIT, len(hyper_config)))
+            return auto_custom_lineage_data
+
+        try:
+            hyper_config = json.loads(hyper_config)
+        except (TypeError, JSONDecodeError) as exc:
+            logger.warning("Hyper config decode error. Detail: %s." % str(exc))
+            return auto_custom_lineage_data
+
+        custom_lineage_data = hyper_config.get("custom_lineage_data")
+        if custom_lineage_data is None:
+            logger.info("No custom lineage data in hyper config. Please check the custom lineage data "
+                        "if custom parameters exist in the configuration file.")
+        auto_custom_lineage_data = custom_lineage_data if custom_lineage_data is not None else {}
+
+        return auto_custom_lineage_data
 
     @staticmethod
     def _check_action(action):
@@ -413,10 +458,17 @@ class SummaryCollector(Callback):
         if not self._collect_specified_data.get('collect_input_data'):
             return
 
+        if self._dataset_sink_mode and context.get_context('device_target') == 'Ascend':
+            self._collect_specified_data['collect_input_data'] = False
+            logger.warning('On Ascend device, SummaryCollector is not supported to record input data '
+                           'in dataset sink mode.')
+            return
+
         input_data = getattr(cb_params, 'train_dataset_element', None)
         if input_data is None:
             self._collect_specified_data['collect_input_data'] = False
-            logger.info("The 'train_dataset_element' in cb_params is None, maybe there is dataset sink mode.")
+            logger.info("The 'train_dataset_element' in cb_params is None, "
+                        "so 'SummaryCollector' will not record the input data.")
             return
 
         if isinstance(input_data, (list, tuple)) and input_data:
@@ -502,8 +554,7 @@ class SummaryCollector(Callback):
         if not isinstance(loss, Tensor):
             loss = Tensor(loss)
 
-        precision = 4
-        loss = Tensor(round(np.mean(loss.asnumpy()), precision))
+        loss = Tensor(np.mean(loss.asnumpy()))
         return loss
 
     def _get_optimizer(self, cb_params):
@@ -596,8 +647,8 @@ class SummaryCollector(Callback):
         """
         learning_rate = optimizer.learning_rate
         if not isinstance(learning_rate, Parameter):
-            logger.warning("The learning rate detected in the optimizer "
-                           "is not a Parameter type, so it is not recorded.")
+            logger.warning("The learning rate detected in the optimizer is not a Parameter type, "
+                           "so it is not recorded. Its type is %r.", type(learning_rate).__name__)
             return None
         return learning_rate.data
 

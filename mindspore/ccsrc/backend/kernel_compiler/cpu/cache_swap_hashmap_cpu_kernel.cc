@@ -20,7 +20,6 @@
 
 namespace mindspore {
 namespace kernel {
-
 template <typename T>
 void Compress(HashmapEntry<T> *entry_p, const size_t &length, T entry) {
   T i = (entry + 1) % length, off = 1;
@@ -50,6 +49,9 @@ void CacheSwapHashmapCPUKernel::InitKernel(const CNodePtr &kernel_node) {
   }
 
   hashmap_length_ = hashmap_shape[0];
+  if (hashmap_length_ <= 0) {
+    MS_LOG(EXCEPTION) << "Hashmap length must > 0";
+  }
   dtype_ = AnfAlgo::GetPrevNodeOutputInferDataType(kernel_node, 0);
 }
 
@@ -107,6 +109,5 @@ void CacheSwapHashmapCPUKernel::LaunchKernel(const std::vector<AddressPtr> &inpu
     }
   }
 }
-
 }  // namespace kernel
 }  // namespace mindspore

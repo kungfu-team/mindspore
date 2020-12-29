@@ -33,10 +33,10 @@ int ReluXInt8CPUKernel::Init() {
   MS_ASSERT(input);
   MS_ASSERT(output);
 
-  quant_arg_.input_arg.scale_ = input->GetQuantParams().front().scale;
-  quant_arg_.input_arg.zp_ = input->GetQuantParams().front().zeroPoint;
-  quant_arg_.output_arg.scale_ = output->GetQuantParams().front().scale;
-  quant_arg_.output_arg.zp_ = output->GetQuantParams().front().zeroPoint;
+  quant_arg_.input_arg.scale_ = input->quant_params().front().scale;
+  quant_arg_.input_arg.zp_ = input->quant_params().front().zeroPoint;
+  quant_arg_.output_arg.scale_ = output->quant_params().front().scale;
+  quant_arg_.output_arg.zp_ = output->quant_params().front().zeroPoint;
 
   const double multiplier = quant_arg_.input_arg.scale_ / quant_arg_.output_arg.scale_;
   QuantizeRoundParameter(multiplier, &quant_arg_.input_multiplier_, &quant_arg_.left_shift_, &quant_arg_.right_shift_);
@@ -48,7 +48,9 @@ int ReluXInt8CPUKernel::ReSize() { return RET_OK; }
 
 int ReluXInt8CPUKernel::DoActivation(int task_id) {
   auto input_addr = reinterpret_cast<int8_t *>(in_tensors_.at(0)->MutableData());
+  MS_ASSERT(input_addr);
   auto output_addr = reinterpret_cast<int8_t *>(out_tensors_.at(0)->MutableData());
+  MS_ASSERT(output_addr);
   auto length = in_tensors_.at(0)->ElementsNum();
 
   int stride = UP_DIV(length, op_parameter_->thread_num_);
@@ -69,11 +71,6 @@ int ReluXInt8Run(void *cdata, int task_id) {
 }
 
 int ReluXInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << ret;
-    return ret;
-  }
   int error_code = ParallelLaunch(this->context_->thread_pool_, ReluXInt8Run, this, op_parameter_->thread_num_);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "ReluXInt8Run function error error_code[" << error_code << "]";

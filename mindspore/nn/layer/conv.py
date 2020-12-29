@@ -19,7 +19,7 @@ from mindspore import context
 from mindspore.ops import operations as P
 from mindspore.ops.primitive import constexpr
 from mindspore.common.parameter import Parameter
-from mindspore.common.initializer import initializer, Initializer
+from mindspore.common.initializer import initializer
 from mindspore.common.tensor import Tensor
 from mindspore._checkparam import Validator, Rel, twice
 from mindspore._extends import cell_attr_register
@@ -45,6 +45,7 @@ class _Conv(Cell):
                  has_bias,
                  weight_init,
                  bias_init,
+                 data_format='NCHW',
                  transposed=False):
         super(_Conv, self).__init__()
         self.in_channels = Validator.check_positive_int(in_channels)
@@ -54,6 +55,9 @@ class _Conv(Cell):
         self.pad_mode = pad_mode
         self.weight_init = weight_init
         self.bias_init = bias_init
+        self.format = Validator.check_string(data_format, ['NCHW', 'NHWC'], 'format', self.cls_name)
+        if context.get_context("device_target") != "GPU" and self.format == "NHWC":
+            raise ValueError("NHWC format only support in GPU target.")
         if isinstance(padding, int):
             Validator.check_non_negative_int(padding, 'padding', self.cls_name)
             self.padding = padding
@@ -89,7 +93,8 @@ class _Conv(Cell):
         if transposed:
             shape = [in_channels, out_channels // group, *kernel_size]
         else:
-            shape = [out_channels, in_channels // group, *kernel_size]
+            shape = [out_channels, in_channels // group, *kernel_size] if self.format == "NCHW" else \
+                [out_channels, *kernel_size, in_channels // group]
         self.weight = Parameter(initializer(self.weight_init, shape), name='weight')
 
         if Validator.check_bool(has_bias):
@@ -126,9 +131,9 @@ class Conv2d(_Conv):
 
     If the 'pad_mode' is set to be "valid", the output height and width will be
     :math:`\left \lfloor{1 + \frac{H_{in} + 2 \times \text{padding} - \text{ks_h} -
-    (\text{ks_h} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor` and
+    (\text{ks_h} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor`    and
     :math:`\left \lfloor{1 + \frac{W_{in} + 2 \times \text{padding} - \text{ks_w} -
-    (\text{ks_w} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor` respectively.
+    (\text{ks_w} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor`    respectively.
 
     The first introduction can be found in paper `Gradient Based Learning Applied to Document Recognition
     <http://vision.stanford.edu/cs598_spring07/papers/Lecun98.pdf>`_.
@@ -181,17 +186,24 @@ class Conv2d(_Conv):
         bias_init (Union[Tensor, str, Initializer, numbers.Number]): Initializer for the bias vector. Possible
             Initializer and string are the same as 'weight_init'. Refer to the values of
             Initializer for more details. Default: 'zeros'.
+        data_format (str): The optional value for data format, is 'NHWC' or 'NCHW'.
+            Default: 'NCHW'.
 
     Inputs:
-        - **input** (Tensor) - Tensor of shape :math:`(N, C_{in}, H_{in}, W_{in})`.
+        - **input** (Tensor) - Tensor of shape :math:`(N, C_{in}, H_{in}, W_{in})` \
+            or `(N, H_{in}, W_{in}, C_{in})`.
 
     Outputs:
-        Tensor of shape :math:`(N, C_{out}, H_{out}, W_{out})`.
+        Tensor of shape :math:`(N, C_{out}, H_{out}, W_{out})` or `(N, H_{out}, W_{out}, C_{out})`.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
 
     Examples:
         >>> net = nn.Conv2d(120, 240, 4, has_bias=False, weight_init='normal')
         >>> input = Tensor(np.ones([1, 120, 1024, 640]), mindspore.float32)
-        >>> net(input).shape
+        >>> output = net(input).shape
+        >>> print(output)
         (1, 240, 1024, 640)
     """
 
@@ -207,7 +219,8 @@ class Conv2d(_Conv):
                  group=1,
                  has_bias=False,
                  weight_init='normal',
-                 bias_init='zeros'):
+                 bias_init='zeros',
+                 data_format='NCHW'):
         kernel_size = twice(kernel_size)
         stride = twice(stride)
         self._dilation = dilation
@@ -223,7 +236,8 @@ class Conv2d(_Conv):
             group,
             has_bias,
             weight_init,
-            bias_init)
+            bias_init,
+            data_format)
         self.conv2d = P.Conv2D(out_channel=self.out_channels,
                                kernel_size=self.kernel_size,
                                mode=1,
@@ -231,28 +245,9 @@ class Conv2d(_Conv):
                                pad=self.padding,
                                stride=self.stride,
                                dilation=self.dilation,
-                               group=self.group)
-        self._init_depthwise_conv2d()
+                               group=self.group,
+                               data_format=self.format)
         self.bias_add = P.BiasAdd()
-
-    def _init_depthwise_conv2d(self):
-        """Initialize depthwise conv2d op"""
-        if context.get_context("device_target") == "Ascend" and self.group > 1:
-            self.dilation = self._dilation
-            Validator.check_integer('group', self.group, self.in_channels, Rel.EQ)
-            Validator.check_integer('group', self.group, self.out_channels, Rel.EQ)
-            self.conv2d = P.DepthwiseConv2dNative(channel_multiplier=1,
-                                                  kernel_size=self.kernel_size,
-                                                  pad_mode=self.pad_mode,
-                                                  pad=self.padding,
-                                                  stride=self.stride,
-                                                  dilation=self.dilation)
-            weight_shape = [1, self.in_channels, *self.kernel_size]
-            if isinstance(self.weight_init, Tensor):
-                self.weight_init = Tensor(self.weight_init.asnumpy().swapaxes(0, 1), self.weight_init.dtype)
-            if isinstance(self.weight_init, Initializer):
-                self.weight_init.shape = weight_shape
-            self.weight = Parameter(initializer(self.weight_init, weight_shape), name='weight')
 
     def construct(self, x):
         output = self.conv2d(x, self.weight)
@@ -263,8 +258,8 @@ class Conv2d(_Conv):
     def extend_repr(self):
         s = 'input_channels={}, output_channels={}, kernel_size={},' \
             'stride={},  pad_mode={}, padding={}, dilation={}, ' \
-            'group={}, has_bias={},' \
-            'weight_init={}, bias_init={}'.format(
+            'group={}, has_bias={}' \
+            'weight_init={}, bias_init={}, format={}'.format(
                 self.in_channels,
                 self.out_channels,
                 self.kernel_size,
@@ -275,7 +270,8 @@ class Conv2d(_Conv):
                 self.group,
                 self.has_bias,
                 self.weight_init,
-                self.bias_init)
+                self.bias_init,
+                self.format)
         return s
 
 
@@ -306,7 +302,7 @@ class Conv1d(_Conv):
 
     If the 'pad_mode' is set to be "valid", the output width will be
     :math:`\left \lfloor{1 + \frac{W_{in} + 2 \times \text{padding} - \text{ks_w} -
-    (\text{ks_w} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor` respectively.
+    (\text{ks_w} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor`    respectively.
 
     The first introduction of convolution layer can be found in paper `Gradient Based Learning Applied to Document
     Recognition <http://vision.stanford.edu/cs598_spring07/papers/Lecun98.pdf>`_.
@@ -359,10 +355,14 @@ class Conv1d(_Conv):
     Outputs:
         Tensor of shape :math:`(N, C_{out}, W_{out})`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> net = nn.Conv1d(120, 240, 4, has_bias=False, weight_init='normal')
         >>> input = Tensor(np.ones([1, 120, 640]), mindspore.float32)
-        >>> net(input).shape
+        >>> output = net(input).shape
+        >>> print(output)
         (1, 240, 640)
     """
 
@@ -384,10 +384,10 @@ class Conv1d(_Conv):
         Validator.check_value_type("stride", stride, [int], self.cls_name)
         Validator.check_value_type("padding", padding, [int], self.cls_name)
         Validator.check_value_type("dilation", dilation, [int], self.cls_name)
-        Validator.check_integer('kernel_size', kernel_size, 1, Rel.GE, self.cls_name)
-        Validator.check_integer('stride', stride, 1, Rel.GE, self.cls_name)
+        Validator.check_int(kernel_size, 1, Rel.GE, 'kernel_size', self.cls_name)
+        Validator.check_int(stride, 1, Rel.GE, 'stride', self.cls_name)
         Validator.check_non_negative_int(padding, 'padding', self.cls_name)
-        Validator.check_integer('dilation', dilation, 1, Rel.GE, self.cls_name)
+        Validator.check_int(dilation, 1, Rel.GE, 'dilation', self.cls_name)
         kernel_size = (1, kernel_size)
         stride = (1, stride)
         dilation = (1, dilation)
@@ -395,7 +395,7 @@ class Conv1d(_Conv):
         get_dtype = P.DType()
         if isinstance(weight_init, Tensor):
             weight_init_shape = get_shape(weight_init)
-            Validator.check_integer('weight_init_shape', len(weight_init_shape), 3, Rel.EQ, self.cls_name)
+            Validator.check_equal_int(len(weight_init_shape), 3, 'weight_init_shape', self.cls_name)
             weight_init_dtype = get_dtype(weight_init)
             weight_init_value = weight_init.asnumpy()
             weight_init_value = np.expand_dims(weight_init_value, 2)
@@ -469,6 +469,19 @@ class Conv2dTranspose(_Conv):
 
     Input is typically of shape :math:`(N, C, H, W)`, where :math:`N` is batch size and :math:`C` is channel number.
 
+    If the 'pad_mode' is set to be "pad", the height and width of output are defined as:
+
+    .. math::
+
+        H_{out} = (H_{in} - 1) \times \text{stride} - 2 \times \text{padding} + \text{dilation} \times
+        (\text{ks_h} - 1) + 1
+
+        W_{out} = (W_{in} - 1) \times \text{stride} - 2 \times \text{padding} + \text{dilation} \times
+        (\text{ks_w} - 1) + 1
+
+    where :math:`\text{ks_h}` is the height of the convolution kernel and :math:`\text{ks_w}` is the width
+    of the convolution kernel.
+
     Args:
         in_channels (int): The number of channels in the input space.
         out_channels (int): The number of channels in the output space.
@@ -516,10 +529,15 @@ class Conv2dTranspose(_Conv):
     Outputs:
         Tensor of shape :math:`(N, C_{out}, H_{out}, W_{out})`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> net = nn.Conv2dTranspose(3, 64, 4, has_bias=False, weight_init='normal')
+        >>> net = nn.Conv2dTranspose(3, 64, 4, has_bias=False, weight_init='normal', pad_mode='pad')
         >>> input = Tensor(np.ones([1, 3, 16, 50]), mindspore.float32)
-        >>> net(input)
+        >>> output = net(input).shape
+        >>> print(output)
+        (1, 64, 19, 53)
         """
 
     def __init__(self,
@@ -539,7 +557,7 @@ class Conv2dTranspose(_Conv):
         dilation = twice(dilation)
         Validator.check_value_type('padding', padding, (int, tuple), self.cls_name)
         if isinstance(padding, tuple):
-            Validator.check_integer('padding size', len(padding), 4, Rel.EQ, self.cls_name)
+            Validator.check_equal_int(len(padding), 4, 'padding size', self.cls_name)
         # out_channels and in_channels swap.
         # cause Conv2DBackpropInput's out_channel refers to Conv2D's out_channel,
         # then Conv2dTranspose's out_channel refers to Conv2DBackpropInput's in_channel.
@@ -642,6 +660,15 @@ class Conv1dTranspose(_Conv):
 
     Input is typically of shape :math:`(N, C, W)`, where :math:`N` is batch size and :math:`C` is channel number.
 
+    If the 'pad_mode' is set to be "pad", the width of output is defined as:
+
+    .. math::
+
+        W_{out} = (W_{in} - 1) \times \text{stride} - 2 \times \text{padding} + \text{dilation} \times
+        (\text{ks_w} - 1) + 1
+
+    where :math:`\text{ks_w}` is the width of the convolution kernel.
+
     Args:
         in_channels (int): The number of channels in the input space.
         out_channels (int): The number of channels in the output space.
@@ -681,10 +708,15 @@ class Conv1dTranspose(_Conv):
     Outputs:
         Tensor of shape :math:`(N, C_{out}, W_{out})`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> net = nn.Conv1dTranspose(3, 64, 4, has_bias=False, weight_init='normal')
+        >>> net = nn.Conv1dTranspose(3, 64, 4, has_bias=False, weight_init='normal', pad_mode='pad')
         >>> input = Tensor(np.ones([1, 3, 50]), mindspore.float32)
-        >>> net(input)
+        >>> output = net(input).shape
+        >>> print(output)
+        (1, 64, 53)
     """
 
     def __init__(self,
@@ -703,10 +735,10 @@ class Conv1dTranspose(_Conv):
         Validator.check_value_type("stride", stride, [int], self.cls_name)
         Validator.check_value_type("padding", padding, [int], self.cls_name)
         Validator.check_value_type("dilation", dilation, [int], self.cls_name)
-        Validator.check_integer('kernel_size', kernel_size, 1, Rel.GE, self.cls_name)
-        Validator.check_integer('stride', stride, 1, Rel.GE, self.cls_name)
+        Validator.check_int(kernel_size, 1, Rel.GE, 'kernel_size', self.cls_name)
+        Validator.check_int(stride, 1, Rel.GE, 'stride', self.cls_name)
         Validator.check_non_negative_int(padding, 'padding', self.cls_name)
-        Validator.check_integer('dilation', dilation, 1, Rel.GE, self.cls_name)
+        Validator.check_int(dilation, 1, Rel.GE, 'dilation', self.cls_name)
         kernel_size = (1, kernel_size)
         stride = (1, stride)
         dilation = (1, dilation)
@@ -714,7 +746,7 @@ class Conv1dTranspose(_Conv):
         get_dtype = P.DType()
         if isinstance(weight_init, Tensor):
             weight_init_shape = get_shape(weight_init)
-            Validator.check_integer('weight_init_shape', len(weight_init_shape), 3, Rel.EQ, self.cls_name)
+            Validator.check_equal_int(len(weight_init_shape), 3, 'weight_init_shape', self.cls_name)
             weight_init_dtype = get_dtype(weight_init)
             weight_init_value = weight_init.asnumpy()
             weight_init_value = np.expand_dims(weight_init_value, 2)

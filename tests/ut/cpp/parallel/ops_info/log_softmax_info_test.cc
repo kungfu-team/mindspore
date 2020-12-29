@@ -54,7 +54,7 @@ void TestLogSoftmaxInfo::SetUp() {
   g_device_manager = std::make_shared<DeviceManager>();
   g_device_manager->Init(dev_list, local_dev, stage_map, "hccl");
 
-  ValuePtr axis = MakeValue(-2);
+  ValuePtr axis = MakeValue(static_cast<int64_t>(-2));
   std::unordered_map<std::string, ValuePtr> attr = {{"axis", axis}};
 
   Shapes inputs_shape = {{2, 4, 8, 16}};
@@ -171,7 +171,7 @@ TEST_F(TestLogSoftmaxInfo, GetDeviceList1) {
   StrategyPtr strategy = NewStrategy(0, inputs);
 
   log_softmax->Init(strategy);
-  RankList dev_list = log_softmax->global_device_list();
+  RankList dev_list = log_softmax->stage_device_list();
   ASSERT_EQ(dev_list.size(), 128);
 }
 

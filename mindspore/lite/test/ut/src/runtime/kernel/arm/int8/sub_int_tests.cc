@@ -36,9 +36,9 @@ TEST_F(TestSubInt8, SubInt8) {
   int8_t input_data0[] = {105, 35, -27, 0, -63, 99, 16, 122, 67, -49};
   int8_t input_data1[] = {24, -38, -115, 106, -98};
   int8_t output_data[10] = {0};
-  in_tensor0.SetData(input_data0);
-  in_tensor1.SetData(input_data1);
-  out_tensor.SetData(output_data);
+  in_tensor0.set_data(input_data0);
+  in_tensor1.set_data(input_data1);
+  out_tensor.set_data(output_data);
 
   const lite::QuantArg quant_in0 = {0.00784314f, 0};  // -1.0--1.0 -> 0--255
   const lite::QuantArg quant_in1 = {0.00784314f, 0};
@@ -57,6 +57,7 @@ TEST_F(TestSubInt8, SubInt8) {
   ASSERT_NE(creator, nullptr);
 
   auto ctx = std::make_shared<lite::InnerContext>();
+  ctx->thread_num_ = 1;
   ASSERT_EQ(lite::RET_OK, ctx->Init());
   auto kernel = creator(inputs, outputs, reinterpret_cast<OpParameter *>(&parameter), ctx.get(), desc, nullptr);
   ASSERT_NE(kernel, nullptr);
@@ -69,8 +70,56 @@ TEST_F(TestSubInt8, SubInt8) {
     EXPECT_EQ(output_data[i], expect0[i]);
   }
 
-  in_tensor0.SetData(nullptr);
-  in_tensor1.SetData(nullptr);
-  out_tensor.SetData(nullptr);
+  in_tensor0.set_data(nullptr);
+  in_tensor1.set_data(nullptr);
+  out_tensor.set_data(nullptr);
+}
+
+TEST_F(TestSubInt8, SubInt8T2) {
+  lite::Tensor in_tensor0(kNumberTypeInt8, {1, 1, 2, 5});
+  lite::Tensor in_tensor1(kNumberTypeInt8, {1, 1, 1, 5});
+  lite::Tensor out_tensor(kNumberTypeInt8, {1, 1, 2, 5});
+
+  int8_t input_data0[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+  int8_t input_data1[] = {1, 2, 3, 4, 5};
+  int8_t output_data[10] = {0};
+  in_tensor0.set_data(input_data0);
+  in_tensor1.set_data(input_data1);
+  out_tensor.set_data(output_data);
+
+  const lite::QuantArg quant_in0 = {0.00784314f, 0};  // -1.0--1.0 -> 0--255
+  const lite::QuantArg quant_in1 = {0.00784314f, 0};
+  const lite::QuantArg quant_out = {0.00784314f, 0};
+  in_tensor0.AddQuantParam(quant_in0);
+  in_tensor1.AddQuantParam(quant_in1);
+  out_tensor.AddQuantParam(quant_out);
+
+  std::vector<lite::Tensor *> inputs = {&in_tensor0, &in_tensor1};
+  std::vector<lite::Tensor *> outputs = {&out_tensor};
+
+  OpParameter parameter = {};
+  kernel::KernelKey desc = {kernel::KERNEL_ARCH::kCPU, kNumberTypeInt8, schema::PrimitiveType_Sub};
+
+  auto creator = lite::KernelRegistry::GetInstance()->GetCreator(desc);
+  ASSERT_NE(creator, nullptr);
+
+  auto ctx = std::make_shared<lite::InnerContext>();
+  ctx->thread_num_ = 2;
+  ASSERT_EQ(lite::RET_OK, ctx->Init());
+  auto kernel = creator(inputs, outputs, reinterpret_cast<OpParameter *>(&parameter), ctx.get(), desc, nullptr);
+  ASSERT_NE(kernel, nullptr);
+
+  auto ret = kernel->Run();
+  EXPECT_EQ(0, ret);
+
+  int8_t expect0[10] = {0, 0, 0, 0, 0, 5, 5, 5, 5, 5};
+  for (int i = 0; i < 10; ++i) {
+    EXPECT_EQ(output_data[i], expect0[i]);
+  }
+  PrintData("output data", output_data, 10);
+
+  in_tensor0.set_data(nullptr);
+  in_tensor1.set_data(nullptr);
+  out_tensor.set_data(nullptr);
 }
 }  // namespace mindspore

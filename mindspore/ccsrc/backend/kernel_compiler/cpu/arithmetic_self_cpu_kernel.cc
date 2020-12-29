@@ -13,10 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "backend/kernel_compiler/cpu/arithmetic_self_cpu_kernel.h"
 #include <cmath>
-#include <thread>
 #include <string>
+#include <thread>
+#include "backend/kernel_compiler/cpu/arithmetic_self_cpu_kernel.h"
 #include "runtime/device/cpu/cpu_device_address.h"
 
 namespace mindspore {
@@ -30,9 +30,43 @@ void Square(const T *in, T *out, size_t start, size_t end) {
 }
 
 template <typename T>
-void Sqrt(const T *in, T *out, size_t start, size_t end) {
+void Sign(const T *in, T *out, size_t start, size_t end) {
   for (size_t i = start; i < end; i++) {
-    out[i] = sqrtf(in[i]);
+    if (in[i] < 0) {
+      out[i] = -1;
+    } else if (in[i] > 0) {
+      out[i] = 1;
+    } else {
+      out[i] = 0;
+    }
+  }
+}
+
+template <typename T>
+void Neg(const T *in, T *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    out[i] = -in[i];
+  }
+}
+
+template <typename T>
+void OnesLike(const T *in, T *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    out[i] = static_cast<T>(1);
+  }
+}
+
+template <typename T>
+void ZerosLike(const T *in, T *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    out[i] = static_cast<T>(0);
+  }
+}
+
+template <typename T>
+void Floor(const T *in, T *out, size_t start, size_t end) {
+  for (size_t i = start; i < end; i++) {
+    out[i] = static_cast<T>(floor(in[i]));
   }
 }
 }  // namespace
@@ -42,8 +76,16 @@ void ArithmeticSelfCPUKernel::InitKernel(const CNodePtr &kernel_node) {
   std::string kernel_name = AnfAlgo::GetCNodeName(kernel_node);
   if (kernel_name == prim::kPrimSquare->name()) {
     operate_type_ = SQUARE;
-  } else if (kernel_name == prim::kPrimSqrt->name()) {
-    operate_type_ = SQRT;
+  } else if (kernel_name == prim::kPrimOnesLike->name()) {
+    operate_type_ = ONESLIKE;
+  } else if (kernel_name == prim::kPrimZerosLike->name()) {
+    operate_type_ = ZEROSLIKE;
+  } else if (kernel_name == prim::kPrimNeg->name()) {
+    operate_type_ = NEG;
+  } else if (kernel_name == prim::kPrimSign->name()) {
+    operate_type_ = SIGN;
+  } else if (kernel_name == prim::kPrimFloor->name()) {
+    operate_type_ = FLOOR;
   }
   dtype_ = AnfAlgo::GetPrevNodeOutputInferDataType(kernel_node, 0);
 }
@@ -51,12 +93,12 @@ void ArithmeticSelfCPUKernel::InitKernel(const CNodePtr &kernel_node) {
 bool ArithmeticSelfCPUKernel::Launch(const std::vector<kernel::AddressPtr> &inputs,
                                      const std::vector<kernel::AddressPtr> & /*workspace*/,
                                      const std::vector<kernel::AddressPtr> &outputs) {
-  if (dtype_ == kNumberTypeFloat32) {
+  if (dtype_ == kNumberTypeFloat32 || dtype_ == kNumberTypeFloat16 || dtype_ == kNumberTypeFloat64) {
     LaunchKernel<float>(inputs, outputs);
-  } else if (dtype_ == kNumberTypeInt32) {
-    LaunchKernel<float>(inputs, outputs);
+  } else if (dtype_ == kNumberTypeInt32 || dtype_ == kNumberTypeInt16 || dtype_ == kNumberTypeInt64) {
+    LaunchKernel<int>(inputs, outputs);
   } else {
-    MS_LOG(EXCEPTION) << "Only support float32, int32, but actual data type is " << TypeIdLabel(dtype_);
+    MS_LOG(EXCEPTION) << "Data type is " << TypeIdLabel(dtype_) << "is not support.";
   }
   return true;
 }
@@ -66,20 +108,37 @@ void ArithmeticSelfCPUKernel::LaunchKernel(const std::vector<AddressPtr> &inputs
                                            const std::vector<AddressPtr> &outputs) {
   T *input = reinterpret_cast<T *>(inputs[0]->addr);
   T *output = reinterpret_cast<T *>(outputs[0]->addr);
-  auto lens = inputs[0]->size / sizeof(T);
-  MS_LOG(INFO) << "lens=" << lens;
+  size_t lens = outputs[0]->size > 0 ? static_cast<size_t>(outputs[0]->size / sizeof(T)) : 1;
 
-  const size_t thread_num = 24;
+  auto max_thread_num = std::thread::hardware_concurrency();
+  size_t thread_num = lens < 128 * max_thread_num ? std::ceil(lens / 128.0) : max_thread_num;
+  MS_LOG(INFO) << "Lens=" << lens << "; use thread_num=" << thread_num << "; max_thread_num: " << max_thread_num;
   std::vector<std::thread> threads;
+  if (thread_num < 1) {
+    MS_LOG(ERROR) << "Invalid value: thread_num " << thread_num;
+    return;
+  }
   threads.reserve(thread_num);
   size_t start = 0;
   size_t once_compute_size = (lens + thread_num - 1) / thread_num;
+  if (once_compute_size < 1) {
+    MS_LOG(ERROR) << "Invalid value: once_compute_size " << once_compute_size;
+    return;
+  }
   while (start < lens) {
     size_t end = (start + once_compute_size) > lens ? lens : (start + once_compute_size);
     if (operate_type_ == SQUARE) {
       threads.emplace_back(std::thread(Square<T>, input, output, start, end));
-    } else if (operate_type_ == SQRT) {
-      threads.emplace_back(std::thread(Sqrt<T>, input, output, start, end));
+    } else if (operate_type_ == NEG) {
+      threads.emplace_back(std::thread(Neg<T>, input, output, start, end));
+    } else if (operate_type_ == ONESLIKE) {
+      threads.emplace_back(std::thread(OnesLike<T>, input, output, start, end));
+    } else if (operate_type_ == ZEROSLIKE) {
+      threads.emplace_back(std::thread(ZerosLike<T>, input, output, start, end));
+    } else if (operate_type_ == SIGN) {
+      threads.emplace_back(std::thread(Sign<T>, input, output, start, end));
+    } else if (operate_type_ == FLOOR) {
+      threads.emplace_back(std::thread(Floor<T>, input, output, start, end));
     }
     start += once_compute_size;
   }

@@ -19,7 +19,7 @@
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
 #include "src/runtime/runtime_api.h"
-#include "nnacl/fp32/arithmetic_self.h"
+#include "nnacl/fp32/arithmetic_self_fp32.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
@@ -32,6 +32,7 @@ namespace {
 int NegGradRun(void *cdata, int thread_id) {
   MS_ASSERT(cdata != nullptr);
   auto kernel = reinterpret_cast<NegGradCPUKernel *>(cdata);
+  MS_ASSERT(kernel != nullptr);
   return kernel->DoNegGrad(thread_id);
 }
 }  // namespace
@@ -77,6 +78,7 @@ kernel::LiteKernel *CpuNegGradFp32KernelCreator(const std::vector<lite::Tensor *
   auto *kernel = new (std::nothrow) NegGradCPUKernel(param, inputs, outputs, ctx, primitive);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "new NegGradCPUKernel fail!";
+    free(param);
     return nullptr;
   }
 

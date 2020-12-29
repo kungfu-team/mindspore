@@ -18,6 +18,7 @@ import numpy as np
 from mindspore.ops import _selected_grad_ops as SG
 from mindspore.ops.primitive import constexpr
 from mindspore.common.tensor import Tensor
+from mindspore.ops.operations import nn_ops as nps
 from .grad_base import bprop_getters
 from .. import functional as F
 from .. import operations as P
@@ -31,7 +32,7 @@ from ... import context
 @bprop_getters.register(P.BiasAdd)
 def get_bprop_bias_add(self):
     """Grad definition for `BiasAdd` operation."""
-    bias_grad = SG.BiasAddGrad()
+    bias_grad = SG.BiasAddGrad(self.data_format)
 
     def bprop(x, w, out, dout):
         return dout, bias_grad(dout)
@@ -44,11 +45,11 @@ def get_bprop_conv2d(self):
     """Grad definition for `Conv2D` operation."""
     input_grad = P.Conv2DBackpropInput(
         self.out_channel, self.kernel_size, self.pad_mode, self.pad, self.pad_list, mode=self.mode,
-        dilation=self.dilation, stride=self.stride, group=self.group
+        dilation=self.dilation, stride=self.stride, group=self.group, data_format=self.format
     )
     filter_grad = G.Conv2DBackpropFilter(
         self.out_channel, self.kernel_size, self.pad_mode, self.pad, self.pad_list, mode=self.mode,
-        dilation=self.dilation, stride=self.stride, group=self.group
+        dilation=self.dilation, stride=self.stride, group=self.group, data_format=self.format
     )
     get_shape = P.Shape()
 
@@ -56,6 +57,48 @@ def get_bprop_conv2d(self):
         dx = input_grad(dout, w, get_shape(x))
         dw = filter_grad(dout, x, get_shape(w))
         return dx, dw
+
+    return bprop
+
+
+@bprop_getters.register(nps.Conv3D)
+def get_bprop_conv3d(self):
+    """Grad definition for `Conv3D` operation."""
+    input_grad = nps.Conv3DBackpropInput(
+        self.out_channel, self.kernel_size, self.mode, pad_mode=self.pad_mode,
+        pad=self.pad, stride=self.stride, dilation=self.dilation, group=self.group, data_format=self.data_format
+    )
+    filter_grad = G.Conv3DBackpropFilter(
+        self.out_channel, self.kernel_size, self.mode, pad_mode=self.pad_mode,
+        pad=self.pad, stride=self.stride, dilation=self.dilation, group=self.group, data_format=self.data_format
+    )
+    get_shape = P.Shape()
+
+    def bprop(x, w, out, dout):
+        dx = input_grad(w, dout, get_shape(x))
+        dw = filter_grad(x, dout, get_shape(w))
+        return dx, dw
+
+    return bprop
+
+
+@bprop_getters.register(nps.Conv3DTranspose)
+def get_bprop_conv3d_transpose(self):
+    """Grad definition for `Conv3DTranspose` operation."""
+    input_grad = nps.Conv3D(
+        out_channel=self.in_channel, kernel_size=self.kernel_size, mode=self.mode, pad_mode="pad",
+        pad=self.pad, stride=self.stride, dilation=self.dilation, group=self.group, data_format=self.data_format
+    )
+    filter_grad = G.Conv3DBackpropFilter(
+        out_channel=self.in_channel, kernel_size=self.kernel_size, mode=self.mode, pad_mode="pad",
+        pad=self.pad, stride=self.stride, dilation=self.dilation, group=self.group, data_format=self.data_format
+    )
+    input_size = self.input_size
+
+    def bprop(x, w, out, dout):
+        dx = input_grad(dout, w)
+        dw = filter_grad(dout, x, F.shape(w))
+        return dx, dw, zeros_like(input_size)
 
     return bprop
 
@@ -79,7 +122,7 @@ def get_bprop_extract_image_patches(self):
     cast = P.Cast()
     matmul = P.MatMul()
 
-    _, ksizes_row, ksizes_col, _ = self.ksizes
+    _, _, ksizes_row, ksizes_col = self.ksizes
 
     def bprop(x, out, dout):
         x_shape = get_shape(x)
@@ -111,39 +154,6 @@ def get_bprop_extract_image_patches(self):
         dx = reshape(jac, (x_row, x_col, x_batch, x_depth))
         dx = transpose(dx, (2, 3, 0, 1))
         return (dx,)
-
-    def bprop_ge(x, out, dout):
-        x_shape = get_shape(x)
-        x_batch, x_row, x_col, x_depth = x_shape
-        x_indices_num = x_row * x_col + 1
-        x_idx = F.tuple_to_array(range(1, x_indices_num))
-        x_idx = reshape(x_idx, (1, x_row, x_col, 1))
-        x_idx_patch = extract_image_patches(x_idx)
-
-        out_shape = get_shape(out)
-        _, out_row, out_col, _ = out_shape
-        out_indices_num = out_row * out_col * ksizes_row * ksizes_col
-        out_idx = F.tuple_to_array(range(out_indices_num))
-        out_idx = reshape(out_idx, (1, out_row, out_col, ksizes_row * ksizes_col))
-
-        idx_tensor = concat((expand_dims(x_idx_patch, -1), expand_dims(out_idx, -1)))
-        idx_tensor = reshape(idx_tensor, (-1, 2))
-        sp_shape = (x_indices_num, out_indices_num)
-        sp_tensor = scatter_nd(idx_tensor, fill(dtype(dout), (out_indices_num,), 1), sp_shape)
-        sp_tensor = slice_op(sp_tensor, (1, 0), (x_indices_num - 1, out_indices_num))
-
-        grad = reshape(dout, (x_batch, out_row, out_col, ksizes_row, ksizes_col, x_depth))
-        grad = transpose(grad, (1, 2, 3, 4, 0, 5))
-        grad = reshape(grad, (-1, x_batch * x_depth))
-
-        jac = matmul(sp_tensor, grad)
-        dx = reshape(jac, (x_row, x_col, x_batch, x_depth))
-        dx = transpose(dx, (2, 0, 1, 3))
-
-        return (dx,)
-
-    if context.get_context("enable_ge"):
-        return bprop_ge
 
     return bprop
 
@@ -224,7 +234,8 @@ def get_bprop_max_pool_grad(self):
     maxpool_grad = G.MaxPoolGrad(
         ksize=self.ksize,
         strides=self.strides,
-        padding=self.padding)
+        padding=self.padding,
+        data_format=self.format)
 
     def bprop(x, out, dout):
         dx = maxpool_grad(x, out, dout)
@@ -268,8 +279,6 @@ def _get_mean_matrix(x_shape, ksize, stride, padding, x_dtype):
 
     n_input, c_input, h_input, w_input = x_shape
     h_ksize, w_ksize = ksize[2], ksize[3]
-    if h_ksize == h_input and w_ksize == w_input and padding == "VALID":
-        return None
     h_stride, w_stride = stride[2], stride[3]
     n_output = n_input
     c_output = c_input
@@ -307,10 +316,6 @@ def _get_mean_matrix(x_shape, ksize, stride, padding, x_dtype):
 
 @constexpr
 def _get_kernel_matrix(x_shape_nchw, kernel_matrix_shape, padding, x_dtype):
-    if x_shape_nchw[2] == kernel_matrix_shape[2] \
-        and x_shape_nchw[3] == kernel_matrix_shape[3] \
-        and padding == 'VALID':
-        return None
     kernel_matrix = np.ones(kernel_matrix_shape)
     return Tensor(kernel_matrix, x_dtype)
 
@@ -324,13 +329,27 @@ def get_bprop_avg_pool_grad(self):
         avgpool_grad_gpu = G.AvgPoolGradGpu(
                         ksize=self.ksize,
                         strides=self.strides,
-                        padding=self.padding)
+                        padding=self.padding,
+                        data_format=self.format)
 
         def bprop_gpu(x, out, dout):
             dx = avgpool_grad_gpu(x, out, dout)
             return (dx,)
 
         bprop_fn = bprop_gpu
+
+    elif self.target == "CPU":
+        avgpool_grad_cpu = G.AvgPoolGradCpu(
+            ksize=self.ksize,
+            strides=self.strides,
+            padding=self.padding,
+            data_format=self.format)
+
+        def bprop_cpu(x, out, dout):
+            dx = avgpool_grad_cpu(x, out, dout)
+            return (dx,)
+
+        bprop_fn = bprop_cpu
 
     elif self.target == "GE":
         avgpool_grad_ge = G.AvgPoolGrad(
@@ -476,16 +495,53 @@ def get_bprop_sigmoid(self):
     return bprop
 
 
+@bprop_getters.register(G.SigmoidGrad)
+def get_bprop_sigmoid_grad(self):
+    """Grad definition for `SigmoidGrad` operation."""
+    sigmoid_grad = G.SigmoidGrad()
+
+    def bprop(y, grad, out, dout):
+        ddy = dout * grad * (1. - 2 * y)
+        d2x = sigmoid_grad(y, dout)
+        return (ddy, d2x)
+
+    return bprop
+
+
+@constexpr
+def _get_transpose_axis(x_shp, axis):
+    rank = len(x_shp)
+    if axis < 0:
+        axis += rank
+    reverse_axis = [i for i in range(rank)]
+    reverse_axis[axis] = rank - 1
+    reverse_axis[rank - 1] = axis
+    return tuple(reverse_axis)
+
+
 @bprop_getters.register(P.Softmax)
 def get_bprop_softmax(self):
     """Grad definition for `Softmax` operation."""
     sum_func = P.ReduceSum(keep_dims=True)
     sub = P.Sub()
     mul = P.Mul()
+    get_shape = P.Shape()
+    transpose = P.Transpose()
     axis = self.axis
+    if not isinstance(axis, int):
+        axis = axis[0]
 
     def bprop(x, out, dout):
-        dx = mul(out, sub(dout, sum_func(mul(out, dout), axis)))
+        # dx = (dout - sum(dout * out)) * out
+        # This formula is correct only when the `axis` is the last dimension.
+        # In order to support the scenario where the `axis` is other values,
+        # we transpose the data of the `axis` dimension to the last dimension for calculation,
+        # and then transpose it back after the calculation.
+        reverse_axis = _get_transpose_axis(get_shape(x), axis)
+        out = transpose(out, reverse_axis)
+        dout = transpose(dout, reverse_axis)
+        dx = mul(out, sub(dout, sum_func(mul(out, dout), -1)))
+        dx = transpose(dx, reverse_axis)
         return (dx,)
 
     return bprop
@@ -554,15 +610,33 @@ def get_bprop_gelu(self):
     return bprop
 
 
+@bprop_getters.register(P.FastGelu)
+def get_bprop_fast_gelu(self):
+    """Grad definition for `FastGelu` operation."""
+    input_grad = G.FastGeluGrad()
+
+    def bprop(x, out, dout):
+        dx = input_grad(dout, x)
+        return (dx,)
+
+    return bprop
+
+
 @bprop_getters.register(P.FusedBatchNorm)
 def get_bprop_fused_batch_norm(self):
     """Grad definition for `FusedBatchNorm` operation."""
     input_grad = G.FusedBatchNormGrad(self.epsilon, self.momentum)
-
+    target_cpu = False
+    if self.target == "CPU":
+        input_grad = G.FusedBatchNormGradCPU(self.epsilon, self.momentum)
+        target_cpu = True
     def bprop(x, scale, b, mean, variance, out, dout):
         saved_mean = out[3]
         saved_variance = out[4]
-        out = input_grad(dout[0], x, scale, saved_mean, saved_variance)
+        if target_cpu:
+            out = input_grad(dout[0], x, scale, b, saved_mean, saved_variance)
+        else:
+            out = input_grad(dout[0], x, scale, saved_mean, saved_variance)
         dx = out[0]
         dscale = out[1]
         dbias = out[2]
@@ -574,7 +648,7 @@ def get_bprop_fused_batch_norm(self):
 @bprop_getters.register(P.FusedBatchNormEx)
 def get_bprop_fused_batch_norm_ex(self):
     """Grad definition for `FusedBatchNormEx` operation."""
-    input_grad = G.FusedBatchNormGradEx(self.epsilon, self.momentum)
+    input_grad = G.FusedBatchNormGradEx(self.epsilon, self.momentum, self.format)
 
     def bprop(x, scale, b, mean, variance, out, dout):
         saved_mean = out[3]
@@ -620,6 +694,19 @@ def get_bprop_layer_norm(self):
         dx, d_gamma, d_beta = layer_norm_grad(
             x, dout[0], out[2], out[1], gamma)
         return dx, d_gamma, d_beta
+
+    return bprop
+
+
+@bprop_getters.register(G.LayerNormGrad)
+def get_bprop_layer_norm_grad(self):
+    """Grad definition for `LayerNormGrad` operation."""
+    layer_norm_grad_grad = G.LayerNormGradGrad(self.begin_norm_axis, self.begin_params_axis)
+
+    def bprop(x, dy, variance, mean, gamma, out, dout):
+        d_x, d_dy, d_gamma = layer_norm_grad_grad(
+            x, dy, variance, mean, gamma, dout[0], dout[1], dout[2])
+        return d_x, d_dy, zeros_like(variance), zeros_like(mean), d_gamma
 
     return bprop
 
@@ -841,7 +928,16 @@ def get_bprop_lstm(self):
 @bprop_getters.register(P.DynamicRNN)
 def get_bprop_dynamic_rnn(self):
     """Grad definition for `DynamicRNN` operation."""
-    dynamic_rnn_grad = G.DynamicRNNGrad(forget_bias=self.forget_bias)
+    dynamic_rnn_grad = G.DynamicRNNGrad(cell_type=self.cell_type,
+                                        direction=self.direction,
+                                        cell_depth=self.cell_depth,
+                                        use_peephole=self.use_peephole,
+                                        keep_prob=self.keep_prob,
+                                        cell_clip=self.cell_clip,
+                                        num_proj=self.num_proj,
+                                        time_major=self.time_major,
+                                        forget_bias=self.forget_bias)
+    expand_dims = P.ExpandDims()
 
     def bprop(x, w, b, seq_length, init_h, init_c, out, dout):
         dy, dh, dc, _, _, _, _, _, = dout
@@ -850,7 +946,27 @@ def get_bprop_dynamic_rnn(self):
         y, h, c, i, j, f, o, tanhct = out
         dw, db, dx, dh_prev, dc_prev = dynamic_rnn_grad(x, w, b, y, init_h[0], init_c[0], h,
                                                         c, dy, dh, dc, i, j, f, o, tanhct)
+        dh_prev = expand_dims(dh_prev, 0)
+        dc_prev = expand_dims(dc_prev, 0)
         return dx, dw, db, (0), dh_prev, dc_prev
+    return bprop
+
+
+@bprop_getters.register(P.DynamicGRUV2)
+def get_bprop_dynamic_gru_v2(self):
+    """Grad definition for `DynamicGRUV2` operation."""
+    dynamic_gru_v2_grad = G.DynamicGRUV2Grad(self.direction, self.cell_depth, self.keep_prob, self.cell_clip,
+                                             self.num_proj, self.time_major, 'double_bias', self.gate_order,
+                                             self.reset_after)
+
+    def bprop(x, winput, whidden, binput, bhidden, seq, init_h, out, dout):
+        y, out_h, update, reset, new, hidden_new = out
+        dy, dout_h, _, _, _, _ = dout
+
+        dw_input, dw_hidden, db_input, db_hidden, dx, dh_prev = dynamic_gru_v2_grad(x, winput, whidden, y, init_h,
+                                                                                    out_h, dy, dout_h[-1], update,
+                                                                                    reset, new, hidden_new, None, None)
+        return dx, dw_input, dw_hidden, db_input, db_hidden, (0), dh_prev
     return bprop
 
 
@@ -922,11 +1038,11 @@ def get_bprop_conv2d_backprop_input(self):
     """Grad definition for `Conv2DBackpropInput` operation."""
     filter_grad = G.Conv2DBackpropFilter(
         self.out_channel, self.kernel_size, self.pad_mode, self.pad, self.pad_list, mode=self.mode,
-        dilation=self.dilation, stride=self.stride, group=self.group
+        dilation=self.dilation, stride=self.stride, group=self.group, data_format=self.format
     )
     input_grad = P.Conv2D(
         self.out_channel, self.kernel_size, pad_mode=self.pad_mode.lower(), pad=self.pad,
-        dilation=self.dilation, stride=self.stride, group=self.group
+        dilation=self.dilation, stride=self.stride, group=self.group, data_format=self.format
     )
 
     def bprop(x, w, f_sizes, out, dout):

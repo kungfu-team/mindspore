@@ -1,11 +1,20 @@
-cmake_minimum_required(VERSION 3.14)
-project (Lite-java)
+cmake_minimum_required(VERSION 3.10)
+project(Lite-java)
+
+set(BUILD_LITE "on")
+set(PLATFORM_ARM "on")
 
 set(MS_VERSION_MAJOR ${MS_VERSION_MAJOR})
 set(MS_VERSION_MINOR ${MS_VERSION_MINOR})
 set(MS_VERSION_REVISION ${MS_VERSION_REVISION})
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DMS_VERSION_MAJOR=${MS_VERSION_MAJOR} -DMS_VERSION_MINOR=${MS_VERSION_MINOR} -DMS_VERSION_REVISION=${MS_VERSION_REVISION}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DMS_VERSION_MAJOR=${MS_VERSION_MAJOR} -DMS_VERSION_MINOR=${MS_VERSION_MINOR} -DMS_VERSION_REVISION=${MS_VERSION_REVISION}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
+
+#set for cross-compiling toolchain
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY BOTH)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE BOTH)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
 
 if (ENABLE_VERBOSE)
     set(CMAKE_VERBOSE_MAKEFILE on)
@@ -18,10 +27,17 @@ if (PLATFORM_ARM64)
     add_compile_definitions(ENABLE_ARM64)
 endif ()
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../)  ## lite include
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../../core/) ## core include
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../../../third_party/flatbuffers/include) ## third_party
+set(TOP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../../..)
+set(LITE_DIR ${TOP_DIR}/mindspore/lite)
+
+include(${TOP_DIR}/cmake/utils.cmake)
+include(${TOP_DIR}/cmake/external_libs/flatbuffers.cmake)
+
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+include_directories(${LITE_DIR})  ## lite include
+include_directories(${TOP_DIR}/mindspore/core/) ## core include
+include_directories(${LITE_DIR}/build) ## flatbuffers
+
 link_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../libs/${ANDROID_ABI}/)
 
 add_library(mindspore-lite-jni SHARED
@@ -35,4 +51,4 @@ add_library(mindspore-lite-jni SHARED
 
 find_library(log-lib log)
 
-target_link_libraries(mindspore-lite-jni mindspore-lite ${log-lib} )
+target_link_libraries(mindspore-lite-jni mindspore-lite ${log-lib})

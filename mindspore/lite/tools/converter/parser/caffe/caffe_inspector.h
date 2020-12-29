@@ -29,11 +29,12 @@ namespace lite {
 class CaffeInspector {
  public:
   CaffeInspector() = default;
+  ~CaffeInspector() = default;
 
   STATUS InspectModel(const caffe::NetParameter &proto);
   STATUS ParseInput();
-  STATUS FindInputAndOutput();
-  STATUS SetTopsAndBottoms();
+  STATUS FindGraphInputsAndOutputs();
+  STATUS SetLayerTopsAndBottoms();
 
   std::set<std::string> GetGraphInput() { return graphInput; }
   std::set<std::string> GetGraphOutput() { return graphOutput; }

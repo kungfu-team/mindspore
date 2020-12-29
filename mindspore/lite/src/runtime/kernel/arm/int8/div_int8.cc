@@ -23,6 +23,7 @@
 #include "include/errorcode.h"
 
 using mindspore::lite::KernelRegistrar;
+using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_Div;
 
@@ -38,12 +39,12 @@ int DivInt8CPUKernel::Init() {
 
   broadcast_ = input0->ElementsNum() != input1->ElementsNum();
 
-  param_.in0_args_.scale_ = input0->GetQuantParams().front().scale;
-  param_.in0_args_.zp_ = -input0->GetQuantParams().front().zeroPoint;
-  param_.in1_args_.scale_ = input1->GetQuantParams().front().scale;
-  param_.in1_args_.zp_ = -input1->GetQuantParams().front().zeroPoint;
-  param_.out_args_.scale_ = output->GetQuantParams().front().scale;
-  param_.out_args_.zp_ = output->GetQuantParams().front().zeroPoint;
+  param_.in0_args_.scale_ = input0->quant_params().front().scale;
+  param_.in0_args_.zp_ = -input0->quant_params().front().zeroPoint;
+  param_.in1_args_.scale_ = input1->quant_params().front().scale;
+  param_.in1_args_.zp_ = -input1->quant_params().front().zeroPoint;
+  param_.out_args_.scale_ = output->quant_params().front().scale;
+  param_.out_args_.zp_ = output->quant_params().front().zeroPoint;
 
   const double real_multiplier = param_.in0_args_.scale_ / (param_.in1_args_.scale_ * param_.out_args_.scale_);
 
@@ -95,12 +96,6 @@ int DivInt8Run(void *cdata, int task_id) {
 }
 
 int DivInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare failed.";
-    return RET_ERROR;
-  }
-
   if (broadcast_) {
     ArithmeticParameter tile_para;
     tile_para.ndim_ = out_tensors_.at(0)->shape().size();
@@ -115,16 +110,20 @@ int DivInt8CPUKernel::Run() {
       MS_LOG(ERROR) << "Memory allocation failed";
       context_->allocator->Free(tile0_data_);
       context_->allocator->Free(tile1_data_);
+      tile0_data_ = nullptr;
+      tile1_data_ = nullptr;
       return RET_ERROR;
     }
     TileDimensionsUint8(static_cast<uint8_t *>(in_tensors_.at(0)->MutableData()),
                         static_cast<uint8_t *>(in_tensors_.at(1)->MutableData()),
                         reinterpret_cast<uint8_t *>(tile0_data_), reinterpret_cast<uint8_t *>(tile1_data_), &tile_para);
   }
-  ret = ParallelLaunch(this->context_->thread_pool_, DivInt8Run, this, op_parameter_->thread_num_);
+  auto ret = ParallelLaunch(this->context_->thread_pool_, DivInt8Run, this, op_parameter_->thread_num_);
   if (broadcast_) {
     context_->allocator->Free(tile0_data_);
     context_->allocator->Free(tile1_data_);
+    tile0_data_ = nullptr;
+    tile1_data_ = nullptr;
   }
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "DivInt8Run function error error_code[" << ret << "]";
@@ -132,29 +131,5 @@ int DivInt8CPUKernel::Run() {
   return ret;
 }
 
-kernel::LiteKernel *CpuDivInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                            const std::vector<lite::Tensor *> &outputs, OpParameter *parameter,
-                                            const lite::InnerContext *ctx, const KernelKey &desc,
-                                            const mindspore::lite::PrimitiveC *primitive) {
-  if (parameter == nullptr || ctx == nullptr) {
-    MS_LOG(ERROR) << "parameter or ctx is nullptr";
-    return nullptr;
-  }
-  MS_ASSERT(desc.type == PrimitiveType_Div);
-  auto *kernel = new (std::nothrow) DivInt8CPUKernel(parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "kernel is nullptr.";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << parameter->name_
-                  << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Div, CpuDivInt8KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Div, LiteKernelCreator<DivInt8CPUKernel>)
 }  // namespace mindspore::kernel

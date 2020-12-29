@@ -16,6 +16,10 @@
 
 #include "src/ops/scatter_nd.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 
@@ -51,10 +55,14 @@ int ScatterND::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> o
     return RET_ERROR;
   }
   auto output = outputs_.front();
+  if (output == nullptr) {
+    MS_LOG(ERROR) << "output null pointer dereferencing.";
+    return RET_ERROR;
+  }
   output->set_data_type(update->data_type());
-  output->SetFormat(update->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output->set_format(update->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   auto shape_data = reinterpret_cast<int *>(shape->MutableData());
   std::vector<int> out_shape(shape_data, shape_data + shape->ElementsNum());
@@ -73,5 +81,6 @@ int ScatterND::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffe
   return RET_OK;
 }
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

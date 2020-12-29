@@ -19,22 +19,25 @@
 #include "nnacl/int8/reshape_int8.h"
 #include "schema/model_generated.h"
 #include "include/errorcode.h"
+#include "src/kernel_registry.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
 
+using mindspore::lite::KernelRegistrar;
+using mindspore::schema::PrimitiveType_Reshape;
+
 namespace mindspore::kernel {
 
 int ReshapeInt8CPUKernel::Init() {
-  ReshapeBaseCPUKernel::Init();
   auto *input_tensor = in_tensors_.at(kInputIndex);
-  auto in_quant_args = input_tensor->GetQuantParams();
+  auto in_quant_args = input_tensor->quant_params();
   reshape_param_->quant_para_.in_args_.scale_ = in_quant_args.front().scale;
   reshape_param_->quant_para_.in_args_.zp_ = in_quant_args.front().zeroPoint;
 
   auto *out_tensor = out_tensors_.at(kOutputIndex);
-  auto out_quant_args = out_tensor->GetQuantParams();
+  auto out_quant_args = out_tensor->quant_params();
   reshape_param_->quant_para_.out_args_.scale_ = out_quant_args.front().scale;
   reshape_param_->quant_para_.out_args_.zp_ = out_quant_args.front().zeroPoint;
 
@@ -44,15 +47,10 @@ int ReshapeInt8CPUKernel::Init() {
   return RET_OK;
 }
 
-int ReshapeInt8CPUKernel::ReSize() { return 0; }
+int ReshapeInt8CPUKernel::ReSize() { return RET_OK; }
 
 int ReshapeInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << ret;
-    return ret;
-  }
-  MS_ASSERT(in_tensors_.size() == 1);
+  MS_ASSERT(in_tensors_.size() == 1 || in_tensors_.size() == 2);
   MS_ASSERT(out_tensors_.size() == 1);
   input_data_ = static_cast<int8_t *>(in_tensors_.at(kInputIndex)->MutableData());
   output_data_ = static_cast<int8_t *>(out_tensors_.at(kOutputIndex)->MutableData());
@@ -60,7 +58,7 @@ int ReshapeInt8CPUKernel::Run() {
   elements_num_ = in_tensors_.at(kInputIndex)->ElementsNum();
   count_unit_ = op_parameter_->thread_num_ > 1 ? UP_DIV(elements_num_, op_parameter_->thread_num_) : elements_num_;
 
-  ret = ParallelLaunch(this->context_->thread_pool_, ReshapeInt8Run, this, op_parameter_->thread_num_);
+  auto ret = ParallelLaunch(this->context_->thread_pool_, ReshapeInt8Run, this, op_parameter_->thread_num_);
   return ret;
 }
 
@@ -75,10 +73,14 @@ int ReshapeInt8CPUKernel::DoExecute(int task_id) {
   if (real_dst_count <= 0) {
     return lite::RET_OK;
   }
+  MS_ASSERT(input_data_);
+  MS_ASSERT(output_data_);
   int8_t *cur_input0_data = input_data_ + task_id * count_unit_;
   int8_t *cur_output_data = output_data_ + task_id * count_unit_;
 
   Int8Reshape(cur_input0_data, cur_output_data, real_dst_count, reshape_param_->quant_para_);
   return lite::RET_OK;
 }
+
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Reshape, LiteKernelCreator<ReshapeInt8CPUKernel>)
 }  // namespace mindspore::kernel

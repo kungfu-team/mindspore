@@ -51,6 +51,8 @@
 #include "backend/kernel_compiler/cpu/ps/sparse_apply_ftrl_ps_kernel.h"
 #include "backend/kernel_compiler/cpu/ps/apply_momentum_ps_kernel.h"
 #include "backend/kernel_compiler/cpu/ps/embedding_look_up_ps_kernel.h"
+#include "ps/ps_cache/ps_data/ps_data_prefetch.h"
+#include "ps/random_normal/random_normal.h"
 
 namespace mindspore {
 namespace ps {
@@ -100,12 +102,13 @@ class ParameterServer {
     void HandleCheckReadyForPush(const ::ps::KVMeta &req_meta, const ::ps::KVPairs<T> &req_data, ::ps::KVPairs<T> *res);
     void HandleCheckReadyForPull(const ::ps::KVMeta &req_meta, const ::ps::KVPairs<T> &req_data, ::ps::KVPairs<T> *res);
     void HandleEmbeddingLookup(const ::ps::KVMeta &req_meta, const ::ps::KVPairs<T> &req_data, ::ps::KVPairs<T> *res);
+    void HandleUpdateEmbeddings(const ::ps::KVMeta &req_meta, const ::ps::KVPairs<T> &req_data, ::ps::KVPairs<T> *res);
     void HandleFinalize(const ::ps::KVMeta &req_meta, const ::ps::KVPairs<T> &req_data, ::ps::KVPairs<T> *res);
 
     ParameterServer *ps_;
     typedef void (ServerHandler::*RequestHandler)(const ::ps::KVMeta &req_meta, const ::ps::KVPairs<T> &req_data,
                                                   ::ps::KVPairs<T> *res);
-    std::unordered_map<int, RequestHandler> handlers_;
+    std::unordered_map<int64_t, RequestHandler> handlers_;
     std::unordered_map<Key, bool> init_weights_;
     std::unordered_map<Key, bool> init_weight_to_optim_;
     std::unordered_map<Key, bool> init_optim_info_;
@@ -113,18 +116,20 @@ class ParameterServer {
 
   bool Init(const FuncGraphPtr &func_graph);
   void InitOptimInfoBuilders();
-  void InitWeightKeyToOptims(const Key &key, const int &optim_id);
+  void InitWeightKeyToOptims(const Key &key, const int64_t &optim_id);
   void InitOptimInputsShape(const Keys &keys, const Values &values, const Lengths &lengths);
   void InitWeight(const Key &key, const WeightPtr &weight);
   void InitGrad(const Key &key, const GradPtr &grad);
   void InitEmbeddingTable(const Key &key,
-                          const std::shared_ptr<std::vector<std::shared_ptr<std::vector<size_t>>>> &shapes);
+                          const std::shared_ptr<std::vector<std::shared_ptr<std::vector<size_t>>>> &shapes,
+                          const ParamInitInfo &param_init_info);
   bool HasWeight(const Key &key);
   void Finalize();
   void UpdateWeights();
   void AccumGrad(const Keys &key, const Values &values, const Lengths &lengths);
   WeightPtr weight(const Key &key);
   void DoEmbeddingLookup(Key key, const LookupIds &lookup_ids, ::ps::KVPairs<T> *res);
+  void UpdateEmbeddings(const Key &key, const LookupIds &lookup_ids, const Values &vals);
   bool ReadyForUpdateWeights();
   bool ReadyForPush(const Key &key);
   bool ReadyForPull(const Key &key);
@@ -193,6 +198,7 @@ void ParameterServer<T>::ServerHandler::Init() {
   handlers_[kCheckReadyForPushCmd] = &ServerHandler::HandleCheckReadyForPush;
   handlers_[kCheckReadyForPullCmd] = &ServerHandler::HandleCheckReadyForPull;
   handlers_[kEmbeddingLookupCmd] = &ServerHandler::HandleEmbeddingLookup;
+  handlers_[kUpdateEmbeddingsCmd] = &ServerHandler::HandleUpdateEmbeddings;
   handlers_[kFinalizeCmd] = &ServerHandler::HandleFinalize;
 }
 
@@ -293,16 +299,26 @@ void ParameterServer<T>::ServerHandler::HandleInitEmbeddings(const ::ps::KVMeta 
 
   const Lengths &lens = req_data.lens;
   size_t index = 0;
-  for (int i = 0; i < lens[0]; i++) {
+  for (int64_t i = 0; i < lens[0]; i++) {
     input_shape->push_back(static_cast<size_t>(req_data.vals[index++]));
   }
-  for (int j = 0; j < lens[1]; j++) {
+  for (int64_t j = 0; j < lens[1]; j++) {
     indices_shape->push_back(static_cast<size_t>(req_data.vals[index++]));
   }
-  for (int k = 0; k < lens[2]; k++) {
+  for (int64_t k = 0; k < lens[2]; k++) {
     output_shape->push_back(static_cast<size_t>(req_data.vals[index++]));
   }
-  ps_->InitEmbeddingTable(key, shapes);
+  ParamInitInfo param_init_info;
+  if (ps::PsDataPrefetch::GetInstance().cache_enable()) {
+    param_init_info.param_type_ = static_cast<ParamType>(lens[3]);
+    if (param_init_info.param_type_ == kWeight) {
+      param_init_info.global_seed_ = static_cast<size_t>(lens[4]);
+      param_init_info.op_seed_ = static_cast<size_t>(lens[5]);
+    } else if (param_init_info.param_type_ == kAccumulation) {
+      param_init_info.init_val_ = req_data.vals[index];
+    }
+  }
+  ps_->InitEmbeddingTable(key, shapes, param_init_info);
 }
 
 template <typename T>
@@ -336,6 +352,18 @@ void ParameterServer<T>::ServerHandler::HandleEmbeddingLookup(const ::ps::KVMeta
     res->keys.push_back(req_data.keys[i]);
   }
   ps_->DoEmbeddingLookup(key, req_data.keys.segment(1, req_data.keys.size()), res);
+}
+
+template <typename T>
+void ParameterServer<T>::ServerHandler::HandleUpdateEmbeddings(const ::ps::KVMeta &req_meta,
+                                                               const ::ps::KVPairs<T> &req_data,
+                                                               ::ps::KVPairs<T> *res) {
+  std::unique_lock<std::mutex> lock(ps_->mutex());
+  MS_EXCEPTION_IF_NULL(res);
+  const Key &key = req_data.keys[0];
+  const LookupIds &lookup_ids = req_data.keys.segment(1, req_data.keys.size());
+  const Values &update_vals = req_data.vals;
+  ps_->UpdateEmbeddings(key, lookup_ids, update_vals);
 }
 
 template <typename T>
@@ -374,7 +402,7 @@ void ParameterServer<T>::InitOptimInfoBuilders() {
 }
 
 template <typename T>
-void ParameterServer<T>::InitWeightKeyToOptims(const Key &key, const int &optim_id) {
+void ParameterServer<T>::InitWeightKeyToOptims(const Key &key, const int64_t &optim_id) {
   if (weight_key_to_optims_.count(key) > 0 || Util::optimizer_name(optim_id) == "") {
     return;
   }
@@ -390,7 +418,7 @@ void ParameterServer<T>::InitOptimInputsShape(const Keys &keys, const Values &va
   MS_EXCEPTION_IF_NULL(inputs_shape);
   InputsShapePtr original_inputs_shape = std::make_shared<InputsShape>();
   MS_EXCEPTION_IF_NULL(original_inputs_shape);
-  int val_idx = 0;
+  int64_t val_idx = 0;
   const Key &key = keys[0];
   MS_LOG(INFO) << "Initializing optimizer inputs shape for key:" << key;
   if (optim_inputs_shape_.count(key) == 0) {
@@ -405,7 +433,7 @@ void ParameterServer<T>::InitOptimInputsShape(const Keys &keys, const Values &va
     inputs_shape->push_back(shape);
     original_inputs_shape->push_back(original_shape);
 
-    for (int j = 0; j < lengths[i]; j++) {
+    for (int64_t j = 0; j < lengths[i]; j++) {
       shape->push_back(values[val_idx]);
       original_shape->push_back(values[val_idx++]);
     }
@@ -476,7 +504,8 @@ void ParameterServer<T>::InitGrad(const Key &key, const GradPtr &grad) {
 
 template <typename T>
 void ParameterServer<T>::InitEmbeddingTable(
-  const Key &key, const std::shared_ptr<std::vector<std::shared_ptr<std::vector<size_t>>>> &shapes) {
+  const Key &key, const std::shared_ptr<std::vector<std::shared_ptr<std::vector<size_t>>>> &shapes,
+  const ParamInitInfo &param_init_info) {
   MS_EXCEPTION_IF_NULL(shapes);
   if (weights_.count(key) == 0) {
     std::shared_ptr<PServerKernel> lookup =
@@ -493,8 +522,18 @@ void ParameterServer<T>::InitEmbeddingTable(
     T *embedding_data = embedding->data();
     std::default_random_engine engine;
     std::normal_distribution<float> random(0, 0.01);
-    for (size_t i = 0; i < total_dims; i++) {
-      embedding_data[i] = random(engine);
+    if (ps::PsDataPrefetch::GetInstance().cache_enable()) {
+      if (param_init_info.param_type_ == kWeight) {
+        InitRandomNormal(0, 0.01, input_shapes, param_init_info.global_seed_, param_init_info.op_seed_, embedding_data);
+      } else if (param_init_info.param_type_ == kAccumulation) {
+        for (size_t i = 0; i < total_dims; i++) {
+          embedding_data[i] = param_init_info.init_val_;
+        }
+      }
+    } else {
+      for (size_t i = 0; i < total_dims; i++) {
+        embedding_data[i] = random(engine);
+      }
     }
     weights_[key] = embedding;
     tokens_[key] = 0;
@@ -513,7 +552,6 @@ template <typename T>
 void ParameterServer<T>::Finalize() {
   running_ = false;
   apply_grads_cv_.notify_one();
-  SyncEmbeddingTables();
 }
 
 template <typename T>
@@ -580,8 +618,8 @@ void ParameterServer<T>::AccumGrad(const Keys &keys, const Values &values, const
         MS_LOG(EXCEPTION) << "no optimizer found for key " << key << " optim name " << weight_key_to_optims_[key];
       }
       MS_EXCEPTION_IF_NULL(pserver_kernel);
-      OptimizerInfo *optim =
-        builder->Build(pserver_kernel, weights_[key], keys, values, lengths, optim_inputs_shape_[key], worker_num_);
+      OptimizerInfo *optim = builder->Build(pserver_kernel, weights_[key], keys, values, lengths,
+                                            optim_inputs_shape_[key], worker_num_, is_embedding_[key]);
       optim_info.reset(optim);
       optim_infos_[key] = optim_info;
     } else {
@@ -674,6 +712,23 @@ void ParameterServer<T>::DoEmbeddingLookup(Key key, const LookupIds &lookup_ids,
 }
 
 template <typename T>
+void ParameterServer<T>::UpdateEmbeddings(const Key &key, const LookupIds &lookup_ids, const Values &vals) {
+  if (weights_.count(key) == 0) {
+    MS_LOG(ERROR) << "Invalid embedding table key " << key;
+    return;
+  }
+  if (embedding_lookup_ops_.count(key) == 0) {
+    MS_LOG(ERROR) << "Invalid embedding lookup op key " << key;
+    return;
+  }
+  WeightPtr table_ptr = weights_[key];
+  MS_EXCEPTION_IF_NULL(table_ptr);
+  std::shared_ptr<PServerKernel> table_lookup_op = embedding_lookup_ops_[key];
+  MS_EXCEPTION_IF_NULL(table_lookup_op);
+  table_lookup_op->UpdateEmbeddings(table_ptr->data(), lookup_ids.data(), vals.data(), lookup_ids.size());
+}
+
+template <typename T>
 inline bool ParameterServer<T>::ReadyForUpdateWeights() {
   return grads_accum_counter_.size() > 0 && grad_accum_count_ == grads_accum_counter_.size();
 }
@@ -718,7 +773,7 @@ void ParameterServer<T>::GetEmbeddingTableParamPtr() {
   for (auto cnode : cnodes) {
     MS_EXCEPTION_IF_NULL(cnode);
     std::string cnode_name = AnfAlgo::GetCNodeName(cnode);
-    if (cnode_name == kEmbeddingLookupOpName) {
+    if (cnode_name == kEmbeddingLookupOpName || cnode_name == kGatherV2OpName) {
       auto embedding_table = AnfAlgo::GetInputNode(cnode, 0);
       MS_EXCEPTION_IF_NULL(embedding_table);
       MS_LOG(INFO) << "Embedding table name is " << embedding_table->fullname_with_scope() << ", key is " << count;
@@ -738,7 +793,7 @@ void ParameterServer<T>::SyncEmbeddingTables() {
     }
     auto lookup = embedding_lookup_ops_[key];
     const std::vector<size_t> &input_shapes = lookup->input_sizes();
-    std::vector<int> new_tensor_shape(input_shapes.begin(), input_shapes.end());
+    std::vector<int64_t> new_tensor_shape(input_shapes.begin(), input_shapes.end());
 
     tensor::TensorPtr new_tensor = std::make_shared<tensor::Tensor>(kNumberTypeFloat32, new_tensor_shape);
     MS_EXCEPTION_IF_NULL(new_tensor);
@@ -751,7 +806,7 @@ void ParameterServer<T>::SyncEmbeddingTables() {
     }
     MS_EXCEPTION_IF_NULL(new_tensor_data_ptr);
     MS_EXCEPTION_IF_NULL(weights_[key]->data());
-    int ret = memcpy_s(new_tensor_data_ptr, new_tensor_size, weights_[key]->data(), embedding_table_size);
+    int64_t ret = memcpy_s(new_tensor_data_ptr, new_tensor_size, weights_[key]->data(), embedding_table_size);
     if (ret != 0) {
       MS_LOG(EXCEPTION) << "memcpy_s error, errorno(" << ret << ")";
       return;
@@ -776,6 +831,7 @@ void ParameterServer<T>::Run(const FuncGraphPtr &func_graph) {
   Init(func_graph);
   PSContext::instance()->SetPSRankId(rank_id_);
   thread_->join();
+  SyncEmbeddingTables();
   MS_LOG(INFO) << "PServer finished updating models, starts finalizing...";
   ::ps::Finalize(0, true);
   MS_LOG(INFO) << "PServer finalized successfully.";

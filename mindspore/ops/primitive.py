@@ -35,9 +35,9 @@ class Primitive(Primitive_):
         >>> # or work with prim_attr_register:
         >>> # init a Primitive class with attr1 and attr2
         >>> class Add(Primitive):
-        >>>     @prim_attr_register
-        >>>     def __init__(self, attr1, attr2):
-        >>>         # check attr1 and attr2 or do some initializations
+        ...     @prim_attr_register
+        ...     def __init__(self, attr1, attr2):
+        ...         # check attr1 and attr2 or do some initializations
         >>> # init a Primitive obj with attr1=1 and attr2=2
         >>> add = Add(attr1=1, attr2=2)
     """
@@ -227,7 +227,7 @@ class PrimitiveWithCheck(Primitive):
         >>>     def __init__(self):
         >>>         pass
         >>>     def check_shape(self, input_x):
-        >>>         validator.check_integer('input_x rank', len(input_x), 1, Rel.GE, self.name)
+        >>>         validator.check_int(len(input_x), 1, Rel.GE, 'input_x rank', self.name)
         >>>
         >>>     def check_dtype(self, input_x):
         >>>         validator.check_subclass("input_x", input_x, mstype.tensor, self.name)
@@ -287,7 +287,7 @@ class PrimitiveWithCheck(Primitive):
 
 class PrimitiveWithInfer(Primitive):
     """
-    PrimitiveWithInfer is the base class of primitives in python defines functions for tracking inference in python.
+    PrimitiveWithInfer is the base class of primitives in python and defines functions for tracking inference in python.
 
     There are four method can be overide to define the infer logic of the primitive: __infer__(), infer_shape(),
     infer_dtype(), and infer_value(). If __infer__() is defined in primitive, the __infer__() has highest priority
@@ -464,8 +464,8 @@ def prim_attr_register(fn):
 
 def constexpr(fn=None, get_instance=True, name=None):
     """
-    Make a PrimitiveWithInfer operator that can infer the value at compile time. We can use it to define a function to
-    compute constant value using the constants in the constructor.
+    Creates a PrimitiveWithInfer operator that can infer the value at compile time. We can use it to define a function
+    to compute constant value using the constants in the constructor.
 
     Args:
         fn (function): A `fn` use as the infer_value of the output operator.
@@ -477,13 +477,13 @@ def constexpr(fn=None, get_instance=True, name=None):
         >>> # make an operator to calculate tuple len
         >>> @constexpr
         >>> def tuple_len(x):
-        >>>     return len(x)
+        ...     return len(x)
         >>> assert tuple_len(a) == 2
-        >>>
-        >>> # make a operator class to calculate tuple len
+        ...
+        >>> # make an operator class to calculate tuple len
         >>> @constexpr(get_instance=False, name="TupleLen")
         >>> def tuple_len_class(x):
-        >>>     return len(x)
+        ...     return len(x)
         >>> assert tuple_len_class()(a) == 2
     """
 
@@ -510,8 +510,4 @@ def constexpr(fn=None, get_instance=True, name=None):
 def _run_op(obj, op_name, args):
     """Single op execution function supported by ge in PyNative mode."""
     output = real_run_op(obj, op_name, args)
-    if not output:
-        raise RuntimeError("Pynative run op %s failed!" % op_name)
-    if len(output) == 1:
-        output = output[0]
     return output

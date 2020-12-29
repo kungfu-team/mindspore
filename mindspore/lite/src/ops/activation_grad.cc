@@ -16,6 +16,10 @@
 
 #include "src/ops/activation_grad.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -43,8 +47,12 @@ int ActivationGrad::UnPackAttr(const Primitive &prim, const std::vector<AnfNodeP
     attr->type = schema::ActivationType_RELU;
   } else if (prim.name() == "SigmoidGrad") {
     attr->type = schema::ActivationType_SIGMOID;
-  } else if (prim.name() == "Relu6Grad") {
+  } else if (prim.name() == "ReLU6Grad") {
     attr->type = schema::ActivationType_RELU6;
+  } else if (prim.name() == "HSigmoidGrad") {
+    attr->type = schema::ActivationType_HSIGMOID;
+  } else if (prim.name() == "HSwishGrad") {
+    attr->type = schema::ActivationType_HSWISH;
   }
   attr->alpha = 0;  // alpha;
   this->primitive_->value.value = attr.release();
@@ -70,6 +78,11 @@ int ActivationGrad::UnPackToFlatBuilder(const schema::Primitive *primitive, flat
 }
 int ActivationGrad::GetType() const { return this->primitive_->value_as_ActivationGrad()->type(); }
 float ActivationGrad::GetAlpha() const { return this->primitive_->value_as_ActivationGrad()->alpha(); }
+
+PrimitiveC *ActivationGradCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<ActivationGrad>(primitive);
+}
+Registry ActivationGradRegistry(schema::PrimitiveType_ActivationGrad, ActivationGradCreator);
 #endif
 }  // namespace lite
 }  // namespace mindspore

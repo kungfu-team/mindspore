@@ -25,6 +25,7 @@
 #include <memory>
 #include <unordered_map>
 #include <utility>
+#include <set>
 
 #include "base/base.h"
 #include "base/user_data.h"
@@ -98,7 +99,9 @@ class AnfNode : public Base {
         debug_info_(std::make_shared<NodeDebugInfo>()),
         fullname_with_scope_(""),
         hash_(std::hash<const AnfNode *>()),
-        kernel_info_(nullptr) {
+        kernel_info_(nullptr),
+        stage_(-1),
+        need_grad_(false) {
     scope_ = ScopeManager::GetInstance().GetCurrentScope();
   }
 
@@ -156,6 +159,7 @@ class AnfNode : public Base {
     return os;
   }
   size_t seen_{0};
+  size_t extra_seen_{0};
 
   template <typename T>
   void set_user_data(const std::string &key, const std::shared_ptr<T> &value) {
@@ -184,6 +188,12 @@ class AnfNode : public Base {
     return user_data_.has(T::key);
   }
 
+  int64_t stage() { return stage_; }
+  void set_stage(const int &stage) { stage_ = stage; }
+
+  bool grad() { return need_grad_; }
+  void set_grad(const bool &need_grad) { need_grad_ = need_grad; }
+
  protected:
   // Hold a weak ref to Graph as Graph also hold ref to AnfNode.
   // Otherwise, func_graph_ and AnfNode will make a reference cycle.
@@ -198,6 +208,8 @@ class AnfNode : public Base {
   ScopePtr scope_;
   KernelInfoDevicePtr kernel_info_;
   UserData user_data_;
+  int64_t stage_;
+  bool need_grad_;
 };
 
 // CNode represents the complex node with a set of arguments.
@@ -315,9 +327,17 @@ class Parameter : public ANode {
     return shared_from_this() == other.shared_from_this();
   }
 
+  void set_used_by_real_kernel() { is_real_kernel_used_ = false; }
+  bool is_used_by_real_kernel() { return is_real_kernel_used_; }
+
+  void set_used_by_dynamic_kernel() { is_used_by_dynamic_kernel_ = true; }
+  bool is_used_by_dynamic_kernel() { return is_used_by_dynamic_kernel_; }
+
  private:
   std::string name_;
   bool has_default_;
+  bool is_real_kernel_used_ = true;
+  bool is_used_by_dynamic_kernel_ = false;
   ValuePtr default_param_;
   // The count of graphs using the parameter.
   int used_graph_count_;
@@ -366,6 +386,9 @@ class ValueNode : public ANode {
   void set_has_new_value(bool flag) { has_new_value_ = flag; }
   bool has_new_value() const { return has_new_value_; }
 
+  size_t used_graph_count() const { return used_graph_count_; }
+  void set_used_graph_count(size_t used_graph_count) { used_graph_count_ = used_graph_count; }
+
   std::string ToString() const override;
   std::string DebugString(int recursive_level = 1) const override;
   std::string DebugString(bool recursive) const override { return DebugString(recursive ? 1 : 0); }
@@ -386,6 +409,7 @@ class ValueNode : public ANode {
  private:
   ValuePtr value_;
   bool has_new_value_ = false;
+  size_t used_graph_count_{0};
 };
 
 template <typename T>
@@ -407,7 +431,6 @@ inline ValuePtr MakeValue(S v) {
 template <typename S, typename U = typename ImmTraits<S>::type>
 static S GetValue(const ValuePtr &value) {
   MS_EXCEPTION_IF_NULL(value);
-
   U imm = value->cast<U>();
   if (imm == nullptr) {
     MS_LOG(EXCEPTION) << "Cast failed, original value: " << value->ToString() << ", type: " << value->type_name();
@@ -482,6 +505,16 @@ void reset_id();
 using TaggedNodeMap = std::unordered_map<AnfNodePtr, size_t>;
 using TaggedGraph = std::pair<FuncGraphPtr, TaggedNodeMap>;
 std::string GetCNodeTarget(const AnfNodePtr &node);
+bool ContainMultiTarget(const std::vector<AnfNodePtr> &nodes);
+struct GraphSegment {
+  GraphSegment(const std::vector<AnfNodePtr> &nodes, bool is_cut) : nodes_(nodes), is_cut_(is_cut) {}
+  void AddPreSegment(const std::shared_ptr<GraphSegment> &segment) { (void)pre_segments_.insert(segment); }
+  std::vector<AnfNodePtr> nodes_;
+  std::set<std::shared_ptr<GraphSegment>> pre_segments_;
+  bool is_cut_{false};
+  uint32_t graph_id_{0};
+};
+using GraphSegmentPtr = std::shared_ptr<GraphSegment>;
 }  // namespace mindspore
 
 #endif  // MINDSPORE_CORE_IR_ANF_H_

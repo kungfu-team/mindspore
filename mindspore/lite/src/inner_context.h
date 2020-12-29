@@ -27,7 +27,29 @@ struct InnerContext : public Context {
   struct ThreadPool *thread_pool_ = nullptr;
 
  public:
+  InnerContext() = default;
+
+  explicit InnerContext(const Context *context);
+
   int Init();
+
+  bool IsCpuFloat16Enabled() const;
+
+  bool IsGpuFloat16Enabled() const;
+
+  bool IsCpuEnabled() const;
+
+  bool IsGpuEnabled() const;
+
+  bool IsNpuEnabled() const;
+
+  CpuDeviceInfo GetCpuInfo() const;
+
+  GpuDeviceInfo GetGpuInfo() const;
+
+  NpuDeviceInfo GetNpuInfo() const;
+
+  int IsValid() const;
 
   virtual ~InnerContext();
 };

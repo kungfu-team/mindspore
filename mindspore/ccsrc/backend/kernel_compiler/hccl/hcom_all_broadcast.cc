@@ -17,27 +17,25 @@
 #include "backend/kernel_compiler/hccl/hcom_all_broadcast.h"
 #include <memory>
 #include "utils/ms_context.h"
+#include "backend/kernel_compiler/hccl/hccl_context.h"
+#include "external/hccl/hccl.h"
 
 namespace mindspore {
 namespace kernel {
 bool HcomAllBroadCastKernel::Launch(const std::vector<AddressPtr> &inputs,
                                     const std::vector<AddressPtr> & /*workspace*/,
                                     const std::vector<AddressPtr> & /*outputs*/, void *stream_ptr) {
-  auto context_ptr = MsContext::GetInstance();
-  MS_EXCEPTION_IF_NULL(context_ptr);
-  if (context_ptr->get_param<bool>(MS_CTX_ENABLE_TASK_SINK)) {
-    return true;
-  }
   if (inputs.empty() || hccl_data_type_list_.empty()) {
     MS_LOG(ERROR) << "BroadCast param is empty";
     return false;
   }
-  const char *tag = "Hccl-BroadCast";
   MS_EXCEPTION_IF_NULL(inputs[0]);
-  HcclResult ret =
-    hcom_broadcast(tag, inputs[0]->addr, hccl_count_, hccl_data_type_list_[0], root_id_, nullptr, stream_ptr);
-  if (ret != HCCL_SUCCESS) {
-    MS_LOG(ERROR) << "HcomBroadcastOp : hcom_broadcast fail, return: " << static_cast<int>(ret);
+  MS_EXCEPTION_IF_NULL(stream_ptr);
+  auto hccl_result = HcclBroadcast(inputs[0]->addr, hccl_count_, hccl_data_type_list_[0], root_id_,
+                                   HcclContext::GetInstance().hccl_comm(), stream_ptr);
+
+  if (hccl_result != HCCL_SUCCESS) {
+    MS_LOG(ERROR) << "HcomBroadcastOp : hcom_broadcast fail, return: " << hccl_result;
     return false;
   }
   return true;

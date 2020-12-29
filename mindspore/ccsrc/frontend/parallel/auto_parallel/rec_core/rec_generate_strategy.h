@@ -36,6 +36,9 @@ Strategys PrepareMatMul(const std::shared_ptr<Graph> &graph, const std::vector<s
 Strategys PrepareBiasAdd(const std::shared_ptr<Dimensions> &s);
 Strategys PrepareOneHot(const std::shared_ptr<Graph> &graph, const std::vector<std::shared_ptr<OperatorInfo>> &ops,
                         const size_t iter_graph, const size_t iter_ops);
+Strategys PrepareAxisRelatedStrategy(const std::shared_ptr<Graph> &graph,
+                                     const std::vector<std::shared_ptr<OperatorInfo>> &ops, const size_t iter_graph,
+                                     const size_t iter_ops);
 Strategys PrepareGatherV2(const std::vector<std::shared_ptr<OperatorInfo>> &ops, const size_t iter_ops, Dimensions s);
 Strategys PrepareGatherV2P(const std::vector<std::shared_ptr<OperatorInfo>> &ops, const size_t iter_ops, Dimensions s);
 Dimensions PrepareGatherV2POutputStrategy(const std::vector<std::shared_ptr<OperatorInfo>> &ops,
@@ -64,7 +67,7 @@ Dimensions CopyIncomingOperatorOutputStrategy(const std::shared_ptr<Graph> &grap
                                               const size_t iter_ops, const size_t iter_graph);
 Dimensions PrepareIncomingOperatorInputStrategy(const std::vector<std::shared_ptr<OperatorInfo>> &ops,
                                                 const size_t incoming_op_index);
-Dimensions GetAxisList(const std::vector<std::shared_ptr<OperatorInfo>> &ops, const int iter_ops);
+Dimensions GetAxisList(const std::vector<std::shared_ptr<OperatorInfo>> &ops, const int64_t iter_ops);
 Dimensions ModifyStrategyIfSqueezeIncoming(const std::vector<std::shared_ptr<OperatorInfo>> &ops,
                                            const size_t incoming_op_index, Dimensions s);
 bool GetKeepDims(const std::vector<std::shared_ptr<OperatorInfo>> &ops, const size_t iter_ops);

@@ -29,6 +29,7 @@
 #include <type_traits>
 #include <typeinfo>
 
+#include "abstract/utils.h"
 #include "abstract/abstract_value.h"
 
 namespace mindspore {
@@ -490,6 +491,16 @@ Tensor::Tensor(double input, const TypePtr &data_type)
       data_(MakeTensorData(data_type_, {}, input)),
       id_(MakeId()) {}
 
+Tensor::Tensor(uint64_t input, const TypePtr &data_type)
+    : MetaTensor(TypeIdOf(data_type, kNumberTypeUInt64), {}),
+      data_(MakeTensorData(data_type_, {}, input)),
+      id_(MakeId()) {}
+
+Tensor::Tensor(bool input, const TypePtr &data_type)
+    : MetaTensor(TypeIdOf(data_type, kNumberTypeBool), {}),
+      data_(MakeTensorData(data_type_, {}, input)),
+      id_(MakeId()) {}
+
 bool Tensor::operator==(const Tensor &tensor) const {
   return (&tensor == this || (MetaTensor::operator==(tensor) && data_ == tensor.data_));
 }
@@ -497,6 +508,7 @@ bool Tensor::operator==(const Tensor &tensor) const {
 bool Tensor::ValueEqual(const Tensor &tensor) const {
   return (&tensor == this || (MetaTensor::operator==(tensor) && data_->equals(*tensor.data_)));
 }
+
 // assgin value to this tensor
 Tensor &Tensor::AssignValue(const Tensor &tensor) {
   if (this != &tensor) {
@@ -541,7 +553,6 @@ std::string Tensor::ToStringInternal(int limit_size) const {
   std::ostringstream buf;
   auto dtype = Dtype();
   MS_EXCEPTION_IF_NULL(dtype);
-  data_sync(false);
   buf << "Tensor(shape=" << ShapeToString(shape_) << ", dtype=" << dtype->ToString() << ", value=";
   if (limit_size <= 0 || DataSize() < limit_size) {
     // Only print data for small tensor.
@@ -567,7 +578,6 @@ std::string Tensor::ToStringRepr() const {
   std::ostringstream buf;
   auto dtype = Dtype();
   MS_EXCEPTION_IF_NULL(dtype);
-  data_sync(false);
   buf << "Tensor(shape=" << ShapeToString(shape_) << ", dtype=" << dtype->ToString()
       << ", value=" << ((data().ndim() > 1) ? '\n' : ' ') << data().ToString(data_type_, shape_, true) << ')';
   return buf.str();
@@ -580,7 +590,11 @@ void Tensor::data_sync(bool need_wait) const {
   if (device_sync_ == nullptr) {
     return;
   }
-  if (!device_sync_->SyncDeviceToHost(shape(), static_cast<size_t>(data().nbytes()), data_type(), data_c())) {
+  std::vector<size_t> shape_tmp;
+  (void)std::transform(shape().begin(), shape().end(), std::back_inserter(shape_tmp), IntToSize);
+  auto size = abstract::ShapeSize(shape_tmp) * abstract::TypeIdSize(data_type());
+  auto address = device_sync_;
+  if (size != 0 && !address->SyncDeviceToHost(shape(), size, data_type(), data_c())) {
     MS_LOG(EXCEPTION) << "SyncDeviceToHost failed.";
   }
   sync_status_ = kNeedSyncHostToDevice;

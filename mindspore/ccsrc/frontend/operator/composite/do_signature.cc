@@ -96,7 +96,7 @@ TypeId GetMaxTypeId(const std::vector<TypePtr> &input_types, std::vector<size_t>
   TypeId max_type_id = kTypeUnknown;
   size_t max_type_number = 0;
   bool has_int8 = false;
-  bool has_scalar_int32 = false;
+  bool has_scalar_int64 = false;
   bool has_scalar_float32 = false;
   for (const auto &index : indices) {
     TypeId arg_type_id = kTypeUnknown;
@@ -105,8 +105,8 @@ TypeId GetMaxTypeId(const std::vector<TypePtr> &input_types, std::vector<size_t>
       continue;
     }
     if (arg_type != kObjectTypeTensorType) {
-      if (arg_type_id == kNumberTypeInt32) {
-        has_scalar_int32 = true;
+      if (arg_type_id == kNumberTypeInt64) {
+        has_scalar_int64 = true;
       } else if (arg_type_id == kNumberTypeFloat32) {
         has_scalar_float32 = true;
       }
@@ -135,15 +135,15 @@ TypeId GetMaxTypeId(const std::vector<TypePtr> &input_types, std::vector<size_t>
   // if so, it means that max is bool tensor, use scalar type instead.
   // for example: Tensor([True, True]) * 2, expect result is Tensor([2, 2])
   if (max_type_id == kNumberTypeBool) {
-    if (has_scalar_int32) {
-      max_type_id = kNumberTypeInt32;
+    if (has_scalar_int64) {
+      max_type_id = kNumberTypeInt64;
     }
     if (has_scalar_float32) {
       max_type_id = kNumberTypeFloat32;
     }
   }
   if (max_type_id != kNumberTypeFloat16 && max_type_id != kNumberTypeFloat32 && max_type_id != kNumberTypeFloat64 &&
-      has_scalar_float32) {
+      max_type_id != kTypeUnknown && has_scalar_float32) {
     max_type_id = kNumberTypeFloat32;
   }
   return max_type_id;
@@ -203,8 +203,8 @@ void DoAutoCast(const std::string &func_name, const std::vector<Signature> &sign
   std::vector<SignatureEnumDType> dtypes;
   (void)std::transform(signature.begin(), signature.end(), std::back_inserter(dtypes),
                        [](const Signature &sig) { return sig.dtype; });
-  int empty_dtype_count = std::count(dtypes.begin(), dtypes.end(), SignatureEnumDType::kDTypeEmptyDefaultValue);
-  if (dtypes.empty() || static_cast<int>(dtypes.size()) == empty_dtype_count) {
+  int64_t empty_dtype_count = std::count(dtypes.begin(), dtypes.end(), SignatureEnumDType::kDTypeEmptyDefaultValue);
+  if (dtypes.empty() || static_cast<int64_t>(dtypes.size()) == empty_dtype_count) {
     return;
   }
   // Stat the index of the arguments with the largest type in the same SignatureEnumDType.

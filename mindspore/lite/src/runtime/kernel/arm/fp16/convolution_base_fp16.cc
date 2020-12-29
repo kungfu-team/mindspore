@@ -23,7 +23,8 @@
 #include "src/runtime/runtime_api.h"
 
 namespace mindspore::kernel {
-
+using mindspore::lite::RET_ERROR;
+using mindspore::lite::RET_OK;
 ConvolutionBaseFP16CPUKernel::~ConvolutionBaseFP16CPUKernel() {
   if (fp16_weight_ != nullptr) {
     free(fp16_weight_);
@@ -66,7 +67,7 @@ int ConvolutionBaseFP16CPUKernel::GetExecuteFilter() {
       MS_LOG(ERROR) << "malloc fp16_weight_ failed.";
       return RET_ERROR;
     }
-    for (int i = 0; i < fp16_weight_size / sizeof(float16_t); ++i) {
+    for (size_t i = 0; i < fp16_weight_size / sizeof(float16_t); ++i) {
       fp16_weight_[i] = (float16_t)origin_weight[i];
     }
     execute_weight_ = fp16_weight_;
@@ -90,9 +91,11 @@ void ConvolutionBaseFP16CPUKernel::IfCastOutput() {
 void ConvolutionBaseFP16CPUKernel::FreeTmpBuffer() {
   if (in_data_type_ == kNumberTypeFloat32) {
     context_->allocator->Free(execute_input_);
+    execute_input_ = nullptr;
   }
   if (out_data_type_ == kNumberTypeFloat32) {
     context_->allocator->Free(execute_output_);
+    execute_output_ = nullptr;
   }
 }
 

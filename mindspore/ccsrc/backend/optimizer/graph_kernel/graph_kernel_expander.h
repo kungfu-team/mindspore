@@ -17,8 +17,8 @@
 #define MINDSPORE_CCSRC_BACKEND_OPTIMIZER_GRAPH_KERNEL_GRAPH_KERNEL_EXPANDER_H_
 #include <memory>
 #include <unordered_set>
-#include "ir/func_graph.h"
 #include "backend/optimizer/common/pass.h"
+#include "ir/func_graph.h"
 
 namespace mindspore {
 namespace opt {
@@ -31,6 +31,8 @@ class GraphKernelExpander : public Pass {
  private:
   FuncGraphPtr CreateExpandFuncGraph(const CNodePtr &node);
   bool DoExpand(const FuncGraphPtr &func_graph);
+  void ToPrimitive(const FuncGraphPtr &func_graph) const;
+  void EliminateRedundantParameters(const FuncGraphPtr &func_graph, AnfNodePtrList *inputs);
   AnfNodePtr CreateExpandGraphKernel(const FuncGraphPtr &func_graph, const FuncGraphPtr &new_func_graph,
                                      const CNodePtr &node);
   bool CanExpand(const CNodePtr &node) {

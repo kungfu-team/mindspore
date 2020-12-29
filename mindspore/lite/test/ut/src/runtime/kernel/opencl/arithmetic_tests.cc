@@ -13,233 +13,185 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "ut/src/runtime/kernel/opencl/common.h"
+#include "nnacl/arithmetic_common.h"
 
-#include "common/common_test.h"
-#include "mindspore/lite/src/runtime/kernel/opencl/subgraph_opencl_kernel.h"
-#include "mindspore/lite/src/runtime/kernel/opencl/kernel/arithmetic.h"
+namespace mindspore::lite::opencl::test {
 
-namespace mindspore {
+class TestOpenCL_Arithmetic : public CommonTest {};
 
-template <class T>
-static void BoardcaseAdd(const T *a, const T b, T *c, const int size) {
-  for (int i = 0; i < size; i++) {
-    c[i] = a[i] + b;
+namespace {
+// PrimitiveType_RealDiv
+// PrimitiveType_LogicalAnd
+// PrimitiveType_LogicalOr
+// PrimitiveType_Equal
+// PrimitiveType_Less
+// PrimitiveType_Greater
+// PrimitiveType_GreaterEqual
+// PrimitiveType_NotEqual
+// PrimitiveType_LessEqual
+// PrimitiveType_Maximum
+// PrimitiveType_Minimum
+// PrimitiveType_FloorDiv
+// PrimitiveType_FloorMod
+// PrimitiveType_SquaredDifference: src/ops/populate/arithmetic_populate.cc
+// PrimitiveType_Add:               src/ops/populate/add_populate.cc
+// PrimitiveType_Sub:               src/ops/populate/sub_populate.cc
+// PrimitiveType_Mul:               src/ops/populate/mul_populate.cc
+// PrimitiveType_Div:               src/ops/populate/div_populate.cc
+// PrimitiveType_Eltwise:           src/ops/populate/eltwise_populate.cc
+// PrimitiveType_BiasAdd:           src/ops/populate/bias_add_populate.cc
+OpParameter *CreateParameter(schema::PrimitiveType type, const std::vector<int> &input0_shape,
+                             const std::vector<int> &input1_shape,
+                             schema::ActivationType act_type = schema::ActivationType_NO_ACTIVATION) {
+  auto *param = test::CreateParameter<ArithmeticParameter>(type);
+  int input0_size = std::accumulate(input0_shape.begin(), input0_shape.end(), 1, std::multiplies<>());
+  int input1_size = std::accumulate(input1_shape.begin(), input1_shape.end(), 1, std::multiplies<>());
+  if (input0_size != input1_size) {
+    param->broadcasting_ = true;
+  }
+  param->activation_type_ = act_type;
+  return reinterpret_cast<OpParameter *>(param);
+}
+}  // namespace
+
+TEST_F(TestOpenCL_Arithmetic, ElementwiseAdd) {
+  std::vector<int> input0_shape = {1, 2, 2, 3};
+  std::vector<int> input1_shape = {1, 2, 2, 3};
+  std::vector<int> output_shape = {1, 2, 2, 3};
+  float input0_data[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  float input1_data[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  float output_data[] = {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24};
+
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(schema::PrimitiveType_Add, input0_shape, input1_shape);
+    TestMain({{input0_shape, input0_data, VAR}, {input1_shape, input1_data, CONST_TENSOR}}, {output_shape, output_data},
+             param, fp16_enable);
   }
 }
 
-template <class T>
-static void ElementAdd(const T *a, const T *b, T *c, const int size) {
-  for (int i = 0; i < size; i++) {
-    c[i] = a[i] + b[i];
+TEST_F(TestOpenCL_Arithmetic, ScalarMul) {
+  std::vector<int> input0_shape = {1, 2, 2, 3};
+  std::vector<int> input1_shape = {1};
+  std::vector<int> output_shape = {1, 2, 2, 3};
+  float input0_data[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  float input1_data[] = {2};
+  float output_data[] = {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24};
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(schema::PrimitiveType_Mul, input0_shape, input1_shape);
+    TestMain({{input0_shape, input0_data, VAR}, {input1_shape, input1_data, CONST_TENSOR}}, {output_shape, output_data},
+             param, fp16_enable);
   }
 }
 
-template <class T>
-static bool DataCompare(const T *a, const T *b, const int size, const float accuracy = 1e-4) {
-  for (int i = 0; i < size; i++) {
-    auto diff = fabs(a[i] - b[i]);
-    if (diff > accuracy) {
-      MS_LOG(ERROR) << "compare failed at " << i << " exp " << a[i] << " bug got " << b[i];
-      return false;
-    }
-  }
-  return true;
-}
-
-template <class T>
-static void InitData(void *data, const int size) {
-  T *data_float = reinterpret_cast<T *>(data);
-  static unsigned int seed = 123;
-  for (int i = 0; i < size; i++) {
-    data_float[i] = static_cast<int>(rand_r(&seed)) % 100;
+TEST_F(TestOpenCL_Arithmetic, BroadcastSubReLU6) {
+  std::vector<int> input0_shape = {1, 2, 2, 3};
+  std::vector<int> input1_shape = {3};
+  std::vector<int> output_shape = {1, 2, 2, 3};
+  float input0_data[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  float input1_data[] = {1, 2, 3};
+  float output_data[] = {0, 0, 0, 3, 3, 3, 6, 6, 6, 6, 6, 6};
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(schema::PrimitiveType_Sub, input0_shape, input1_shape, schema::ActivationType_RELU6);
+    TestMain({{input0_shape, input0_data, VAR}, {input1_shape, input1_data, CONST_TENSOR}}, {output_shape, output_data},
+             param, fp16_enable);
   }
 }
 
-template <class T>
-static void LogData(void *data, const int size, const std::string prefix) {
-  std::cout << prefix;
-  T *data_float = reinterpret_cast<T *>(data);
-  for (int i = 0; i < size; i++) {
-    std::cout << data_float[i] << ",";
-  }
-  std::cout << std::endl;
-}
-
-template <class T>
-static void TestCase(const std::vector<int> &shape_a, const std::vector<int> &shape_b) {
-  bool is_log_data = false;
-  auto ocl_runtime = lite::opencl::OpenCLRuntimeWrapper().GetInstance();
-  auto allocator = ocl_runtime->GetAllocator();
-
-  bool is_bias_add = shape_b.empty();
-  auto data_type = kNumberTypeFloat32;
-  if (sizeof(T) == 2) {
-    data_type = kNumberTypeFloat16;
-    ocl_runtime->SetFp16Enable(true);
-  }
-
-  lite::Tensor *tensor_a = new (std::nothrow) lite::Tensor(data_type, shape_a, schema::Format_NHWC4);
-  lite::Tensor *tensor_b = new (std::nothrow) lite::Tensor(data_type, shape_b, schema::Format_NHWC4);
-  lite::Tensor *tensor_c = new (std::nothrow) lite::Tensor(data_type, shape_a, schema::Format_NHWC4);
-  if (tensor_a == nullptr || tensor_b == nullptr || tensor_c == nullptr) {
-    MS_LOG(ERROR) << "Create tensor failed!";
-    delete tensor_a;
-    delete tensor_b;
-    delete tensor_c;
-    return;
-  }
-
-  int64_t element_num = tensor_a->ElementsC4Num();
-  int64_t element_num_b = is_bias_add ? 1 : tensor_b->ElementsC4Num();
-
-  T *data_a = new (std::nothrow) T[element_num];
-  T *data_b = new (std::nothrow) T[element_num_b];
-  T *data_c_cpu = new (std::nothrow) T[element_num];
-  T *data_c_ocl = new (std::nothrow) T[element_num];
-  if (data_a == nullptr || data_b == nullptr || data_c_cpu == nullptr || data_c_ocl == nullptr) {
-    MS_LOG(ERROR) << "Create buffer failed!";
-    delete tensor_a;
-    delete tensor_b;
-    delete tensor_c;
-    delete[] data_a;
-    delete[] data_b;
-    delete[] data_c_cpu;
-    delete[] data_c_ocl;
-    return;
-  }
-
-  InitData<T>(data_a, element_num);
-  InitData<T>(data_b, element_num_b);
-  memset(data_c_ocl, 0, sizeof(T) * element_num);
-
-  if (is_bias_add) {
-    BoardcaseAdd(data_a, static_cast<T *>(data_b)[0], data_c_cpu, element_num);
-  } else {
-    ElementAdd(data_a, data_b, data_c_cpu, element_num);
-  }
-
-  std::vector<lite::Tensor *> inputs = {tensor_a};
-  if (!is_bias_add) {
-    inputs.push_back(tensor_b);
-  } else {
-    tensor_b->MallocData();
-    memcpy(tensor_b->data_c(), data_b, sizeof(T));
-  }
-  std::vector<lite::Tensor *> outputs = {tensor_c};
-
-  ArithmeticParameter *param = static_cast<ArithmeticParameter *>(malloc(sizeof(ArithmeticParameter)));
-  param->broadcasting_ = is_bias_add;
-  if (param == nullptr) {
-    MS_LOG(ERROR) << "Create parameter failed!";
-    delete tensor_a;
-    delete tensor_b;
-    delete tensor_c;
-    delete[] data_a;
-    delete[] data_b;
-    delete[] data_c_cpu;
-    delete[] data_c_ocl;
-    return;
-  }
-  param->ndim_ = 4;
-  param->op_parameter_.type_ = PrimitiveType_Add;
-
-  std::vector<lite::Tensor *> arithmetic_inputs = {tensor_a, tensor_b};
-  lite::InnerContext ctx;
-  ASSERT_EQ(lite::RET_OK, ctx.Init());
-  auto *arith_kernel = new (std::nothrow)
-    kernel::ArithmeticOpenCLKernel(reinterpret_cast<OpParameter *>(param), arithmetic_inputs, outputs, &ctx);
-  if (arith_kernel == nullptr) {
-    MS_LOG(ERROR) << "Create ArithmeticOpenCLKernel failed!";
-    delete tensor_a;
-    delete tensor_b;
-    delete tensor_c;
-    delete[] data_a;
-    delete[] data_b;
-    delete[] data_c_cpu;
-    delete[] data_c_ocl;
-    free(param);
-    return;
-  }
-  arith_kernel->Init();
-
-  tensor_a->MallocData(allocator);
-  tensor_b->MallocData(allocator);
-  std::vector<kernel::LiteKernel *> kernels{arith_kernel};
-  auto *kernel = new (std::nothrow) kernel::SubGraphOpenCLKernel(inputs, outputs, kernels, kernels, kernels);
-  if (arith_kernel == nullptr) {
-    MS_LOG(ERROR) << "Create SubGraphOpenCLKernel failed!";
-    delete tensor_a;
-    delete tensor_b;
-    delete tensor_c;
-    delete[] data_a;
-    delete[] data_b;
-    delete[] data_c_cpu;
-    delete[] data_c_ocl;
-    delete arith_kernel;
-    return;
-  }
-  kernel->Init();
-
-  memcpy(inputs[0]->data_c(), data_a, sizeof(T) * element_num);
-  if (!is_bias_add) {
-    memcpy(inputs[1]->data_c(), data_b, sizeof(T) * element_num_b);
-  }
-
-  kernel->Run();
-
-  memcpy(data_c_ocl, outputs[0]->data_c(), sizeof(T) * element_num);
-
-  if (is_log_data) {
-    LogData<T>(data_a, 10, "Data A : ");
-    LogData<T>(data_b, tensor_b->shape().empty() ? 1 : 10, "Data B : ");
-    LogData<T>(data_c_cpu, 10, "Expect compute : ");
-    LogData<T>(outputs[0]->data_c(), 10, "OpenCL compute : ");
-  }
-  bool cmp = DataCompare(data_c_cpu, data_c_ocl, element_num);
-  MS_LOG(INFO) << "Compare " << (cmp ? "success!" : "failed!");
-  EXPECT_EQ(true, cmp);
-
-  // free
-  delete[] data_a;
-  delete[] data_b;
-  delete[] data_c_cpu;
-  delete[] data_c_ocl;
-
-  delete kernel;
-  for (auto tensor : inputs) {
-    delete tensor;
-  }
-  for (auto tensor : outputs) {
-    delete tensor;
+TEST_F(TestOpenCL_Arithmetic, BroadcastSub2) {
+  std::vector<int> input0_shape = {1, 3};
+  std::vector<int> input1_shape = {1, 2, 2, 3};
+  std::vector<int> output_shape = {1, 2, 2, 3};
+  float input0_data[] = {1, 2, 3};
+  float input1_data[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  float output_data[] = {0, 0, 0, -3, -3, -3, -6, -6, -6, -9, -9, -9};
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(schema::PrimitiveType_Sub, input0_shape, input1_shape);
+    TestMain({{input0_shape, input0_data, VAR}, {input1_shape, input1_data, CONST_TENSOR}}, {output_shape, output_data},
+             param, fp16_enable);
   }
 }
 
-class TestArithmeticOpenCL : public mindspore::CommonTest {
- public:
-  TestArithmeticOpenCL() {}
-};
-
-TEST_F(TestArithmeticOpenCL, AddElementwiseFP32) {
-  const std::vector<int> &shape_a = {1, 1024, 1024, 4};
-  const std::vector<int> &shape_b = {1, 1024, 1024, 4};
-  TestCase<float>(shape_a, shape_b);
+TEST_F(TestOpenCL_Arithmetic, BroadcastFloorMod) {
+  std::vector<int> input0_shape = {1, 1, 3, 4};
+  std::vector<int> input1_shape = {1, 1, 1, 4};
+  std::vector<int> output_shape = {1, 1, 3, 4};
+  float input0_data[] = {1.1, -1.1, 3.123, -5.432, 0.1234, -0.0312, 12.1, 21.1, 9.1, 9.0, -100, 0.1};
+  float input1_data[] = {1, 3, 2, 0.3};
+  float output_data[] = {0.100000, 1.900000, 1.123000, 0.268000, 0.123400, 2.968800,
+                         0.100000, 0.100000, 0.100000, 0.000000, 0.000000, 0.100000};
+  for (auto fp16_enable : {true, false}) {
+    auto *param = CreateParameter(schema::PrimitiveType_FloorMod, input0_shape, input1_shape);
+    TestMain({{input0_shape, input0_data, VAR}, {input1_shape, input1_data, CONST_TENSOR}}, {output_shape, output_data},
+             param, fp16_enable, fp16_enable ? 1e-2 : 1e-6);
+  }
 }
 
-TEST_F(TestArithmeticOpenCL, AddBroadcastFP32) {
-  const std::vector<int> &shape_a = {1, 128, 128, 4};
-  const std::vector<int> &shape_b = {};
-  TestCase<float>(shape_a, shape_b);
+TEST_F(TestOpenCL_Arithmetic, FloorMod) {
+  std::vector<int> input0_shape = {1, 1, 3, 4};
+  std::vector<int> input1_shape = {1, 1, 3, 4};
+  std::vector<int> output_shape = {1, 1, 3, 4};
+  float input0_data[] = {1.1, -1.1, 3.123, -5.432, 0.1234, -0.0312, 12.1, 21.1, 9.1, 9.0, -100, 0.1};
+  float input1_data[] = {1, 3, 2, 0.3, 1, 3, 2, 0.3, 1, 3, 2, 0.3};
+  float output_data[] = {0.100000, 1.900000, 1.123000, 0.268000, 0.123400, 2.968800,
+                         0.100000, 0.100000, 0.100000, 0.000000, 0.000000, 0.100000};
+  for (auto fp16_enable : {true, false}) {
+    auto *param = CreateParameter(schema::PrimitiveType_FloorMod, input0_shape, input1_shape);
+    TestMain({{input0_shape, input0_data, VAR}, {input1_shape, input1_data, CONST_TENSOR}}, {output_shape, output_data},
+             param, fp16_enable, fp16_enable ? 1e-2 : 1e-6);
+  }
 }
 
-TEST_F(TestArithmeticOpenCL, AddElementwiseFP16) {
-  const std::vector<int> &shape_a = {1, 1024, 1024, 4};
-  const std::vector<int> &shape_b = {1, 1024, 1024, 4};
-  TestCase<float16_t>(shape_a, shape_b);
+TEST_F(TestOpenCL_Arithmetic, FloorModFile) {
+  std::vector<int> input0_shape = {1, 3, 4, 5};
+  std::vector<int> input1_shape = {1, 3, 4, 5};
+  std::vector<int> output_shape = {1, 3, 4, 5};
+  size_t input1_size, input2_size, output_size;
+  std::string input1Ppath = "./test_data/FloodModfp32_input1.bin";
+  std::string input2Ppath = "./test_data/FloodModfp32_input2.bin";
+  std::string correctOutputPath = "./test_data/FloodModfp32_output.bin";
+  auto input0_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(input1Ppath.c_str(), &input1_size));
+  auto input1_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(input2Ppath.c_str(), &input2_size));
+  auto output_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(correctOutputPath.c_str(), &output_size));
+
+  for (auto fp16_enable : {true}) {
+    auto *param = CreateParameter(schema::PrimitiveType_FloorMod, input0_shape, input1_shape);
+    TestMain({{input0_shape, input0_data, VAR}, {input1_shape, input1_data, CONST_TENSOR}}, {output_shape, output_data},
+             param, fp16_enable, fp16_enable ? 1e-2 : 1e-7);
+  }
 }
 
-TEST_F(TestArithmeticOpenCL, AddBroadcastFP16) {
-  const std::vector<int> &shape_a = {1, 128, 128, 4};
-  const std::vector<int> &shape_b = {};
-  TestCase<float16_t>(shape_a, shape_b);
+TEST_F(TestOpenCL_Arithmetic, SquaredDifference) {
+  std::vector<int> input0_shape = {1, 512, 1, 5};
+  std::vector<int> input1_shape = {1, 1, 1, 5};
+  std::vector<int> output_shape = {1, 512, 1, 5};
+  size_t input1_size, input2_size, output_size;
+  std::string input1Ppath = "./test_data/SquaredDifferencefp32_input1.bin";
+  std::string input2Ppath = "./test_data/SquaredDifferencefp32_input2.bin";
+  std::string correctOutputPath = "./test_data/SquaredDifferencefp32_output.bin";
+  auto input0_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(input1Ppath.c_str(), &input1_size));
+  auto input1_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(input2Ppath.c_str(), &input2_size));
+  auto output_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(correctOutputPath.c_str(), &output_size));
+
+  for (auto fp16_enable : {true}) {
+    auto *param = CreateParameter(schema::PrimitiveType_SquaredDifference, input0_shape, input1_shape);
+    TestMain({{input0_shape, input0_data, VAR}, {input1_shape, input1_data, CONST_TENSOR}}, {output_shape, output_data},
+             param, fp16_enable, fp16_enable ? 1e-2 : 1e-9);
+  }
 }
-}  // namespace mindspore
+
+TEST_F(TestOpenCL_Arithmetic, ElementwiseDiv) {
+  std::vector<int> input0_shape = {1, 2, 2, 3};
+  std::vector<int> input1_shape = {1, 2, 2, 3};
+  std::vector<int> output_shape = {1, 2, 2, 3};
+  float input0_data[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  float input1_data[] = {1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2};
+  float output_data[] = {1, 2, 3, 2, 2.5, 3, 7, 8, 9, 5, 5.5, 6};
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(schema::PrimitiveType_Div, input0_shape, input1_shape);
+    TestMain({{input0_shape, input0_data, VAR}, {input1_shape, input1_data, CONST_TENSOR}}, {output_shape, output_data},
+             param, fp16_enable);
+  }
+}
+
+}  // namespace mindspore::lite::opencl::test

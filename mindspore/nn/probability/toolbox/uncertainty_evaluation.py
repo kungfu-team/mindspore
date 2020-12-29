@@ -53,24 +53,32 @@ class UncertaintyEvaluation:
                         the the path of the uncertainty model; if the path is not given , it will not save or load the
                         uncertainty model. Default: False.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> network = LeNet()
         >>> param_dict = load_checkpoint('checkpoint_lenet.ckpt')
         >>> load_param_into_net(network, param_dict)
         >>> ds_train = create_dataset('workspace/mnist/train')
+        >>> ds_eval = create_dataset('workspace/mnist/test')
         >>> evaluation = UncertaintyEvaluation(model=network,
-        >>>                                    train_dataset=ds_train,
-        >>>                                    task_type='classification',
-        >>>                                    num_classes=10,
-        >>>                                    epochs=1,
-        >>>                                    epi_uncer_model_path=None,
-        >>>                                    ale_uncer_model_path=None,
-        >>>                                    save_model=False)
-        >>> epistemic_uncertainty = evaluation.eval_epistemic_uncertainty(eval_data)
-        >>> aleatoric_uncertainty = evaluation.eval_aleatoric_uncertainty(eval_data)
-        >>> epistemic_uncertainty.shape
+        ...                                    train_dataset=ds_train,
+        ...                                    task_type='classification',
+        ...                                    num_classes=10,
+        ...                                    epochs=1,
+        ...                                    epi_uncer_model_path=None,
+        ...                                    ale_uncer_model_path=None,
+        ...                                    save_model=False)
+        >>> for eval_data in ds_eval.create_dict_iterator(output_numpy=True, num_epochs=1):
+        ...    eval_data = Tensor(eval_data['image'], mstype.float32)
+        ...    epistemic_uncertainty = evaluation.eval_epistemic_uncertainty(eval_data)
+        ...    aleatoric_uncertainty = evaluation.eval_aleatoric_uncertainty(eval_data)
+        >>> output = epistemic_uncertainty.shape
+        >>> print(output)
         (32, 10)
-        >>> aleatoric_uncertainty.shape
+        >>> output = aleatoric_uncertainty.shape
+        >>> print(output)
         (32,)
     """
 
@@ -79,7 +87,7 @@ class UncertaintyEvaluation:
         self.epi_model = model
         self.ale_model = deepcopy(model)
         self.epi_train_dataset = train_dataset
-        self.ale_train_dataset = deepcopy(train_dataset)
+        self.ale_train_dataset = train_dataset
         self.task_type = task_type
         self.epochs = Validator.check_positive_int(epochs)
         self.epi_uncer_model_path = epi_uncer_model_path
@@ -103,17 +111,13 @@ class UncertaintyEvaluation:
                 raise ValueError("If save_model is True, the epi_uncer_model_path and "
                                  "ale_uncer_model_path should not be None.")
 
-    def _uncertainty_normalize(self, data):
-        area = np.max(data) - np.min(data)
-        return (data - np.min(data)) / area
-
     def _get_epistemic_uncertainty_model(self):
         """
         Get the model which can obtain the epistemic uncertainty.
         """
         if self.epi_uncer_model is None:
             self.epi_uncer_model = EpistemicUncertaintyModel(self.epi_model)
-            if self.epi_uncer_model.drop_count == 0:
+            if self.epi_uncer_model.drop_count == 0 and self.epi_train_dataset is not None:
                 if self.task_type == 'classification':
                     net_loss = SoftmaxCrossEntropyWithLogits(sparse=True, reduction="mean")
                     net_opt = Adam(self.epi_uncer_model.trainable_params())
@@ -127,9 +131,11 @@ class UncertaintyEvaluation:
                     ckpoint_cb = ModelCheckpoint(prefix='checkpoint_epi_uncer_model',
                                                  directory=self.epi_uncer_model_path,
                                                  config=config_ck)
-                    model.train(self.epochs, self.epi_train_dataset, callbacks=[ckpoint_cb, LossMonitor()])
+                    model.train(self.epochs, self.epi_train_dataset, dataset_sink_mode=False,
+                                callbacks=[ckpoint_cb, LossMonitor()])
                 elif self.epi_uncer_model_path is None:
-                    model.train(self.epochs, self.epi_train_dataset, callbacks=[LossMonitor()])
+                    model.train(self.epochs, self.epi_train_dataset, dataset_sink_mode=False,
+                                callbacks=[LossMonitor()])
                 else:
                     uncer_param_dict = load_checkpoint(self.epi_uncer_model_path)
                     load_param_into_net(self.epi_uncer_model, uncer_param_dict)
@@ -150,13 +156,15 @@ class UncertaintyEvaluation:
         else:
             outputs = np.stack(outputs, axis=1)
             epi_uncertainty = outputs.var(axis=1)
-        epi_uncertainty = self._uncertainty_normalize(np.array(epi_uncertainty))
+        epi_uncertainty = np.array(epi_uncertainty)
         return epi_uncertainty
 
     def _get_aleatoric_uncertainty_model(self):
         """
         Get the model which can obtain the aleatoric uncertainty.
         """
+        if self.ale_train_dataset is None:
+            raise ValueError('The train dataset should not be None when evaluating aleatoric uncertainty.')
         if self.ale_uncer_model is None:
             self.ale_uncer_model = AleatoricUncertaintyModel(self.ale_model, self.num_classes, self.task_type)
             net_loss = AleatoricLoss(self.task_type)
@@ -170,9 +178,11 @@ class UncertaintyEvaluation:
                 ckpoint_cb = ModelCheckpoint(prefix='checkpoint_ale_uncer_model',
                                              directory=self.ale_uncer_model_path,
                                              config=config_ck)
-                model.train(self.epochs, self.ale_train_dataset, callbacks=[ckpoint_cb, LossMonitor()])
+                model.train(self.epochs, self.ale_train_dataset, dataset_sink_mode=False,
+                            callbacks=[ckpoint_cb, LossMonitor()])
             elif self.ale_uncer_model_path is None:
-                model.train(self.epochs, self.ale_train_dataset, callbacks=[LossMonitor()])
+                model.train(self.epochs, self.ale_train_dataset, dataset_sink_mode=False,
+                            callbacks=[LossMonitor()])
             else:
                 uncer_param_dict = load_checkpoint(self.ale_uncer_model_path)
                 load_param_into_net(self.ale_uncer_model, uncer_param_dict)
@@ -184,7 +194,7 @@ class UncertaintyEvaluation:
         self._get_aleatoric_uncertainty_model()
         _, var = self.ale_uncer_model(eval_data)
         ale_uncertainty = self.sum(self.pow(var, 2), 1)
-        ale_uncertainty = self._uncertainty_normalize(ale_uncertainty.asnumpy())
+        ale_uncertainty = ale_uncertainty.asnumpy()
         return ale_uncertainty
 
     def eval_epistemic_uncertainty(self, eval_data):
@@ -229,30 +239,33 @@ class EpistemicUncertaintyModel(Cell):
     def __init__(self, epi_model):
         super(EpistemicUncertaintyModel, self).__init__()
         self.drop_count = 0
+        if not self._make_epistemic(epi_model):
+            raise ValueError("The model has not Dense Layer or Convolution Layer, "
+                             "it can not evaluate epistemic uncertainty so far.")
         self.epi_model = self._make_epistemic(epi_model)
 
     def construct(self, x):
         x = self.epi_model(x)
         return x
 
-    def _make_epistemic(self, epi_model, dropout_rate=0.5):
+    def _make_epistemic(self, epi_model, keep_prob=0.5):
         """
         The dropout rate is set to 0.5 by default.
         """
         for (name, layer) in epi_model.name_cells().items():
-            if isinstance(layer, Dropout):
-                self.drop_count += 1
-            return epi_model
-        for (name, layer) in epi_model.name_cells().items():
-            if isinstance(layer, (Conv2d, Dense)):
+            if isinstance(layer, (Conv2d, Dense, Dropout)):
+                if isinstance(layer, Dropout):
+                    self.drop_count += 1
+                    return epi_model
                 uncertainty_layer = layer
                 uncertainty_name = name
-                drop = Dropout(keep_prob=dropout_rate)
+                drop = Dropout(keep_prob=keep_prob)
                 bnn_drop = SequentialCell([uncertainty_layer, drop])
                 setattr(epi_model, uncertainty_name, bnn_drop)
-            return epi_model
-        raise ValueError("The model has not Dense Layer or Convolution Layer, "
-                         "it can not evaluate epistemic uncertainty so far.")
+                return epi_model
+            if self._make_epistemic(layer):
+                return epi_model
+        return None
 
 
 class AleatoricUncertaintyModel(Cell):

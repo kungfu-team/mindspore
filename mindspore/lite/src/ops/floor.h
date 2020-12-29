@@ -26,13 +26,13 @@ namespace mindspore {
 namespace lite {
 class Floor : public ArithmeticSelf {
  public:
+  Floor() = default;
+  ~Floor() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(Floor, ArithmeticSelf);
-  Floor() = default;
   explicit Floor(schema::PrimitiveT *primitive) : ArithmeticSelf(primitive) {}
+  int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs);
 #else
-  Floor() = default;
-
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
 };

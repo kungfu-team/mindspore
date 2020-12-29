@@ -30,10 +30,20 @@ using mindspore::schema::ActivationType_HSWISH;
 using mindspore::schema::ActivationType_LEAKY_RELU;
 using mindspore::schema::ActivationType_RELU;
 using mindspore::schema::ActivationType_RELU6;
+using mindspore::schema::ActivationType_SWISH;
 using mindspore::schema::PrimitiveType_Activation;
 
 namespace mindspore::kernel {
-int ActivationFp16CPUKernel::Init() { return RET_OK; }
+int ActivationFp16CPUKernel::Init() {
+  if (type_ != schema::ActivationType_RELU && type_ != schema::ActivationType_RELU6 &&
+      type_ != schema::ActivationType_LEAKY_RELU && type_ != schema::ActivationType_SIGMOID &&
+      type_ != schema::ActivationType_TANH && type_ != schema::ActivationType_HSWISH &&
+      type_ != schema::ActivationType_SWISH) {
+    MS_LOG(ERROR) << "Activation fp16 not support type: " << type_;
+    return RET_ERROR;
+  }
+  return RET_OK;
+}
 
 int ActivationFp16CPUKernel::ReSize() { return RET_OK; }
 
@@ -85,6 +95,8 @@ int ActivationFp16CPUKernel::DoActivation(int task_id) {
     error_code = TanhFp16(fp16_input_ + stride * task_id, fp16_output_ + stride * task_id, count);
   } else if (type_ == schema::ActivationType_HSWISH) {
     error_code = HSwishFp16(fp16_input_ + stride * task_id, fp16_output_ + stride * task_id, count);
+  } else if (type_ == schema::ActivationType_SWISH) {
+    error_code = SwishFp16(fp16_input_ + stride * task_id, fp16_output_ + stride * task_id, count);
   } else {
     MS_LOG(ERROR) << "Activation fp16 not support type: " << type_;
     return RET_ERROR;
@@ -103,13 +115,7 @@ int ActivationFp16Run(void *cdata, int task_id) {
 }
 
 int ActivationFp16CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare failed.";
-    return ret;
-  }
-
-  ret = MallocTmpBuffer();
+  auto ret = MallocTmpBuffer();
   if (ret != RET_OK) {
     FreeTmpBuffer();
     return ret;
@@ -130,26 +136,5 @@ int ActivationFp16CPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuActivationFp16KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                   const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                   const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                   const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(opParameter != nullptr);
-  MS_ASSERT(desc.type == schema::PrimitiveType_Activation);
-  auto *kernel = new (std::nothrow) ActivationFp16CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "kernel is nullptr.";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    delete kernel;
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Activation, CpuActivationFp16KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Activation, LiteKernelCreator<ActivationFp16CPUKernel>)
 }  // namespace mindspore::kernel

@@ -24,16 +24,17 @@ from mindspore.nn.optim import Adam
 from mindspore.train.model import Model
 from mindspore.train.loss_scale_manager import DynamicLossScaleManager
 from mindspore.train.callback import Callback
-import mindspore.dataset.engine as de
+import mindspore.dataset as ds
 import mindspore.dataset.transforms.c_transforms as deC
 from mindspore import context
 from model_zoo.official.nlp.transformer.src.transformer_model import TransformerConfig
 from model_zoo.official.nlp.transformer.src.transformer_for_train import TransformerNetworkWithLoss, \
-                                            TransformerTrainOneStepWithLossScaleCell
+    TransformerTrainOneStepWithLossScaleCell
 from model_zoo.official.nlp.transformer.src.config import cfg, transformer_net_cfg
 from model_zoo.official.nlp.transformer.src.lr_schedule import create_dynamic_lr
 
 DATA_DIR = ["/home/workspace/mindspore_dataset/transformer/test-mindrecord"]
+
 
 def get_config(version='base', batch_size=1):
     """get config"""
@@ -52,7 +53,6 @@ def get_config(version='base', batch_size=1):
             max_position_embeddings=128,
             initializer_range=0.02,
             label_smoothing=0.1,
-            input_mask_from_dataset=True,
             dtype=mstype.float32,
             compute_type=mstype.float16)
     elif version == 'base':
@@ -70,30 +70,31 @@ def get_config(version='base', batch_size=1):
             max_position_embeddings=128,
             initializer_range=0.02,
             label_smoothing=0.1,
-            input_mask_from_dataset=True,
             dtype=mstype.float32,
             compute_type=mstype.float16)
     else:
         transformer_cfg = TransformerConfig(batch_size=batch_size)
     return transformer_cfg
 
+
 def load_test_data(batch_size=1, data_file=None):
     """Load test dataset."""
-    ds = de.MindDataset(data_file,
-                        columns_list=["source_eos_ids", "source_eos_mask",
-                                      "target_sos_ids", "target_sos_mask",
-                                      "target_eos_ids", "target_eos_mask"],
-                        shuffle=False)
+    data_set = ds.MindDataset(data_file,
+                              columns_list=["source_eos_ids", "source_eos_mask",
+                                            "target_sos_ids", "target_sos_mask",
+                                            "target_eos_ids", "target_eos_mask"],
+                              shuffle=False)
     type_cast_op = deC.TypeCast(mstype.int32)
-    ds = ds.map(operations=type_cast_op, input_columns="source_eos_ids")
-    ds = ds.map(operations=type_cast_op, input_columns="source_eos_mask")
-    ds = ds.map(operations=type_cast_op, input_columns="target_sos_ids")
-    ds = ds.map(operations=type_cast_op, input_columns="target_sos_mask")
-    ds = ds.map(operations=type_cast_op, input_columns="target_eos_ids")
-    ds = ds.map(operations=type_cast_op, input_columns="target_eos_mask")
+    data_set = data_set.map(operations=type_cast_op, input_columns="source_eos_ids")
+    data_set = data_set.map(operations=type_cast_op, input_columns="source_eos_mask")
+    data_set = data_set.map(operations=type_cast_op, input_columns="target_sos_ids")
+    data_set = data_set.map(operations=type_cast_op, input_columns="target_sos_mask")
+    data_set = data_set.map(operations=type_cast_op, input_columns="target_eos_ids")
+    data_set = data_set.map(operations=type_cast_op, input_columns="target_eos_mask")
     # apply batch operations
-    ds = ds.batch(batch_size, drop_remainder=True)
-    return ds
+    data_set = data_set.batch(batch_size, drop_remainder=True)
+    return data_set
+
 
 class ModelCallback(Callback):
     def __init__(self):
@@ -109,13 +110,16 @@ class ModelCallback(Callback):
         self.lossscale_list.append(cb_params.net_outputs[2].asnumpy())
         print("epoch: {}, outputs are: {}".format(cb_params.cur_epoch_num, str(cb_params.net_outputs)))
 
+
 class TimeMonitor(Callback):
     """Time Monitor."""
+
     def __init__(self, data_size):
         super(TimeMonitor, self).__init__()
         self.data_size = data_size
         self.epoch_mseconds_list = []
         self.per_step_mseconds_list = []
+
     def epoch_begin(self, run_context):
         self.epoch_time = time.time()
 
@@ -123,6 +127,7 @@ class TimeMonitor(Callback):
         epoch_mseconds = (time.time() - self.epoch_time) * 1000
         self.epoch_mseconds_list.append(epoch_mseconds)
         self.per_step_mseconds_list.append(epoch_mseconds / self.data_size)
+
 
 @pytest.mark.level0
 @pytest.mark.platform_arm_ascend_training
@@ -144,7 +149,7 @@ def test_transformer():
     netwithloss = TransformerNetworkWithLoss(config, True)
 
     lr = Tensor(create_dynamic_lr(schedule="constant*rsqrt_hidden*linear_warmup*rsqrt_decay",
-                                  training_steps=dataset.get_dataset_size()*epoch_size,
+                                  training_steps=dataset.get_dataset_size() * epoch_size,
                                   learning_rate=cfg.lr_schedule.learning_rate,
                                   warmup_steps=cfg.lr_schedule.warmup_steps,
                                   hidden_size=config.hidden_size), mstype.float32)
@@ -170,6 +175,7 @@ def test_transformer():
 
     expect_loss_value = [11.241624, 11.243232, 11.217465, 11.204196, 11.2138195,
                          11.215386, 11.19053, 11.150403, 11.191858, 11.160057]
+
     print("loss value: {}".format(loss_value))
     assert np.allclose(loss_value[0:10], expect_loss_value, 0, 0.0005)
 
@@ -193,6 +199,7 @@ def test_transformer():
     expect_per_step_mseconds = 318
     print("per step mseconds: {}".format(per_step_mseconds))
     assert per_step_mseconds <= expect_per_step_mseconds + 2
+
 
 if __name__ == '__main__':
     test_transformer()

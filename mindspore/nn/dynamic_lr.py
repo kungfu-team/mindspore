@@ -16,7 +16,6 @@
 import math
 
 from mindspore._checkparam import Validator as validator
-from mindspore._checkparam import Rel
 
 
 def piecewise_constant_lr(milestone, learning_rates):
@@ -41,11 +40,12 @@ def piecewise_constant_lr(milestone, learning_rates):
     Examples:
         >>> milestone = [2, 5, 10]
         >>> learning_rates = [0.1, 0.05, 0.01]
-        >>> piecewise_constant_lr(milestone, learning_rates)
+        >>> output = piecewise_constant_lr(milestone, learning_rates)
+        >>> print(output)
         [0.1, 0.1, 0.05, 0.05, 0.05, 0.01, 0.01, 0.01, 0.01, 0.01]
     """
-    validator.check_value_type('milestone', milestone, (tuple, list), None)
-    validator.check_value_type('learning_rates', learning_rates, (tuple, list), None)
+    validator.check_value_type('milestone', milestone, (tuple, list))
+    validator.check_value_type('learning_rates', learning_rates, (tuple, list))
     if len(milestone) != len(learning_rates):
         raise ValueError('The size of `milestone` must be same with the size of `learning_rates`.')
 
@@ -70,7 +70,7 @@ def _check_inputs(learning_rate, decay_rate, total_step, step_per_epoch, decay_e
     validator.check_is_float(learning_rate, 'learning_rate')
     validator.check_positive_float(decay_rate, 'decay_rate')
     validator.check_is_float(decay_rate, 'decay_rate')
-    validator.check_value_type('is_stair', is_stair, [bool], None)
+    validator.check_value_type('is_stair', is_stair, [bool])
 
 
 def exponential_decay_lr(learning_rate, decay_rate, total_step, step_per_epoch, decay_epoch, is_stair=False):
@@ -101,7 +101,8 @@ def exponential_decay_lr(learning_rate, decay_rate, total_step, step_per_epoch, 
         >>> total_step = 6
         >>> step_per_epoch = 2
         >>> decay_epoch = 1
-        >>> exponential_decay_lr(learning_rate, decay_rate, total_step, step_per_epoch, decay_epoch)
+        >>> output = exponential_decay_lr(learning_rate, decay_rate, total_step, step_per_epoch, decay_epoch)
+        >>> print(output)
         [0.1, 0.1, 0.09000000000000001, 0.09000000000000001, 0.08100000000000002, 0.08100000000000002]
     """
     _check_inputs(learning_rate, decay_rate, total_step, step_per_epoch, decay_epoch, is_stair)
@@ -143,7 +144,8 @@ def natural_exp_decay_lr(learning_rate, decay_rate, total_step, step_per_epoch, 
         >>> total_step = 6
         >>> step_per_epoch = 2
         >>> decay_epoch = 2
-        >>> natural_exp_decay_lr(learning_rate, decay_rate, total_step, step_per_epoch, decay_epoch, True)
+        >>> output = natural_exp_decay_lr(learning_rate, decay_rate, total_step, step_per_epoch, decay_epoch, True)
+        >>> print(output)
         [0.1, 0.1, 0.1, 0.1, 0.016529888822158657, 0.016529888822158657]
     """
     _check_inputs(learning_rate, decay_rate, total_step, step_per_epoch, decay_epoch, is_stair)
@@ -186,7 +188,8 @@ def inverse_decay_lr(learning_rate, decay_rate, total_step, step_per_epoch, deca
         >>> total_step = 6
         >>> step_per_epoch = 1
         >>> decay_epoch = 1
-        >>> inverse_decay_lr(learning_rate, decay_rate, total_step, step_per_epoch, decay_epoch, True)
+        >>> output = inverse_decay_lr(learning_rate, decay_rate, total_step, step_per_epoch, decay_epoch, True)
+        >>> print(output)
         [0.1, 0.06666666666666667, 0.05, 0.04, 0.03333333333333333, 0.028571428571428574]
     """
     _check_inputs(learning_rate, decay_rate, total_step, step_per_epoch, decay_epoch, is_stair)
@@ -228,12 +231,13 @@ def cosine_decay_lr(min_lr, max_lr, total_step, step_per_epoch, decay_epoch):
         >>> total_step = 6
         >>> step_per_epoch = 2
         >>> decay_epoch = 2
-        >>> cosine_decay_lr(min_lr, max_lr, total_step, step_per_epoch, decay_epoch)
+        >>> output = cosine_decay_lr(min_lr, max_lr, total_step, step_per_epoch, decay_epoch)
+        >>> print(output)
         [0.1, 0.1, 0.05500000000000001, 0.05500000000000001, 0.01, 0.01]
     """
     if not isinstance(min_lr, float):
         raise TypeError("min_lr must be float.")
-    validator.check_number_range("min_lr", min_lr, 0.0, float("inf"), Rel.INC_LEFT, None)
+    validator.check_non_negative_float(min_lr, "min_lr", None)
     validator.check_positive_float(max_lr, 'max_lr')
     validator.check_is_float(max_lr, 'max_lr')
     validator.check_positive_int(total_step, 'total_step')
@@ -296,20 +300,21 @@ def polynomial_decay_lr(learning_rate, end_learning_rate, total_step, step_per_e
         >>> step_per_epoch = 2
         >>> decay_epoch = 2
         >>> power = 0.5
-        >>> polynomial_decay_lr(learning_rate, end_learning_rate, total_step, step_per_epoch, decay_epoch, power)
+        >>> r = polynomial_decay_lr(learning_rate, end_learning_rate, total_step, step_per_epoch, decay_epoch, power)
+        >>> print(r)
         [0.1, 0.1, 0.07363961030678928, 0.07363961030678928, 0.01, 0.01]
     """
     validator.check_positive_float(learning_rate, 'learning_rate')
     validator.check_is_float(learning_rate, 'learning_rate')
     if not isinstance(end_learning_rate, float):
         raise TypeError("end_learning_rate must be float.")
-    validator.check_number_range("end_learning_rate", end_learning_rate, 0.0, float("inf"), Rel.INC_LEFT, None)
+    validator.check_non_negative_float(end_learning_rate, "end_learning_rate", None)
     validator.check_positive_float(power, 'power')
     validator.check_is_float(power, 'power')
     validator.check_positive_int(total_step, 'total_step')
     validator.check_positive_int(step_per_epoch, 'step_per_epoch')
     validator.check_positive_int(decay_epoch, 'decay_epoch')
-    validator.check_value_type('update_decay_epoch', update_decay_epoch, [bool], None)
+    validator.check_value_type('update_decay_epoch', update_decay_epoch, [bool])
 
     origin_decay_epoch = decay_epoch
     function = lambda x, y: (x, min(x, y))
@@ -338,25 +343,25 @@ def warmup_lr(learning_rate, total_step, step_per_epoch, warmup_epoch):
 
     Args:
         learning_rate (float): The initial value of learning rate.
-        warmup_steps (int): The warm up steps of learning rate.
-
-    Inputs:
-        Tensor. The current step number.
+        total_step (int): The total number of steps.
+        step_per_epoch (int): The number of steps in per epoch.
+        warmup_epoch (int): A value that determines the epochs of the learning rate is warmed up.
 
     Returns:
-        Tensor. The learning rate value for the current step.
+        list[float]. The size of list is `total_step`.
 
     Examples:
         >>> learning_rate = 0.1
         >>> total_step = 6
         >>> step_per_epoch = 2
         >>> warmup_epoch = 2
-        >>> warmup_lr(learning_rate, total_step, step_per_epoch, warmup_epoch)
+        >>> output = warmup_lr(learning_rate, total_step, step_per_epoch, warmup_epoch)
+        >>> print(output)
         [0.0, 0.0, 0.05, 0.05, 0.1, 0.1]
     """
     if not isinstance(learning_rate, float):
         raise TypeError("learning_rate must be float.")
-    validator.check_number_range("learning_rate", learning_rate, 0.0, float("inf"), Rel.INC_LEFT, None)
+    validator.check_non_negative_float(learning_rate, "learning_rate", None)
     validator.check_positive_int(warmup_epoch, 'warmup_epoch')
     validator.check_positive_int(total_step, 'total_step')
     validator.check_positive_int(step_per_epoch, 'step_per_epoch')

@@ -69,11 +69,15 @@ TypePtr TypeIdToType(TypeId id) {
       return kFloat32;
     case kNumberTypeFloat64:
       return kFloat64;
+    case kNumberTypeComplex64:
+      return kComplex64;
     case kNumberTypeInt8:
       return kInt8;
     case kNumberTypeInt16:
       return kInt16;
     case kNumberTypeInt32:
+      return kInt32;
+    case kNumberTypeInt:
       return kInt32;
     case kNumberTypeInt64:
       return kInt64;
@@ -117,6 +121,8 @@ TypePtr TypeIdToType(TypeId id) {
       return kSlice;
     case kObjectTypeKeyword:
       return kKeyword;
+    case kObjectTypeTensorType:
+      return kTensorType;
     case kTypeUnknown:
       return kTypeNone;
     default:

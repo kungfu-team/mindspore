@@ -50,6 +50,24 @@ enum class ImageFormat { HWC = 0, CHW = 1, HW = 2 };
 // Possible interpolation modes
 enum class InterpolationMode { kLinear = 0, kNearestNeighbour = 1, kCubic = 2, kArea = 3 };
 
+// Possible JiebaMode modes
+enum class JiebaMode { kMix = 0, kMp = 1, kHmm = 2 };
+
+// Possible values for SPieceTokenizerOutType
+enum class SPieceTokenizerOutType { kString = 0, kInt = 1 };
+
+// Possible values for SPieceTokenizerLoadType
+enum class SPieceTokenizerLoadType { kFile = 0, kModel = 1 };
+
+// Possible values for NormalizeForm
+enum class NormalizeForm {
+  kNone = 0,
+  kNfc,
+  kNfkc,
+  kNfd,
+  kNfkd,
+};
+
 // convenience functions for 32bit int bitmask
 inline bool BitTest(uint32_t bits, uint32_t bitMask) { return (bits & bitMask) == bitMask; }
 
@@ -66,6 +84,7 @@ constexpr uint32_t kCfgRowsPerBuffer = 1;
 constexpr uint32_t kCfgParallelWorkers = 4;
 constexpr uint32_t kCfgWorkerConnectorSize = 16;
 constexpr uint32_t kCfgOpConnectorSize = 16;
+constexpr int32_t kCfgDefaultRankId = -1;
 constexpr uint32_t kCfgDefaultSeed = std::mt19937::default_seed;
 constexpr uint32_t kCfgMonitorSamplingInterval = 10;
 constexpr uint32_t kCfgCallbackTimeout = 60;  // timeout value for callback in seconds
@@ -73,6 +92,7 @@ constexpr int32_t kCfgDefaultCachePort = 50052;
 constexpr char kCfgDefaultCacheHost[] = "127.0.0.1";
 constexpr int32_t kDftPrefetchSize = 20;
 constexpr int32_t kDftNumConnections = 12;
+constexpr int32_t kDftAutoNumWorkers = false;
 
 // Invalid OpenCV type should not be from 0 to 7 (opencv4/opencv2/core/hal/interface.h)
 constexpr uint8_t kCVInvalidType = 255;

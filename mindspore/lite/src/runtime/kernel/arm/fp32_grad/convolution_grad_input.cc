@@ -27,6 +27,7 @@ using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_Conv2DGradInput;
+using mindspore::schema::PrimitiveType_GroupConv2DGradInput;
 
 namespace mindspore::kernel {
 int ConvolutionGradInputCPUKernel::Init() {
@@ -50,11 +51,14 @@ int ConvolutionGradInputCPUKernel::Init() {
 
   conv_param->output_h_ = dy_tensor->shape()[kNHWC_H];
   conv_param->output_w_ = dy_tensor->shape()[kNHWC_W];
+  ws_size = chunk * conv_param->kernel_h_ * conv_param->kernel_w_ * conv_param->input_channel_ / conv_param->group_;
 
-  size_t ws_size = conv_param->output_h_ * conv_param->output_w_ * conv_param->kernel_h_ * conv_param->kernel_w_ *
-                   conv_param->input_channel_ / conv_param->group_;
+  int n = conv_param->kernel_w_ * conv_param->kernel_h_ * conv_param->input_channel_ / conv_param->group_;
+  int k = conv_param->output_channel_ / conv_param->group_;
 
-  SetWorkspaceSize(ws_size * sizeof(float));
+  size_t mat_alloc = MatSizeTotal(chunk, n, k, 0);
+
+  set_workspace_size((ws_size + mat_alloc) * sizeof(float));
   return RET_OK;
 }
 
@@ -86,17 +90,31 @@ int ConvolutionGradInputCPUKernel::Execute(int task_id) {
   int m = out_h * out_w;
   int n = k_w * k_h * in_ch / groups;
   int k = out_ch / groups;
-  float *workspace = reinterpret_cast<float *>(GetWorkspace());
-
+  float *workspace_temp = reinterpret_cast<float *>(workspace());
+  float *mat_workspace = workspace_temp + ws_size;
   memset(dx_addr, 0, sizeof(float) * batch * in_ch * in_h * in_w);
-
   for (i = 0; i < batch; ++i) {
     for (j = 0; j < groups; ++j) {
-      float *mat_a = dy_addr + (i * groups) * m * k + j * (out_ch / groups);
-      float *mat_b = w_addr + j * nweights / groups;
-      float *mat_c = workspace;
-      gemm(0, 0, m, n, k, 1, mat_a, out_ch, mat_b, n, 0, mat_c, n);
-      col2im_hwc(mat_c, dx_addr + (i * groups) * (in_ch / groups) * in_h * in_w + j * (in_ch / groups), conv_param);
+      GemmCb gcb;
+      for (int ci = 0; ci < m; ci += chunk) {
+        float *mat_b = nullptr;
+        if (ci == 0) {
+          mat_b = w_addr + j * nweights / groups;
+          gcb.ca = 0;
+          gcb.cb = 0;
+          gcb.bias = nullptr;
+          gcb.atype = ActType_No;
+        } else {
+          mat_b = gcb.mat_b;
+          gcb.cb = 1;
+        }
+        int real_chunk = MSMIN(m - ci, chunk);
+        float *mat_a = dy_addr + (i * groups) * m * k + j * (out_ch / groups) + ci * out_ch;
+        float *mat_c = workspace_temp;
+        GemmMatmulPlus(0, 0, real_chunk, n, k, 1, mat_a, out_ch, mat_b, n, 0, mat_c, n, mat_workspace, &gcb);
+        rolling_col2im_hwc(mat_c, dx_addr + (i * groups) * (in_ch / groups) * in_h * in_w + j * (in_ch / groups),
+                           conv_param, real_chunk, ci);
+      }
     }
   }
 
@@ -104,6 +122,7 @@ int ConvolutionGradInputCPUKernel::Execute(int task_id) {
 }
 
 int ConvolutionGradInputRun(void *cdata, int task_id) {
+  MS_ASSERT(cdata != nullptr);
   auto convinput_kernel = reinterpret_cast<ConvolutionGradInputCPUKernel *>(cdata);
   auto error_code = convinput_kernel->Execute(task_id);
   if (error_code != RET_OK) {
@@ -114,12 +133,6 @@ int ConvolutionGradInputRun(void *cdata, int task_id) {
 }
 
 int ConvolutionGradInputCPUKernel::Run() {
-  auto prepare_ret = Prepare();
-  if (prepare_ret != RET_OK) {
-    MS_LOG(ERROR) << "ConvolutionGradInputCPUKernel Prepare fail!ret: " << prepare_ret;
-    return prepare_ret;
-  }
-
   int error_code = ParallelLaunch(this->context_->thread_pool_, ConvolutionGradInputRun, this, 1);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "bias function error error_code[" << error_code << "]";
@@ -134,16 +147,18 @@ kernel::LiteKernel *CpuConvGradInputFp32KernelCreator(const std::vector<lite::Te
                                                       const kernel::KernelKey &desc,
                                                       const mindspore::lite::PrimitiveC *primitive) {
   MS_ASSERT(opParameter != nullptr);
-  MS_ASSERT(desc.type == schema::PrimitiveType_Conv2DGradInput);
+  MS_ASSERT(desc.type == schema::PrimitiveType_Conv2DGradInput ||
+            desc.type == schema::PrimitiveType_GroupConv2DGradInput);
 
   auto *kernel = new (std::nothrow) ConvolutionGradInputCPUKernel(opParameter, inputs, outputs, ctx, primitive);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "new kernel fail!";
+    free(opParameter);
     return nullptr;
   }
 
   auto ret = kernel->Init();
-  if (0 != ret) {
+  if (ret != RET_OK) {
     MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
                   << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
     delete kernel;
@@ -153,4 +168,5 @@ kernel::LiteKernel *CpuConvGradInputFp32KernelCreator(const std::vector<lite::Te
 }
 
 REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Conv2DGradInput, CpuConvGradInputFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_GroupConv2DGradInput, CpuConvGradInputFp32KernelCreator)
 }  // namespace mindspore::kernel

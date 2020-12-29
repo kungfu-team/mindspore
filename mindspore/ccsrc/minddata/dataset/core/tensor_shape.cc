@@ -20,7 +20,11 @@
 #include <limits>
 
 #include "utils/ms_utils.h"
+#ifndef ENABLE_ANDROID
 #include "utils/log_adapter.h"
+#else
+#include "mindspore/lite/src/common/log_adapter.h"
+#endif
 #include "minddata/dataset/core/constants.h"
 
 namespace mindspore {
@@ -92,6 +96,7 @@ TensorShape::TensorShape(py::list l)
 }
 #endif
 
+#ifndef ENABLE_ANDROID
 TensorShape::TensorShape(cv::MatSize cv_size, uint32_t type)
     : raw_shape_(*GlobalContext::Instance()->int_allocator()), strides_(*GlobalContext::Instance()->int_allocator()) {
   for (int i = 0; i < cv_size.dims(); i++) {
@@ -103,6 +108,7 @@ TensorShape::TensorShape(cv::MatSize cv_size, uint32_t type)
   }
   known_ = true;
 }
+#endif
 
 TensorShape TensorShape::CreateUnknownRankShape() {
   TensorShape s({});

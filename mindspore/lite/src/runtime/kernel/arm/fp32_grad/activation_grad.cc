@@ -33,7 +33,7 @@ using mindspore::schema::PrimitiveType_ActivationGrad;
 
 namespace mindspore::kernel {
 int ActivationGradCPUKernel::Init() {
-  if (2 != in_tensors_.size()) {
+  if (in_tensors_.size() != 2) {
     MS_LOG(ERROR) << "ActivationGrad should have 2 input tensors";
     return RET_ERROR;
   }
@@ -48,7 +48,7 @@ int ActivationGradCPUKernel::DoActivation(int task_id) {
   auto output_addr = reinterpret_cast<float *>(out_tensors_.at(0)->MutableData());
   int length = in_tensors_.at(0)->ElementsNum();
 
-  int stride = UP_DIV(length, thread_count_);
+  int stride = UP_DIV(length, 1);
   int count = MSMIN(stride, length - stride * task_id);
 
   auto error_code = RET_OK;
@@ -63,8 +63,9 @@ int ActivationGradCPUKernel::DoActivation(int task_id) {
     error_code = LReluGrad(yt_addr + stride * task_id, input_addr + stride * task_id, count,
                            output_addr + stride * task_id, param_act_grad_->alpha_);
   } else if (param_act_grad_->type_ == schema::ActivationType_SIGMOID) {
+    // Sigmoid gets the input tensors in reverse order!
     error_code =
-      SigmoidGrad(yt_addr + stride * task_id, input_addr + stride * task_id, count, output_addr + stride * task_id);
+      SigmoidGrad(input_addr + stride * task_id, yt_addr + stride * task_id, count, output_addr + stride * task_id);
   } else if (param_act_grad_->type_ == schema::ActivationType_TANH) {
     error_code =
       TanhGrad(yt_addr + stride * task_id, input_addr + stride * task_id, count, output_addr + stride * task_id);
@@ -85,6 +86,7 @@ int ActivationGradCPUKernel::DoActivation(int task_id) {
 }
 
 int ActivationGradRun(void *cdata, int task_id) {
+  MS_ASSERT(cdata != nullptr);
   auto activationGrad_kernel = reinterpret_cast<ActivationGradCPUKernel *>(cdata);
   auto error_code = activationGrad_kernel->DoActivation(task_id);
   if (error_code != RET_OK) {
@@ -95,12 +97,6 @@ int ActivationGradRun(void *cdata, int task_id) {
 }
 
 int ActivationGradCPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "ActivationGradCPUKernel Prepare failed.";
-    return ret;
-  }
-
   int error_code = ParallelLaunch(this->context_->thread_pool_, ActivationGradRun, this, 1);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "Activation Grad function error error_code[" << error_code << "]";
@@ -119,6 +115,7 @@ kernel::LiteKernel *CpuActivationGradFp32KernelCreator(const std::vector<lite::T
   auto *kernel = new (std::nothrow) ActivationGradCPUKernel(opParameter, inputs, outputs, ctx, primitive);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "new ActivationGradCPUKernel fail!";
+    free(opParameter);
     return nullptr;
   }
   auto ret = kernel->Init();

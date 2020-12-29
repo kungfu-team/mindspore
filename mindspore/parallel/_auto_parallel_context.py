@@ -16,6 +16,7 @@
 import threading
 import mindspore.context as context
 from mindspore.parallel._dp_allreduce_fusion import _set_fusion_strategy_by_idx, _set_fusion_strategy_by_size
+from mindspore.parallel._ps_context import _is_role_pserver
 from mindspore._c_expression import AutoParallelContext
 from mindspore._checkparam import args_type_check
 
@@ -180,6 +181,8 @@ class _AutoParallelContext:
     def get_parallel_mode(self):
         """Get parallel mode."""
         self.check_context_handle()
+        if _is_role_pserver():
+            return context.ParallelMode.STAND_ALONE
         return self._context_handle.get_parallel_mode()
 
     def set_strategy_search_mode(self, auto_parallel_search_mode):
@@ -207,9 +210,6 @@ class _AutoParallelContext:
             parameter_broadcast (bool): Parameter broadcast or not.
         """
         self.check_context_handle()
-        if parameter_broadcast is True and context.get_context("enable_ge") is False:
-            raise RuntimeError("Parameter broadcast is a developing feature. For now we suggest to"
-                               " use mindspore.common.set_seed() to share parameters among devices.")
         self._context_handle.set_parameter_broadcast(parameter_broadcast)
 
     def get_parameter_broadcast(self):
@@ -245,6 +245,8 @@ class _AutoParallelContext:
     def get_full_batch(self):
         """Get whether load full batch on each device."""
         self.check_context_handle()
+        if _is_role_pserver():
+            return False
         return self._context_handle.get_full_batch()
 
     def set_strategy_ckpt_save_file(self, strategy_ckpt_save_file):

@@ -37,13 +37,16 @@ void MKLCPUKernel::GetPadding(const CNodePtr &kernel_node, const std::string &pa
   if (pad_mode == PAD_MODE_LOWER_SAME || pad_mode == PAD_MODE_UPPER_SAME) {
     for (size_t i = 0; i < weight_height.size(); ++i) {
       auto wh = weight_height[i];
-      int rad = kernel_size[i] / 2;
-      int need_pad = kernel_size[i] - 1;
-      int re = (wh - 1) % stride;
-      int pad = std::max(rad - (re / 2), 0);
-      padding_r->emplace_back(pad);
-      pad = std::max(need_pad - pad - re, 0);
+      int re = wh % stride;
+      int pad_along;
+      if (re == 0) {
+        pad_along = std::max(SizeToInt(kernel_size[i]) - stride, 0);
+      } else {
+        pad_along = std::max(SizeToInt(kernel_size[i]) - re, 0);
+      }
+      int pad = pad_along / 2;
       padding_l->emplace_back(pad);
+      padding_r->emplace_back(pad_along - pad);
     }
   } else if (pad_mode == PAD_MODE_LOWER_VALID || pad_mode == PAD_MODE_UPPER_VALID) {
     MS_LOG(INFO) << "pad valid";
@@ -52,12 +55,61 @@ void MKLCPUKernel::GetPadding(const CNodePtr &kernel_node, const std::string &pa
     padding_r->emplace_back(0);
     padding_r->emplace_back(0);
   } else {
-    int pad = AnfAlgo::GetNodeAttr<int>(kernel_node, PAD);
-    padding_l->emplace_back(pad);
-    padding_l->emplace_back(pad);
-    padding_r->emplace_back(pad);
-    padding_r->emplace_back(pad);
+    std::vector<int> pad;
+    std::vector<int64_t> pad_me = AnfAlgo::GetNodeAttr<std::vector<int64_t>>(kernel_node, PAD_LIST);
+    (void)std::transform(pad_me.begin(), pad_me.end(), std::back_inserter(pad),
+                         [](const int64_t &value) { return static_cast<int>(value); });
+    padding_l->emplace_back(pad[0]);
+    padding_l->emplace_back(pad[1]);
+    padding_r->emplace_back(pad[2]);
+    padding_r->emplace_back(pad[3]);
   }
+}
+
+bool MKLCPUKernel::BinaryBroadCast(std::vector<size_t> *src0_shape, std::vector<size_t> *src1_shape,
+                                   std::vector<size_t> *dst_shape) {
+  MS_EXCEPTION_IF_NULL(src0_shape);
+  MS_EXCEPTION_IF_NULL(src1_shape);
+  MS_EXCEPTION_IF_NULL(dst_shape);
+  bool need_swap = false;
+  if (dst_shape->size() == 0) {
+    dst_shape->emplace_back(1);
+    src0_shape->emplace_back(1);
+    src1_shape->emplace_back(1);
+  }
+  MS_LOG(DEBUG) << "Binary broadcast in: src0: " << *src0_shape << " src1: " << *src1_shape << " dst: " << *dst_shape;
+  if (src0_shape->size() != dst_shape->size()) {
+    need_swap = true;
+    for (size_t i = src0_shape->size(); i < dst_shape->size(); ++i) {
+      src0_shape->insert(src0_shape->begin(), 1);
+    }
+  } else if (src1_shape->size() != dst_shape->size()) {
+    for (size_t i = src1_shape->size(); i < dst_shape->size(); ++i) {
+      src1_shape->insert(src1_shape->begin(), 1);
+    }
+  }
+  if (src0_shape->size() == src1_shape->size()) {
+    bool visit_src0 = false;
+    bool visit_src1 = false;
+    for (size_t i = 0; i < src0_shape->size(); ++i) {
+      if (src0_shape->at(i) != src1_shape->at(i)) {
+        if (src0_shape->at(i) == 1 && !visit_src1) {
+          need_swap = true;
+          visit_src0 = true;
+        } else if (src1_shape->at(i) == 1 && !visit_src0) {
+          need_swap = false;
+          visit_src1 = true;
+        } else {
+          MS_LOG(EXCEPTION) << "Invalid broadcast! " << *src0_shape << " vs " << *src1_shape;
+        }
+      }
+    }
+  } else {
+    MS_LOG(EXCEPTION) << "Invalid broadcast! src0: " << *src0_shape << " src1: " << *src1_shape
+                      << " dst: " << *dst_shape;
+  }
+  MS_LOG(DEBUG) << "Binary broadcast out: src0: " << *src0_shape << " src1: " << *src1_shape << " dst: " << *dst_shape;
+  return need_swap;
 }
 
 dnnl::memory::format_tag MKLCPUKernel::GetDefaultFormatTag(const dnnl::memory::dims &dims) const {

@@ -20,7 +20,7 @@
 #include <vector>
 #include "src/lite_kernel.h"
 #include "src/runtime/kernel/arm/base/convolution_base.h"
-#include "nnacl/fp32/conv_depthwise.h"
+#include "nnacl/fp32/conv_depthwise_fp32.h"
 
 namespace mindspore::kernel {
 class ConvolutionDepthwiseSWInt8CPUKernel : public ConvolutionBaseCPUKernel {
@@ -36,15 +36,16 @@ class ConvolutionDepthwiseSWInt8CPUKernel : public ConvolutionBaseCPUKernel {
   int Run() override;
 
   int InitWeightBias();
-  int InitBuffer();
+  int InitPackedInputOutput();
   int Execute(int task_id);
 
  private:
+  void FreePackedInputOutput();
   int ReinitQuantParam();
   int ReinitFreeBefore();
   void FreeTmpQuant();
 
-  SlidingWindowParam *sliding = nullptr;
+  SlidingWindowParam *sliding_ = nullptr;
   int16_t *packed_weight_ = nullptr;
   int8_t *packed_input_ = nullptr;
   int8_t *packed_output_ = nullptr;

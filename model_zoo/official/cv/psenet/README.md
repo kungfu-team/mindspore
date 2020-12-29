@@ -35,6 +35,9 @@ With the development of convolutional neural network, scene text detection techn
 Progressive Scale Expansion Network (PSENet) is a text detector which is able to well detect the arbitrary-shape text in natural scene.
 
 # [Dataset](#contents)
+
+Note that you can run the scripts based on the dataset mentioned in original paper or widely used in relevant domain/network architecture. In the following sections, we will introduce how to run the scripts using the related dataset below.
+
 Dataset used: [ICDAR2015](https://rrc.cvc.uab.es/?ch=4&com=tasks#TextLocalization)
 A training set of 1000 images containing about 4500 readable words 
 A testing set containing about 2000 readable words
@@ -55,7 +58,7 @@ A testing set containing about 2000 readable words
 After installing MindSpore via the official website, you can start training and evaluation as follows: 
 ```python
 # run distributed training example
-sh scripts/run_distribute_train.sh pretrained_model.ckpt
+sh scripts/run_distribute_train.sh rank_table_file pretrained_model.ckpt
 
 #download opencv library
 download pyblind11, opencv3.4
@@ -88,7 +91,6 @@ sh scripts/run_eval_ascend.sh
 		└── run_eval_ascend.sh  			// shell script for evaluation 
 	├── src  
 		├── __init__.py  
-        ├── generate_hccn_file.py           // creating rank.json
 		├── ETSNET  
 			├── __init__.py  
 			├── base.py                     // convolution and BN operator
@@ -103,7 +105,10 @@ sh scripts/run_eval_ascend.sh
                 ├── Makefile
 		├── config.py                       // parameter configuration 
 		├── dataset.py                      // creating dataset
+		├── lr_schedule.py                  // learning ratio generation
 		└── network_define.py               // PSENet architecture
+	├── export.py                           // export mindir file 
+	├── mindspore_hub_conf.py               // hub config file 
 	├── test.py                             // test script 
 	└── train.py                            // training script
 
@@ -127,9 +132,10 @@ Major parameters in train.py and config.py are:
 
 ### Distributed Training
 ```
-sh scripts/run_distribute_train.sh pretrained_model.ckpt
+sh scripts/run_distribute_train.sh rank_table_file pretrained_model.ckpt
 ```
 
+rank_table_file which is specified by RANK_TABLE_FILE is needed when you are running a distribute task. You can generate it by using the [hccl_tools](https://gitee.com/mindspore/mindspore/tree/master/model_zoo/utils/hccl_tools).
 The above shell script will run distribute training in the background. You can view the results through the file 
 `device[X]/test_*.log`. The loss value will be achieved as follows:
 
@@ -166,18 +172,18 @@ Calculated!{"precision": 0.814796668299853, "recall": 0.8006740491092923, "hmean
 
 | Parameters                 | PSENet                                                   |
 | -------------------------- | ----------------------------------------------------------- |
-| Model Version              | Inception V1                                                |
+| Model Version              | V1                                                |
 | Resource                   | Ascend 910 ；CPU 2.60GHz，192cores；Memory，755G             |
-| uploaded Date              | 09/15/2020 (month/day/year)                                 |
-| MindSpore Version          | 1.0-alpha                                                   |
+| uploaded Date              | 09/30/2020 (month/day/year)                                 |
+| MindSpore Version          | 1.0.0                                                   |
 | Dataset                    | ICDAR2015                                                   |
 | Training Parameters        | start_lr=0.1; lr_scale=0.1                                  |
 | Optimizer                  | SGD                                                         |
 | Loss Function              | LossCallBack                                                |
 | outputs                    | probability                                                 |
 | Loss                       | 0.35                                                        |
-| Speed                      | 1pc: 444 ms/step;  4pcs: 446 ms/step                        |
-| Total time                 | 1pc: 75.48 h;  4pcs: 18.87 h                                |
+| Speed                      | 1pc: 444 ms/step;  8pcs: 446 ms/step                        |
+| Total time                 | 1pc: 75.48 h;  8pcs: 10.01 h                                |
 | Parameters (M)             | 27.36                                                       |
 | Checkpoint for Fine tuning | 109.44M (.ckpt file)                                        |
 | Scripts                    | https://gitee.com/mindspore/mindspore/tree/master/model_zoo/psenet |
@@ -187,13 +193,13 @@ Calculated!{"precision": 0.814796668299853, "recall": 0.8006740491092923, "hmean
 
 | Parameters          | PSENet                      |
 | ------------------- | --------------------------- |
-| Model Version       | Inception V1                |
+| Model Version       | V1                |
 | Resource            | Ascend 910                  |
-| Uploaded Date       | 09/15/2020 (month/day/year) |
-| MindSpore Version   | 1.0-alpha                   |
+| Uploaded Date       | 09/30/2020 (month/day/year) |
+| MindSpore Version   | 1.0,0                   |
 | Dataset             | ICDAR2015                   |
 | outputs             | probability                 |
-| Accuracy            | 1pc: 81%;  4pcs: 81%   |
+| Accuracy            | 1pc: 81%;  8pcs: 81%   |
 
 ## [How to use](#contents)
 

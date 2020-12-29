@@ -22,11 +22,11 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "utils/ms_utils.h"
 #include "frontend/parallel/auto_parallel/edge_costmodel.h"
 #include "frontend/parallel/costmodel_context.h"
 #include "frontend/parallel/ops_info/operator_info.h"
 #include "frontend/parallel/ops_info/tmp_identity_info.h"
+#include "utils/ms_utils.h"
 
 namespace mindspore {
 namespace parallel {
@@ -45,8 +45,11 @@ extern size_t TENSOR_SLICE_ALIGNMENT_SIZE;
 extern bool FULLY_USE_DEVICES;
 extern bool ELEMENTWISE_OP_STRA_FOLLOW;
 extern bool MULTI_SUBGRAPHS;
-extern int32_t RUN_PHASE;
-extern bool TRIANGLE_STRATEGY_OVERWRITE;
+extern bool DP_ALGO_ENABLE_APPROX;
+extern double DP_ALGO_APPROX_EPSILON;
+extern int64_t RUN_PHASE;
+extern bool TRIANGLE_STAR_STRATEGY_OVERWRITE;
+extern bool DP_ALGO_SINGLE_LOOP;
 
 class CostGraph {
   // 'CostGraph' consists of Operators and edges between them. An edge is created between two Operators if they have
@@ -58,6 +61,7 @@ class CostGraph {
     costmodel_beta_ = DEFAULT_COST_MODEL_BETA_ASCEND;
   }
   ~CostGraph() = default;
+  void Init();
   void AddOperator(const OperatorInfoPtr &op) { ops_.push_back(op); }
   OperatorInfoPtr FindOperatorByIndex(size_t index) {
     if (index >= ops_.size()) {
@@ -193,6 +197,9 @@ class CostGraph {
   // When TmpIdentity is used by mulitple operators, the corresponding parameter's memory cost should be calculated only
   // once (instead of multiple times), this method is used to correct this.
   Status CorrectOpsMemoryCost();
+  // When APPROXIMATION is enabled in the DP algorithm, some edges may have no valid strategies.
+  // This method is to re-init those edge involved operators.
+  void CheckApproximateCostGraphEdges();
   // Needed by rec_parser
   void add_inputs_tensor_name(const std::vector<std::string> &inputs_tensor_name) {
     inputs_tensor_name_list_.push_back(inputs_tensor_name);
@@ -213,7 +220,7 @@ class CostGraph {
   void TopologyOrder(std::vector<OperatorInfoPtr> *);
   void DFSForTopoOrder(const OperatorInfoPtr &, std::map<OperatorInfoPtr, bool> *, std::vector<OperatorInfoPtr> *);
   Status DetermineCriticalOps(const std::vector<OperatorInfoPtr> &);
-  void MarkCriticalOpsAndEdges(const std::map<OperatorInfoPtr, int> &);
+  void MarkCriticalOpsAndEdges(const std::map<OperatorInfoPtr, int64_t> &);
   // Needed by rec_parser
   std::vector<std::vector<std::string>> inputs_tensor_name_list_;
   std::map<std::string, std::string> tuple_getitem_list_;

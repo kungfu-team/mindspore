@@ -25,6 +25,7 @@
 #include "utils/contract.h"
 #include "ir/anf.h"
 #include "vm/segment_runner.h"
+#include "vm/graph_partition.h"
 #include "vm/vm.h"
 #include "backend/session/session_basic.h"
 
@@ -44,7 +45,7 @@ class Backend {
   LinkFuncType convert_fn() { return convert_fn_; }
   std::string name() { return name_; }
   virtual bool GetCond(const BaseRef &c, bool *value);
-  virtual bool GetIndex(const BaseRef &c, int *value);
+  virtual bool GetIndex(const BaseRef &c, int64_t *value);
   virtual GraphId CompileGraph(NotNull<FuncGraphPtr> fg) { return kInvalidGraphId; }
   virtual void Link(GraphId) {}
   virtual void SetDebugger() {}
@@ -63,7 +64,7 @@ class MsBackend : public Backend {
   MsBackend(const std::string &name, const std::string &target, uint32_t device_id);
   ~MsBackend() override = default;
 
-  LinConvertResult MsConvert(const AnfNodePtrList &lst, const std::string &target = "");
+  LinConvertResult MsConvert(const GraphSegmentPtr &segment, const std::string &target = "");
   VectorRef MsRunGraph(const GraphId &g, const VectorRef &args, const std::string &target = "");
 
   VectorRef MsSimuRunGraph(const GraphId &g, const VectorRef &args);

@@ -16,6 +16,10 @@
 
 #include "src/ops/cos.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifndef PRIMITIVE_WRITEABLE
@@ -27,6 +31,9 @@ int Cos::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::Fl
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+PrimitiveC *CosCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Cos>(primitive); }
+Registry CosRegistry(schema::PrimitiveType_Cos, CosCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

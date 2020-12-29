@@ -21,32 +21,33 @@
 #include <set>
 #include <cmath>
 #include "src/ops/primitive_c.h"
+#include "nnacl/arithmetic_common.h"
 
 namespace mindspore {
 namespace lite {
 class Arithmetic : public PrimitiveC {
  public:
+  Arithmetic() = default;
+  ~Arithmetic() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(Arithmetic, PrimitiveC);
-  Arithmetic() = default;
   explicit Arithmetic(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
 #else
   //  explicit Arithmetic(schema::Primitive *primitive) : PrimitiveC(primitive) {}
-  Arithmetic() = default;
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override {
     return RET_ERROR;
   }
 #endif
   int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
-  bool Broadcasting() { return this->broadcasting_; }
-  int NDims() { return this->ndim_; }
-  std::vector<int> InShape0() { return this->in_shape0_; }
-  std::vector<int> InShape1() { return this->in_shape1_; }
-  std::vector<int> OutputShape() { return this->out_shape_; }
+  bool Broadcasting() const { return this->broadcasting_; }
+  int NDims() const { return this->ndim_; }
+  std::vector<int> InShape0() const { return this->in_shape0_; }
+  std::vector<int> InShape1() const { return this->in_shape1_; }
+  std::vector<int> OutputShape() const { return this->out_shape_; }
 
  protected:
   bool broadcasting_ = false;
-  int ndim_;
+  int ndim_ = 0;
   std::vector<int> in_shape0_;
   std::vector<int> in_shape1_;
   std::vector<int> out_shape_;

@@ -14,11 +14,12 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_PREDICT_NODE_UTIL_H
-#define MINDSPORE_PREDICT_NODE_UTIL_H
+#ifndef MINDSPORE_LITE_TOOLS_COMMON_NODE_UTIL_H
+#define MINDSPORE_LITE_TOOLS_COMMON_NODE_UTIL_H
 
 #include <memory>
 #include <vector>
+#include <string>
 #include <unordered_map>
 #include "schema/inner/model_generated.h"
 #include "src/common/common.h"
@@ -31,13 +32,21 @@ namespace lite {
 using STATUS = int;
 STATUS BroadCastQuantParam(schema::MetaGraphT *graphT, const std::unique_ptr<schema::CNodeT> &node);
 
+inline schema::PrimitiveType GetCNodeTType(const schema::CNodeT &cNodeT) { return cNodeT.primitive->value.type; }
+
+inline std::string GetCNodeTTypeName(const schema::CNodeT &cNodeT) {
+  return schema::EnumNamePrimitiveType(GetCNodeTType(cNodeT));
+}
+
+inline schema::PrimitiveType GetOpType(const schema::CNode &opDef) { return opDef.primitive()->value_type(); }
+
+inline std::string GetOpTypeName(const schema::CNode &opDef) { return schema::EnumNamePrimitiveType(GetOpType(opDef)); }
+
 std::unordered_map<int, int> GetNc2NhAxisMap();
 
 std::vector<schema::PrimitiveType> GetInsertOpList();
 
 std::vector<schema::PrimitiveType> GetNhwcOpList();
-
-std::vector<schema::PrimitiveType> GetNhwcDualInputOpList();
 
 std::vector<schema::PrimitiveType> GetNhwcAllInputOpList();
 
@@ -51,13 +60,6 @@ class NodeUtils {
  public:
   static STATUS ConvertDims(schema::Format src_format, const std::vector<int32_t> &src_dims, schema::Format dst_format,
                             std::vector<int32_t> *dst_dims);
-
-  static void SliceData(std::vector<char *> &input, int64_t chunk_size, std::vector<char *> &output, int64_t begin,
-                        int64_t out_dim, int64_t stride);
-
-  static STATUS SetOutputSliceData(void *data, int64_t data_size, int32_t data_type, std::vector<int32_t> &input_dims,
-                                   std::vector<int32_t> &begin, std::vector<int32_t> &output_dims,
-                                   schema::TensorT *output, std::vector<int32_t> &stride);
 };
 
 enum kTransFilterType {
@@ -124,7 +126,7 @@ static STATUS TransFilterData(schema::TensorT *tensor, kTransFilterType type, in
               if (type == kCHWK2HWCK) {
                 p2Buff =
                   buf.get() + ((h * filterW * filterC * filterK) + (w * filterC * filterK) + (c * filterK) + (k));
-              } else if (type == kCHWK2KHWC) {
+              } else {
                 p2Buff =
                   buf.get() + ((k * filterH * filterW * filterC) + (h * filterW * filterC) + (w * filterC) + (c));
               }
@@ -325,4 +327,4 @@ static STATUS TransFilterFormat(schema::TensorT *tensor, kTransFilterType type) 
 STATUS TransFilterFormat(schema::TensorT *tensor, schema::Format dstFormat);
 }  // namespace lite
 }  // namespace mindspore
-#endif  // MINDSPORE_PREDICT_NODE_UTIL_H
+#endif  // MINDSPORE_LITE_TOOLS_COMMON_NODE_UTIL_H

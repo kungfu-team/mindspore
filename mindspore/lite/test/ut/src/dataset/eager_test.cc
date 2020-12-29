@@ -19,15 +19,18 @@
 #include "./securec.h"
 #include "minddata/dataset/include/tensor.h"
 #include "minddata/dataset/include/datasets.h"
+#include "minddata/dataset/include/transforms.h"
+#include "minddata/dataset/include/vision.h"
 #include "minddata/dataset/include/execute.h"
 #include "minddata/dataset/util/path.h"
+#include "mindspore/lite/src/common/log_adapter.h"
 
 using MSTensor = mindspore::tensor::MSTensor;
 using DETensor = mindspore::tensor::DETensor;
-using mindspore::dataset::api::vision::Decode;
-using mindspore::dataset::api::vision::Normalize;
-using mindspore::dataset::api::vision::Resize;
-using Execute = mindspore::dataset::api::Execute;
+using mindspore::dataset::vision::Decode;
+using mindspore::dataset::vision::Normalize;
+using mindspore::dataset::vision::Resize;
+using Execute = mindspore::dataset::Execute;
 using Path = mindspore::dataset::Path;
 
 class MindDataTestEager : public mindspore::CommonTest {
@@ -54,7 +57,7 @@ TEST_F(MindDataTestEager, Test1) {
   auto dir_it = Path::DirIterator::OpenDirectory(&base_dir);
   while (dir_it->hasNext()) {
     Path v = dir_it->next();
-    MS_LOG(WARNING) << v.toString() << ".";
+    // MS_LOG(WARNING) << v.toString() << ".";
     std::shared_ptr<MSTensor> image = std::shared_ptr<MSTensor>(DETensor::CreateTensor(v.toString()));
 
     image = Execute(Decode())(image);

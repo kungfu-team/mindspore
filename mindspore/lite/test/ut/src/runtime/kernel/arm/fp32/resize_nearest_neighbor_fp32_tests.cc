@@ -16,7 +16,7 @@
 #include <vector>
 #include "common/common_test.h"
 #include "nnacl/resize_parameter.h"
-#include "mindspore/lite/src/kernel_registry.h"
+#include "src/kernel_registry.h"
 
 namespace mindspore {
 
@@ -42,8 +42,8 @@ class TestResizeNearestNeighborFp32 : public mindspore::CommonTest {
 };
 
 void TestResizeNearestNeighborFp32::TearDown() {
-  in_tensor_.SetData(nullptr);
-  out_tensor_.SetData(nullptr);
+  in_tensor_.set_data(nullptr);
+  out_tensor_.set_data(nullptr);
 }
 
 void TestResizeNearestNeighborFp32::Prepare(const std::vector<int> &input_shape, const std::vector<int> &output_shape,
@@ -53,11 +53,11 @@ void TestResizeNearestNeighborFp32::Prepare(const std::vector<int> &input_shape,
   in_tensor_.set_shape(input_shape);
   out_tensor_.set_data_type(kNumberTypeFloat32);
   out_tensor_.set_shape(output_shape);
-  in_tensor_.SetData(input_data);
-  out_tensor_.SetData(output_data);
+  in_tensor_.set_data(input_data);
+  out_tensor_.set_data(output_data);
 
   ResizeParameter param_ = {
-    {}, static_cast<int>(schema::ResizeMethod_NEAREST_NEIGHBOR), output_shape[1], output_shape[2], align_corners};
+    {}, static_cast<int>(schema::ResizeMethod_NEAREST), output_shape[1], output_shape[2], align_corners};
   desc = {kernel::KERNEL_ARCH::kCPU, kNumberTypeFloat32, schema::PrimitiveType_Resize};
   ctx_ = lite::InnerContext();
   ctx_.thread_num_ = thread_num;
@@ -81,7 +81,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest1) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 2*2 -> 1*1
@@ -98,7 +98,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest2) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 2*2 -> 1*2
@@ -115,7 +115,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest3) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 2*2 -> 2*1
@@ -132,7 +132,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest4) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 2*2 -> 2*2
@@ -149,7 +149,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest5) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 2*2 -> 1*4
@@ -166,7 +166,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest6) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 2*2 -> 4*1
@@ -183,7 +183,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest7) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 2*2 -> 2*4
@@ -200,7 +200,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest8) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 2*2 -> 4*2
@@ -217,7 +217,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest9) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 2*2 -> 3*3
@@ -234,7 +234,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest10) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 2*2 -> 4*4
@@ -251,7 +251,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest11) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 2*2*2*5 -> 2*4*4*5
@@ -279,7 +279,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest12) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 2*2*2*5 -> 2*4*4*5 thread_num 2
@@ -307,7 +307,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest13) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 2*2*2*5 -> 2*4*4*5 thread_num 4
@@ -335,7 +335,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest14) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 4*4 -> 6*6 align_corners True
@@ -354,7 +354,7 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest15) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 
 // 2*7*5*8 -> 2*14*10*8 align_corners True
@@ -546,6 +546,6 @@ TEST_F(TestResizeNearestNeighborFp32, ResizeNearestNeighborTest16) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol));
 }
 }  // namespace mindspore

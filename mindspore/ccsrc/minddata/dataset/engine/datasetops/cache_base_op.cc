@@ -46,7 +46,7 @@ Status CacheBase::Reset() {
   return Status::OK();
 }
 CacheBase::CacheBase(int32_t num_workers, int32_t op_connector_size, int32_t rows_per_buf,
-                     std::shared_ptr<CacheClient> cache_client, std::shared_ptr<Sampler> sampler)
+                     std::shared_ptr<CacheClient> cache_client, std::shared_ptr<SamplerRT> sampler)
     : ParallelOp(num_workers, op_connector_size, std::move(sampler)),
       row_cnt_(0),
       num_cache_miss_(0),
@@ -74,7 +74,7 @@ Status CacheBase::FetchSamplesToWorkers() {
   // Kick off several threads which will prefetch prefetch_size_ rows in advance. The rows_per_buffers_
   // is too small (1 by default) and won't help performance.
   RETURN_IF_NOT_OK(
-    tree_->LaunchWorkers(num_prefetchers_, std::bind(&CacheBase::Prefetcher, this, std::placeholders::_1)));
+    tree_->LaunchWorkers(num_prefetchers_, std::bind(&CacheBase::Prefetcher, this, std::placeholders::_1), Name()));
   auto send_to_que = [](QueueList<std::unique_ptr<IOBlock>> &qList, int32_t worker_id,
                         std::vector<row_id_type> &keys) -> Status {
     auto blk = std::make_unique<IOBlock>(IOBlock(keys, IOBlock::kDeIoBlockNone));
@@ -84,9 +84,9 @@ Status CacheBase::FetchSamplesToWorkers() {
   // Instead of sending sampler id to WorkerEntry, we send them to the Prefetcher which will redirect them
   // to the WorkerEntry.
   do {
-    if (AllowCacheMiss() && wait_cnt > 0) {
-      MS_LOG(WARNING) << "Epoch: " << wait_cnt << " Cache Miss : " << num_cache_miss_
-                      << " Total number of rows : " << row_cnt_;
+    if (AllowCacheMiss() && wait_cnt > 0 && wait_cnt % op_num_repeats_per_epoch() == 0) {
+      MS_LOG(INFO) << "Epoch: " << op_current_epochs_ << " Cache Miss : " << num_cache_miss_
+                   << " Total number of rows : " << row_cnt_;
     }
     num_cache_miss_ = 0;
     row_cnt_ = 0;
@@ -167,8 +167,8 @@ Status CacheBase::FetchSamplesToWorkers() {
   }
   // Dump the last epoch result (approximately) without waiting for the worker threads to come back.
   if (AllowCacheMiss()) {
-    MS_LOG(WARNING) << "Epoch: " << wait_cnt << " Cache Miss : " << num_cache_miss_
-                    << " Total number of rows : " << row_cnt_;
+    MS_LOG(INFO) << "Epoch: " << wait_cnt / op_num_repeats_per_epoch() << " Cache Miss : " << num_cache_miss_
+                 << " Total number of rows : " << row_cnt_;
   }
   return Status::OK();
 }
@@ -271,29 +271,18 @@ Status CacheBase::PrefetchRows(const std::vector<row_id_type> &keys, std::vector
   }
   // Get the rows from the server
   TensorTable ttbl;
-  Status rc = cache_client_->GetRows(prefetch_keys, &ttbl);
-  if (rc.IsOk()) {
-    auto row_it = ttbl.begin();
-    for (auto row_id : prefetch_keys) {
-      auto &row = *row_it;
-      if (row.empty()) {
-        cache_miss->push_back(row_id);
-      }
-      // Put the prefetch row into the pool and wake up any WorkerEntry to wait for the row
-      RETURN_IF_NOT_OK(prefetch_.Add(row_id, std::move(row)));
-      ++row_it;
-    }
-  } else {
-    // In case any thread is waiting for the rows to come back and blocked on a semaphore,
-    // we will put an empty row in the local cache.
-    for (auto row_id : prefetch_keys) {
-      TensorRow row;
-      row.setId(row_id);
-      RETURN_IF_NOT_OK(prefetch_.Add(row_id, std::move(row)));
+  RETURN_IF_NOT_OK(cache_client_->GetRows(prefetch_keys, &ttbl));
+  auto row_it = ttbl.begin();
+  for (auto row_id : prefetch_keys) {
+    auto &row = *row_it;
+    if (row.empty()) {
       cache_miss->push_back(row_id);
     }
+    // Put the prefetch row into the pool and wake up any WorkerEntry to wait for the row
+    RETURN_IF_NOT_OK(prefetch_.Add(row_id, std::move(row)));
+    ++row_it;
   }
-  return rc;
+  return Status::OK();
 }
 
 Status CacheBase::Prefetcher(int32_t worker_id) {
@@ -319,9 +308,20 @@ Status CacheBase::Prefetcher(int32_t worker_id) {
           // If we get some network error, we will attempt some retries
           retry_count++;
         } else if (rc.IsError()) {
+          MS_LOG(WARNING) << rc.ToString();
           return rc;
         }
       } while (rc.IsNetWorkError());
+      // In case any thread is waiting for the rows to come back and blocked on a semaphore,
+      // we will put an empty row in the local cache.
+      if (rc.IsError() && AllowCacheMiss()) {
+        for (auto row_id : prefetch_keys) {
+          TensorRow row;
+          row.setId(row_id);
+          RETURN_IF_NOT_OK(prefetch_.Add(row_id, std::move(row)));
+          cache_miss.push_back(row_id);
+        }
+      }
     } else {
       if (AllowCacheMiss()) {
         // This code path is for CacheLookupOp acting as a sampler. If we get a eoe from

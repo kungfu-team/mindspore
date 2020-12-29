@@ -27,23 +27,25 @@ namespace mindspore::kernel {
 
 class PReluOpenCLKernel : public OpenCLKernel {
  public:
-  explicit PReluOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                             const std::vector<lite::Tensor *> &outputs)
+  PReluOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
+                    const std::vector<lite::Tensor *> &outputs)
       : OpenCLKernel(parameter, inputs, outputs) {}
-  ~PReluOpenCLKernel() override{};
+  ~PReluOpenCLKernel() override = default;
 
-  int Init() override;
+  int Prepare() override;
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
   int Run() override;
-  int GetImageSize(size_t idx, std::vector<size_t> *img_size) override;
-  void InitBuffer();
+  int InitWeights() override;
 
  private:
-  cl::Kernel kernel_;
   bool enable_fp16_{false};
-  int batch_size_{};
-  int C_{};
-  int H_{};
-  int W_{};
+  uint32_t OH = {1};
+  uint32_t OW = {1};
+  uint32_t OC = {1};
+  cl_int4 weight_shape_{};
+  cl_int4 out_shape_{};
   void *weight_vector_{nullptr};
   float weight_scalar_{0.f};
   bool weight_is_scalar{false};

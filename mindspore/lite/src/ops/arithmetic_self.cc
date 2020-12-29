@@ -17,6 +17,9 @@
 #include "src/ops/arithmetic_self.h"
 #include "include/errorcode.h"
 #include "src/common/log_adapter.h"
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
 
 namespace mindspore {
 namespace lite {
@@ -27,10 +30,10 @@ int ArithmeticSelf::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor
   MS_ASSERT(input != nullptr);
   auto output = outputs_.front();
   MS_ASSERT(output != nullptr);
-  output->SetFormat(input->GetFormat());
+  output->set_format(input->format());
   output->set_data_type(input->data_type());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   output->set_shape(input->shape());
   return RET_OK;

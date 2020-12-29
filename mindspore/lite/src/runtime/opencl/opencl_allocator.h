@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_LITE_SRC_OPENCL_ALLOCATOR_H_
-#define MINDSPORE_LITE_SRC_OPENCL_ALLOCATOR_H_
+#ifndef MINDSPORE_LITE_SRC_RUNTIME_OPENCL_ALLOCATOR_H_
+#define MINDSPORE_LITE_SRC_RUNTIME_OPENCL_ALLOCATOR_H_
 
 #include <memory>
 #include <string>
@@ -29,19 +29,8 @@
 
 namespace mindspore::lite::opencl {
 
-#define MS_HOST_BUFFER 0
-#define MS_CL_BUFFER (1 << 1)
-#define MS_CL_IMAGE2D (1 << 2)
-typedef int32_t OpenCLMemoryType;
-
-struct OpenclMemory {
-  void *host_ptr{nullptr};
-  void *device_ptr{nullptr};
-  OpenCLMemoryType mem_type{MS_HOST_BUFFER | MS_CL_BUFFER};
-};
-
 class OpenCLRuntime;
-enum class MemType : char { SVM, BUF, IMG };
+enum class MemType : char { BUF, IMG };
 
 class OpenCLAllocator : public Allocator {
  public:
@@ -49,12 +38,11 @@ class OpenCLAllocator : public Allocator {
   ~OpenCLAllocator() override;
   void SetContext(const AllocatorContext &ctx) override;
   void *Malloc(size_t size) override;
-  void *Malloc(size_t size, const std::vector<size_t> &img_size);
-  void *CreateImageFromHost(void *host_ptr, size_t size, const std::vector<size_t> &img_size);
+  void *Malloc(size_t size, const std::vector<size_t> &img_size, void *data = nullptr);
   void Free(void *ptr) override;
-  size_t GetTotalSize() override;
+  size_t total_size() override;
 
-  void Clear() override;
+  void Clear();
   void *GetImage(void *host_ptr);
   void *GetBuffer(void *host_ptr);
   void *MapBuffer(void *host_ptr, int flags, void *command_queue = nullptr, bool sync = true);
@@ -71,6 +59,16 @@ class OpenCLAllocator : public Allocator {
  private:
   void Lock();
   void UnLock();
+  void *MinimumFit(size_t size, const std::vector<size_t> &img_size);
+  void *CreateBuffer(size_t size, void *data, size_t flags, cl::Buffer **buffer);
+  void *CreateImage2D(size_t size, const std::vector<size_t> &img_size, void *data, size_t flags, bool is_map,
+                      cl::Buffer **buffer, cl::Image2D **image);
+  template <typename T>
+  void ClearMemList(T *list);
+
+ private:
+  OpenCLRuntime *ocl_runtime_{nullptr};
+  std::mutex lock;
   struct MemBuf {
     size_t size_;
     void *device_ptr_;
@@ -80,16 +78,15 @@ class OpenCLAllocator : public Allocator {
     bool map_flags{false};
   };
 
-  std::mutex lock;
   // <membuf->buf, membuf>
   std::unordered_map<void *, MemBuf *> allocated_list_;
   std::multimap<size_t, MemBuf *> free_list_;
+  uint64_t total_size_{0};
   // 6 is empirical value
   int shift_factor_ = 6;
   bool lock_flag_ = false;
-  OpenCLRuntime *ocl_runtime_{nullptr};
 };
 
 }  // namespace mindspore::lite::opencl
 
-#endif  // MINDSPORE_LITE_SRC_OPENCL_ALLOCATOR_H_
+#endif  // MINDSPORE_LITE_SRC_RUNTIME_OPENCL_ALLOCATOR_H_

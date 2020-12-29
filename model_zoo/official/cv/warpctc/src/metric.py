@@ -39,9 +39,6 @@ class WarpCTCAccuracy(nn.Metric):
 
         y_pred = self._convert_data(inputs[0])
         y = self._convert_data(inputs[1])
-        if self.device_target == 'GPU':
-            y = y[:, :-1]
-
         self._count += 1
 
         pred_lbls = self._get_prediction(y_pred)
@@ -53,7 +50,7 @@ class WarpCTCAccuracy(nn.Metric):
 
     def eval(self):
         if self._total_num == 0:
-            raise RuntimeError('Accuary can not be calculated, because the number of samples is 0.')
+            raise RuntimeError('Accuracy can not be calculated, because the number of samples is 0.')
         return self._correct_num / self._total_num
 
     def _is_eq(self, pred_lbl, target):

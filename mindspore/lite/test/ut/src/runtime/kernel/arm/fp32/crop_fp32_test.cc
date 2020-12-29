@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 #include "common/common_test.h"
-#include "mindspore/lite/nnacl/fp32/crop.h"
-#include "mindspore/lite/src/runtime/kernel/arm/fp32/crop.h"
+#include "mindspore/lite/nnacl/fp32/crop_fp32.h"
+#include "mindspore/lite/src/runtime/kernel/arm/fp32/crop_fp32.h"
 
 namespace mindspore {
 class CropTestFp32 : public mindspore::CommonTest {
@@ -42,7 +42,7 @@ TEST_F(CropTestFp32, CropTest1) {
     std::cout << output[i] << " ";
   }
   std::cout << "\n";
-  CompareOutputData(output, expect_out, kOutSize, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, expect_out, kOutSize, 0.000001));
 }
 
 TEST_F(CropTestFp32, CropTest2) {
@@ -65,7 +65,7 @@ TEST_F(CropTestFp32, CropTest2) {
     std::cout << output[i] << " ";
   }
   std::cout << "\n";
-  CompareOutputData(output, expect_out, kOutSize, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, expect_out, kOutSize, 0.000001));
 }
 
 TEST_F(CropTestFp32, CropTest3) {
@@ -85,7 +85,7 @@ TEST_F(CropTestFp32, CropTest3) {
     std::cout << output[i] << " ";
   }
   std::cout << "\n";
-  CompareOutputData(output, expect_out, kOutSize, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, expect_out, kOutSize, 0.000001));
 }
 
 TEST_F(CropTestFp32, CropTest4) {
@@ -106,7 +106,7 @@ TEST_F(CropTestFp32, CropTest4) {
     std::cout << output[i] << " ";
   }
   std::cout << "\n";
-  CompareOutputData(output, expect_out, kOutSize, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, expect_out, kOutSize, 0.000001));
 }
 
 TEST_F(CropTestFp32, CropTest5) {
@@ -127,7 +127,7 @@ TEST_F(CropTestFp32, CropTest5) {
     std::cout << output[i] << " ";
   }
   std::cout << "\n";
-  CompareOutputData(output, expect_out, kOutSize, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, expect_out, kOutSize, 0.000001));
 }
 
 TEST_F(CropTestFp32, CropTest6) {
@@ -145,11 +145,11 @@ TEST_F(CropTestFp32, CropTest6) {
   crop_param.offset_[2] = 0;
   crop_param.offset_[3] = 0;
   Crop4DNoParallel(input, output, in_shape, out_shape, &crop_param);
-  for (int i = 0; i < kOutSize; ++i) {
-    std::cout << output[i] << " ";
+  for (float i : output) {
+    std::cout << i << " ";
   }
   std::cout << "\n";
-  CompareOutputData(output, expect_out, kOutSize, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, expect_out, kOutSize, 0.000001));
 }
 
 TEST_F(CropTestFp32, CropTest7) {
@@ -164,11 +164,11 @@ TEST_F(CropTestFp32, CropTest7) {
   crop_param.axis_ = 3;
   crop_param.offset_[0] = 1;
   Crop4DNoParallel(input, output, in_shape, out_shape, &crop_param);
-  for (int i = 0; i < kOutSize; ++i) {
-    std::cout << output[i] << " ";
+  for (float i : output) {
+    std::cout << i << " ";
   }
   std::cout << "\n";
-  CompareOutputData(output, expect_out, kOutSize, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, expect_out, kOutSize, 0.000001));
 }
 
 TEST_F(CropTestFp32, CropTest8) {
@@ -187,11 +187,11 @@ TEST_F(CropTestFp32, CropTest8) {
   crop_param.op_parameter_.thread_num_ = 2;
   Crop4D(input, output, in_shape, out_shape, &crop_param, 0);
   Crop4D(input, output, in_shape, out_shape, &crop_param, 1);
-  for (int i = 0; i < kOutSize; ++i) {
-    std::cout << output[i] << " ";
+  for (float i : output) {
+    std::cout << i << " ";
   }
   std::cout << "\n";
-  CompareOutputData(output, expect_out, kOutSize, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, expect_out, kOutSize, 0.000001));
 }
 
 TEST_F(CropTestFp32, CropTest9) {
@@ -213,11 +213,11 @@ TEST_F(CropTestFp32, CropTest9) {
   crop_param.op_parameter_.thread_num_ = 2;
   Crop4D(input, output, in_shape, out_shape, &crop_param, 0);
   Crop4D(input, output, in_shape, out_shape, &crop_param, 1);
-  for (int i = 0; i < kOutSize; ++i) {
-    std::cout << output[i] << " ";
+  for (float i : output) {
+    std::cout << i << " ";
   }
   std::cout << "\n";
-  CompareOutputData(output, expect_out, kOutSize, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, expect_out, kOutSize, 0.000001));
 }
 
 TEST_F(CropTestFp32, CropTest10) {
@@ -237,11 +237,11 @@ TEST_F(CropTestFp32, CropTest10) {
   crop_param.op_parameter_.thread_num_ = 2;
   Crop4D(input, output, in_shape, out_shape, &crop_param, 1);
   Crop4D(input, output, in_shape, out_shape, &crop_param, 0);
-  for (int i = 0; i < kOutSize; ++i) {
-    std::cout << output[i] << " ";
+  for (float i : output) {
+    std::cout << i << " ";
   }
   std::cout << "\n";
-  CompareOutputData(output, expect_out, kOutSize, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, expect_out, kOutSize, 0.000001));
 }
 
 TEST_F(CropTestFp32, CropTest11) {
@@ -257,12 +257,12 @@ TEST_F(CropTestFp32, CropTest11) {
   std::vector<int> out_shape = {1, 4, 2, 2};
   std::vector<lite::Tensor *> inputs;
   std::vector<lite::Tensor *> outputs;
-  auto in_t = new lite::Tensor(kNumberTypeFloat, in_shape, schema::Format_NHWC, lite::Tensor::Category::CONST);
+  auto in_t = new lite::Tensor(kNumberTypeFloat, in_shape, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   in_t->MallocData();
   memcpy(in_t->MutableData(), input, sizeof(float) * in_t->ElementsNum());
   inputs.push_back(in_t);
 
-  auto out_t = new lite::Tensor(kNumberTypeFloat, out_shape, schema::Format_NHWC, lite::Tensor::Category::CONST);
+  auto out_t = new lite::Tensor(kNumberTypeFloat, out_shape, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   out_t->MallocData();
   outputs.push_back(out_t);
 
@@ -277,11 +277,11 @@ TEST_F(CropTestFp32, CropTest11) {
   kernel->Init();
   kernel->Run();
 
-  float *output = reinterpret_cast<float *>(outputs[0]->MutableData());
+  auto *output = reinterpret_cast<float *>(outputs[0]->MutableData());
   for (int i = 0; i < kOutSize; ++i) {
     std::cout << output[i] << " ";
   }
   std::cout << "\n";
-  CompareOutputData(output, expect_out, kOutSize, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, expect_out, kOutSize, 0.000001));
 }
 }  // namespace mindspore

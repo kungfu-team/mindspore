@@ -54,31 +54,6 @@ py::dict GetParameterLayout(const FuncGraphPtr &graph) {
   return dict;
 }
 
-py::dict GetCNodeStrategy(const FuncGraphPtr &graph) {
-  MS_EXCEPTION_IF_NULL(graph);
-  py::dict dict;
-  auto ret = graph->get_return();
-  MS_EXCEPTION_IF_NULL(ret);
-  auto nodes = DeepScopedGraphSearch(ret);
-
-  for (auto node : nodes) {
-    if (node->isa<CNode>()) {
-      auto cnode = node->cast<CNodePtr>();
-      MS_EXCEPTION_IF_NULL(cnode);
-      auto distributed_operation_info = cnode->user_data<OperatorInfo>();
-      if (distributed_operation_info != nullptr) {
-        auto strategyPtr = distributed_operation_info->strategy();
-        if (strategyPtr != nullptr) {
-          auto strategy = strategyPtr->GetInputDim();
-          auto name = cnode->fullname_with_scope();
-          dict[py::str(name)] = strategy;
-        }
-      }
-    }
-  }
-  return dict;
-}
-
 py::dict GetAllreduceFusion(const FuncGraphPtr &graph) {
   MS_EXCEPTION_IF_NULL(graph);
   py::dict dict;
@@ -96,10 +71,10 @@ py::dict GetAllreduceFusion(const FuncGraphPtr &graph) {
       MS_LOG(EXCEPTION) << "name is not StringImm";
     }
     auto name = name_ptr->cast<StringImmPtr>()->value();
-    if (!fusion_ptr->isa<Int32Imm>()) {
-      MS_LOG(EXCEPTION) << "fusion is not Int32Imm";
+    if (!fusion_ptr->isa<Int64Imm>()) {
+      MS_LOG(EXCEPTION) << "fusion is not Int64Imm";
     }
-    int32_t fusion = fusion_ptr->cast<Int32ImmPtr>()->value();
+    int64_t fusion = fusion_ptr->cast<Int64ImmPtr>()->value();
     dict[py::str(name)] = fusion;
   }
   return dict;

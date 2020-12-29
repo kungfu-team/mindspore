@@ -48,11 +48,11 @@ int CastFp16CPUKernel::Init() {
 }
 
 int CastFp16CPUKernel::ReSize() {
-  data_num_ = in_tensors_[0]->ElementsNum();
+  data_num_ = in_tensors_.at(0)->ElementsNum();
   if (data_num_ == 0) {
     return RET_OK;
   }
-  op_parameter_->thread_num_ = MSMIN(op_parameter_->thread_num_, data_num_);
+  op_parameter_->thread_num_ = MSMIN(op_parameter_->thread_num_, static_cast<int>(data_num_));
   stride_ = UP_DIV(data_num_, op_parameter_->thread_num_);
   return RET_OK;
 }
@@ -65,65 +65,68 @@ int CastFp16CPUKernel::DoCast(int thread_id) {
   }
 
   auto offset = thread_id * stride_;
-  auto output_data = out_tensors_.at(0)->MutableData();
-  switch (input->data_type()) {
-    case kNumberTypeFloat32:
-      Float32ToFloat16(reinterpret_cast<float *>(input->MutableData()) + offset,
-                       reinterpret_cast<float16_t *>(output_data) + offset, data_num);
-      break;
-    case kNumberTypeFloat16:
-      Float16ToFloat32(reinterpret_cast<float16_t *>(input->MutableData()) + offset,
-                       reinterpret_cast<float *>(output_data) + offset, data_num);
-      break;
-    default:
-      MS_LOG(ERROR) << "Unsupported input data type " << input->data_type();
-      return RET_ERROR;
+  auto output = out_tensors_.at(0);
+  auto output_data = output->data_c();
+  auto input_data_type = input->data_type();
+  auto output_data_type = output->data_type();
+
+  if (input_data_type == kNumberTypeFloat16) {
+    switch (output_data_type) {
+      case kNumberTypeInt64:
+        Float16ToInt64(reinterpret_cast<float16_t *>(input->data_c()) + offset,
+                       reinterpret_cast<int64_t *>(output_data) + offset, data_num);
+        break;
+      case kNumberTypeInt32:
+        Float16ToInt32(reinterpret_cast<float16_t *>(input->data_c()) + offset,
+                       reinterpret_cast<int32_t *>(output_data) + offset, data_num);
+        break;
+      case kNumberTypeFloat32:
+        Float16ToFloat32(reinterpret_cast<float16_t *>(input->MutableData()) + offset,
+                         reinterpret_cast<float *>(output_data) + offset, data_num);
+        break;
+      case kNumberTypeFloat16:
+        memcpy(reinterpret_cast<float16_t *>(output_data) + offset,
+               reinterpret_cast<float16_t *>(input->data_c()) + offset, data_num * sizeof(float16_t));
+        break;
+      default:
+        MS_LOG(ERROR) << "Unsupported output data type " << output_data_type;
+        return RET_ERROR;
+    }
+  } else if (input_data_type == kNumberTypeFloat32) {
+    switch (output_data_type) {
+      case kNumberTypeInt64:
+        Float32ToInt64(reinterpret_cast<float *>(input->data_c()) + offset,
+                       reinterpret_cast<int64_t *>(output_data) + offset, data_num);
+        break;
+      case kNumberTypeInt32:
+        Float32ToInt32(reinterpret_cast<float *>(input->data_c()) + offset,
+                       reinterpret_cast<int32_t *>(output_data) + offset, data_num);
+        break;
+      case kNumberTypeFloat32:
+        memcpy(reinterpret_cast<float *>(output_data) + offset, reinterpret_cast<float *>(input->data_c()) + offset,
+               data_num * sizeof(float));
+        break;
+      case kNumberTypeFloat16:
+        Float32ToFloat16(reinterpret_cast<float *>(input->MutableData()) + offset,
+                         reinterpret_cast<float16_t *>(output_data) + offset, data_num);
+        break;
+      default:
+        MS_LOG(ERROR) << "Unsupported output data type " << output_data_type;
+        return RET_ERROR;
+    }
+  } else {
+    MS_LOG(ERROR) << "Unsupported input data type " << input_data_type;
+    return RET_ERROR;
   }
   return RET_OK;
 }
 
 int CastFp16CPUKernel::Run() {
-  auto prepare_ret = Prepare();
-  if (prepare_ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << prepare_ret;
-    return prepare_ret;
-  }
   if (data_num_ == 0) {
     return RET_OK;
   }
   return ParallelLaunch(this->context_->thread_pool_, CastFp16Run, this, op_parameter_->thread_num_);
 }
 
-kernel::LiteKernel *CpuCastFp16KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                             const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                             const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                             const mindspore::lite::PrimitiveC *primitive) {
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Input opParameter is nullptr!";
-    return nullptr;
-  }
-  if (ctx == nullptr) {
-    MS_LOG(ERROR) << "Input context is nullptr!";
-    return nullptr;
-  }
-  if (ctx->thread_num_ == 0) {
-    MS_LOG(ERROR) << "context thread num is 0!";
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) CastFp16CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new CastFp16CPUKernel fail!";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    delete kernel;
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Cast, CpuCastFp16KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Cast, LiteKernelCreator<CastFp16CPUKernel>)
 }  // namespace mindspore::kernel

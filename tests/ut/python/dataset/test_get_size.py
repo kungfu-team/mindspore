@@ -74,9 +74,11 @@ def test_case2():
 
 
 def test_case3():
-    data1 = ds.TFRecordDataset(FILES, SCHEMA_FILE).batch(2).repeat(10)
-    data2 = ds.TFRecordDataset(FILES, SCHEMA_FILE).batch(2).repeat(5)
-    data3 = ds.TFRecordDataset(FILES, SCHEMA_FILE).batch(2)
+    data1 = ds.TFRecordDataset(FILES, SCHEMA_FILE, columns_list=["col_sint64"]).batch(2).repeat(10).rename(
+        ["col_sint64"], ["a1"])
+    data2 = ds.TFRecordDataset(FILES, SCHEMA_FILE, columns_list=["col_sint64"]).batch(2).repeat(5).rename(
+        ["col_sint64"], ["a2"])
+    data3 = ds.TFRecordDataset(FILES, SCHEMA_FILE, columns_list=["col_sint64"]).batch(2).rename(["col_sint64"], ["a3"])
 
     data4 = ds.zip((data1, data2, data3))
 
@@ -84,8 +86,9 @@ def test_case3():
 
 
 def test_case4():
-    data1 = ds.TFRecordDataset(FILES, SCHEMA_FILE).batch(2).repeat(10)
-    data2 = ds.TFRecordDataset(FILES)
+    data1 = ds.TFRecordDataset(FILES, SCHEMA_FILE, columns_list=["col_sint64"]).batch(2).repeat(10).rename(
+        ["col_sint64"], ["a1"])
+    data2 = ds.TFRecordDataset(FILES, columns_list=["col_sint64"]).rename(["col_sint64"], ["a2"])
     assert data2.get_dataset_size() == 12
     data2 = data2.batch(2)
     assert data2.get_dataset_size() == 6
@@ -158,13 +161,23 @@ def test_imagefolder():
     assert data.get_dataset_size() == 10
     assert data.num_classes() == 4
 
+    data = ds.ImageFolderDataset("../data/dataset/testPK/data/", class_indexing={"class1": 1, "class2": 22})
+    assert data.num_classes() == 2
+
+    data = ds.ImageFolderDataset("../data/dataset/testPK/data/", class_indexing={"class1": 1, "wrong name": 22})
+    err_msg = ""
+    try:
+        data.num_classes()
+    except RuntimeError as e:
+        err_msg = str(e)
+    assert "wrong name doesn't exist" in err_msg
+
 
 if __name__ == '__main__':
-    # test_compare_v1_and_2()
-    # test_imagefolder()
-    # test_manifest()
+    test_manifest()
     test_case1()
-    # test_case2()
-    # test_case3()
-    # test_case4()
-    # test_case5()
+    test_case2()
+    test_case3()
+    test_case4()
+    test_case5()
+    test_imagefolder()

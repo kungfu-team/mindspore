@@ -27,13 +27,13 @@ namespace dataset {
 // constructor
 EpochInjectionPass::InjectionFinder::InjectionFinder(std::shared_ptr<DatasetOp> node) : injection_point_(node) {}
 
+#ifndef ENABLE_ANDROID
 // Performs finder work for BuildVocabOp that has special rules about epoch control injection
 Status EpochInjectionPass::InjectionFinder::PreRunOnNode(std::shared_ptr<BuildVocabOp> node, bool *modified) {
   injection_point_ = nullptr;
   return Status::OK();
 }
 
-#ifndef ENABLE_ANDROID
 // Performs finder work for BuildSentencePieceVocabOp that has special rules about epoch control injection
 Status EpochInjectionPass::InjectionFinder::PreRunOnNode(std::shared_ptr<BuildSentencePieceVocabOp> node,
                                                          bool *modified) {
@@ -68,7 +68,7 @@ Status EpochInjectionPass::RunOnTree(ExecutionTree *tree, bool *modified) {
     std::shared_ptr<EpochCtrlOp> epoch_ctrl_op;
     RETURN_IF_NOT_OK(EpochCtrlOp::Builder(num_epochs).Build(&epoch_ctrl_op));
     RETURN_IF_NOT_OK(tree->AssociateNode(epoch_ctrl_op));
-    epoch_inject_node->InsertAsParent(epoch_ctrl_op);
+    RETURN_IF_NOT_OK(epoch_inject_node->InsertAsParent(epoch_ctrl_op));
   }
 
   MS_LOG(INFO) << "Pre pass: Injection pass complete.";

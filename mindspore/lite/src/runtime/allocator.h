@@ -34,12 +34,11 @@ struct AllocatorContext {
 class Allocator {
  public:
   Allocator() : name("default") {}
-  virtual ~Allocator() {}
+  virtual ~Allocator() = default;
   virtual void *Malloc(size_t size) = 0;
   virtual void Free(void *ptr) = 0;
   virtual void SetContext(const AllocatorContext &ctx) {}
-  virtual size_t GetTotalSize() { return 0; }
-  virtual void Clear() {}
+  virtual size_t total_size() = 0;
   static std::shared_ptr<Allocator> Create();
   virtual void *Prepare(void *ptr) { return ptr; }
   std::string name;
@@ -52,8 +51,8 @@ class DefaultAllocator : public Allocator {
   void SetContext(const AllocatorContext &ctx) override;
   void *Malloc(size_t size) override;
   void Free(void *ptr) override;
-  size_t GetTotalSize() override;
-  void Clear() override;
+  size_t total_size() override { return this->total_size_; }
+  void Clear();
 
  private:
   void Lock();
@@ -63,16 +62,18 @@ class DefaultAllocator : public Allocator {
     void *buf;
   };
 
-  std::mutex lock;
+  std::mutex lock_;
+  size_t total_size_ = 0;
   // <membuf->buf, membuf>
-  std::unordered_map<void *, MemBuf *> allocatedList;
-  std::multimap<size_t, MemBuf *> freeList;
+  std::unordered_map<void *, MemBuf *> allocatedList_;
+  std::multimap<size_t, MemBuf *> freeList_;
   // 6 is empirical value
-  int shiftFactor = 6;
-  bool lockFlag = false;
+  int shiftFactor_ = 6;
+  bool lockFlag_ = false;
 };
 
-#define MAX_MALLOC_SIZE (2000 * 1024 * 1024)
+constexpr int64_t MAX_MALLOC_SIZE = static_cast<size_t>(2000) * 1024 * 1024;
+constexpr int64_t MAX_THREAD_POOL_SIZE = static_cast<size_t>(3000) * 1024 * 1024;
 
 }  // namespace mindspore::lite
 

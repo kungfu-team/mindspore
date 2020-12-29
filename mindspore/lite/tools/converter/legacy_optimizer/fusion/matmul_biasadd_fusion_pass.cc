@@ -21,11 +21,9 @@
 #include <memory>
 #include "tools/converter/legacy_optimizer/fusion/matmul_biasadd_fusion_pass.h"
 #include "src/common/log_adapter.h"
-#include "securec/include/securec.h"
 #include "tools/common/graph_util.h"
 #include "include/errorcode.h"
 #include "schema/inner/model_generated.h"
-#include "src/common/op_utils.h"
 
 namespace mindspore {
 namespace lite {
@@ -76,7 +74,7 @@ STATUS MatMulBiasAddFusionPass::DoFusion(MetaGraphT *graph, const std::string &p
   // biasadd node the second tensor is not constant tensor, don't fusion
   auto baNodeInputIndex = baNode->inputIndex;
   if (baNodeInputIndex.size() != BIASADD_OP_INPUT_NUM) {
-    MS_LOG(ERROR) << "%s node tensors number is invalid! ";  // baNode->name.c_str());
+    MS_LOG(ERROR) << "input num is invalid! node: " << baNode->name.c_str();
     return RET_ERROR;
   }
   MS_ASSERT(graph->allTensors.size() > baNodeInputIndex.at(BIASADD_OP_BIAS_INDEX));
@@ -90,23 +88,24 @@ STATUS MatMulBiasAddFusionPass::DoFusion(MetaGraphT *graph, const std::string &p
   // 1. add biasTensor for matMul
   auto status = AddFullConnectionBiasTensor(matMulPath, baPath, graph);
   if (RET_OK != status) {
-    MS_LOG(ERROR) << "AddFullConnectionBiasTensor failed, %d";  // status);
+    MS_LOG(ERROR) << "AddFullConnectionBiasTensor failed, ret: " << status;
     return status;
   }
 
   // 2. change matmul to full connection op
   matMulNode->name += "-fc";
-  std::unique_ptr<FullConnectionT> fcAttr(new FullConnectionT());
+  std::unique_ptr<FullConnectionT> fcAttr(new (std::nothrow) FullConnectionT());
   if (fcAttr == nullptr) {
     MS_LOG(ERROR) << "new FullConnectionT node failed";
     return RET_ERROR;
   }
   fcAttr->hasBias = true;
   fcAttr->axis = 1;
+  MS_ASSERT(matMulNode->primitive != nullptr);
+  MS_ASSERT(matMulNode->primitive->value != nullptr);
   MS_ASSERT(matMulNode->primitive->value.AsMatMul() != nullptr);
   transA = matMulNode->primitive->value.AsMatMul()->transposeA;
   transB = matMulNode->primitive->value.AsMatMul()->transposeB;
-  MS_ASSERT(matMulNode->primitive->value.value != nullptr);
   matMulNode->primitive->value.type = schema::PrimitiveType_FullConnection;
   matMulNode->primitive->value.value = fcAttr.release();
 
@@ -114,17 +113,16 @@ STATUS MatMulBiasAddFusionPass::DoFusion(MetaGraphT *graph, const std::string &p
   MergeNodeAttrFromPost(matMulNode, baNode);
   status = IsolateOneWayNode(graph, baPath->nodeIdx);
   if (status != RET_OK) {
-    MS_LOG(ERROR) << "IsolateOneWayNode failed, subGraph: %zu, node: %zu, error: %d";
-    // baPath->subGraphIdx, baPath->nodeIdx, status);
+    MS_LOG(ERROR) << "IsolateOneWayNode failed, subGraph: " << baPath->subGraphIdx << ", node: " << baPath->nodeIdx
+                  << ", ret: " << status;
     return status;
   }
 
   // 4. addTranspose node
   status = InsertTransposeNode(graph, matMulPath);
   if (status != RET_OK) {
-    MS_LOG(ERROR)
-      << "InsertTransposeNode failed, subGraph: %zu, node: %zu, error: %d";  // matMulPath->subGraphIdx,
-                                                                             // matMulPath->nodeIdx, status);
+    MS_LOG(ERROR) << "InsertTransposeNode failed, subGraph: " << matMulPath->subGraphIdx
+                  << ", node: " << matMulPath->nodeIdx << ", ret: " << status;
     return status;
   }
   return RET_OK;
@@ -152,18 +150,17 @@ STATUS MatMulBiasAddFusionPass::InsertTransposeNode(MetaGraphT *graph, const std
     }
     transNode->name = "transpose" + std::to_string(id++);
     transNode->primitive->value.type = schema::PrimitiveType_Transpose;
-    std::unique_ptr<TransposeT> transposeParam(new TransposeT());
+    std::unique_ptr<TransposeT> transposeParam(new (std::nothrow) TransposeT());
     if (transposeParam == nullptr) {
       MS_LOG(ERROR) << "new transposeParam failed";
       return RET_ERROR;
     }
-    transposeParam->conjugate = false;
     transposeParam->perm = {1, 0};
     transNode->primitive->value.value = transposeParam.release();
     matmulOpIter =
       InsertNode(graph, matmulOpIter, kBefore, needInsertIdx, std::move(transNode), &errorCode, TransposeOpCopyer);
     if (errorCode != RET_OK) {
-      MS_LOG(ERROR) << "InsertNode failed: %d";  // errorCode);
+      MS_LOG(ERROR) << "InsertNode failed: " << errorCode;
       return errorCode;
     }
   }
@@ -188,7 +185,7 @@ STATUS MatMulBiasAddFusionPass::AddFullConnectionBiasTensor(const std::shared_pt
   // check biasTensor
   auto baWeightTensorIdxes = baNode->inputIndex;
   if (baWeightTensorIdxes.size() != BIASADD_OP_INPUT_NUM) {
-    MS_LOG(ERROR) << "%s node tensors number is invalid! ";  // baNode->name.c_str());
+    MS_LOG(ERROR) << "input number is invalid! node: " << baNode->name.c_str();
     return RET_ERROR;
   }
   MS_ASSERT(graph->allTensors.size() > baWeightTensorIdxes.at(BIASADD_OP_BIAS_INDEX));
@@ -197,7 +194,7 @@ STATUS MatMulBiasAddFusionPass::AddFullConnectionBiasTensor(const std::shared_pt
   auto biasDims = biasTensor->dims;
   // if biasTensor is a scaler
   if (biasDims.empty() && biasTensor->data.data() == nullptr) {
-    MS_LOG(ERROR) << "BiasAdd node %s bias tensor is invalid";  // baNode->name.c_str());
+    MS_LOG(ERROR) << "bias tensor is invalid, node: " << baNode->name.c_str();
     return RET_ERROR;
   }
   if (!biasDims.empty() && biasDims.size() != BIASADD_WEIGHT_SHAPE_SIZE) {

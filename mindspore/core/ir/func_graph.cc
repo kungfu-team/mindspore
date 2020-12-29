@@ -46,7 +46,8 @@ FuncGraph::FuncGraph()
       is_generated_(false),
       return_(nullptr),
       manager_(std::weak_ptr<FuncGraphManager>()),
-      stub_(false) {
+      stub_(false),
+      stage_(-1) {
   debug_info_ = std::make_shared<GraphDebugInfo>();
   switch_layer_input_ = std::make_shared<bool>(false);
 }
@@ -356,33 +357,33 @@ void FuncGraph::DropFuncGraphCNodeIndex(CNodeIndexPairPtr pair) {
   }
 }
 
-const FuncGraphCounterMap &FuncGraph::j_func_graphs() { return j_func_graphs_; }
+const std::unordered_map<AnfNodePtr, int> &FuncGraph::j_value_nodes() { return j_value_nodes_; }
 
-void FuncGraph::CopyJFuncGraphs(const FuncGraphPtr &source) {
-  auto &others = source->j_func_graphs();
-  for (auto it = others.begin(); it != others.end(); it++) {
-    AddJFuncGraph(it->first, it->second);
+void FuncGraph::CopyJValueNodes(const FuncGraphPtr &source) {
+  auto &others = source->j_value_nodes();
+  for (const auto &other : others) {
+    AddJValueNode(other.first, other.second);
   }
 }
 
-void FuncGraph::ClearJFuncGraphs() { j_func_graphs_.clear(); }
+void FuncGraph::ClearJValueNodes() { j_value_nodes_.clear(); }
 
-void FuncGraph::AddJFuncGraph(FuncGraphPtr fg, int count) {
-  if (j_func_graphs_.count(fg) == 0) {
-    j_func_graphs_[fg] = count;
+void FuncGraph::AddJValueNode(const AnfNodePtr &value_node, int count) {
+  if (j_value_nodes_.count(value_node) == 0) {
+    j_value_nodes_[value_node] = count;
   } else {
-    j_func_graphs_[fg] += count;
+    j_value_nodes_[value_node] += count;
   }
 }
 
-void FuncGraph::DropJFuncGraph(FuncGraphPtr fg) {
-  if (j_func_graphs_.count(fg) != 0) {
-    if (j_func_graphs_[fg] == 1) {
-      (void)j_func_graphs_.erase(fg);
+void FuncGraph::DropJValueNode(const AnfNodePtr &value_node) {
+  if (j_value_nodes_.count(value_node) != 0) {
+    if (j_value_nodes_[value_node] == 1) {
+      (void)j_value_nodes_.erase(value_node);
     } else {
-      j_func_graphs_[fg]--;
-      if (j_func_graphs_[fg] < 0) {
-        MS_LOG(EXCEPTION) << "Count of J FuncGraph '" << fg
+      j_value_nodes_[value_node]--;
+      if (j_value_nodes_[value_node] < 0) {
+        MS_LOG(EXCEPTION) << "Count of J ValueNode '" << value_node->DebugString()
                           << "' dec from 0. NodeInfo: " << trace::GetDebugInfo(debug_info());
       }
     }
@@ -430,7 +431,7 @@ void FuncGraph::ClearAllManagerInfo() {
   ClearFuncGraphCNodesIndex();
   ClearFreeVariables();
   ClearFuncGraphsUsed();
-  ClearJFuncGraphs();
+  ClearJValueNodes();
 }
 
 AnfNodePtr FuncGraph::GetDefaultValueByName(const std::string &name) {
@@ -645,6 +646,19 @@ ParameterPtr FuncGraph::add_weight(const tensor::MetaTensorPtr &meta_tensor) {
   parameter->set_default_param(MakeValue(meta_tensor));
   parameter->set_abstract(meta_tensor->ToAbstract());
   return parameter;
+}
+
+bool FuncGraph::ContainMultiTarget() const {
+  auto graph_manager = manager();
+  MS_EXCEPTION_IF_NULL(graph_manager);
+  FuncGraphSet graphs = graph_manager->func_graphs();
+  for (auto &g : graphs) {
+    auto nodes = TopoSort(g->get_return());
+    if (mindspore::ContainMultiTarget(nodes)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 size_t NewFgSeenGeneration() {

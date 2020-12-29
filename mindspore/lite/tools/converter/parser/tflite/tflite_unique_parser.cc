@@ -18,48 +18,34 @@
 #include "tools/converter/parser/tflite/tflite_unique_parser.h"
 #include <vector>
 #include <memory>
-#include <map>
 
 namespace mindspore {
 namespace lite {
-STATUS TfliteUniqueParser::Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                 const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TfliteUniqueParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
+PrimitiveC *TfliteUniqueParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                   const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "primitive is null";
+    return nullptr;
   }
 
   std::unique_ptr<schema::UniqueT> attr = std::make_unique<schema::UniqueT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   const auto &tflite_attr = tflite_op->builtin_options.AsUniqueOptions();
   if (tflite_attr == nullptr) {
-    MS_LOG(ERROR) << "get op: %s attr failed", op->name.c_str();
-    return RET_NULL_PTR;
+    MS_LOG(ERROR) << "get op unique attr failed";
+    return nullptr;
   }
-  attr->outType = GetTfliteDataType(tflite_attr->idx_out_type);
 
-  op->primitive->value.type = schema::PrimitiveType_Unique;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  for (size_t i = 0; i < tflite_op->outputs.size(); i++) {
-    AddOpOutput(op, tensors_info, tflite_op->outputs[i], tflite_model->subgraphs[0]->tensors.size(),
-                schema::Format::Format_NHWC);
-  }
-  return RET_OK;
+  primitive->value.type = schema::PrimitiveType_Unique;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteUniqueParser("Unique", new TfliteUniqueParser());
+TfliteNodeRegister g_tfliteUniqueParser(tflite::BuiltinOperator_UNIQUE, new TfliteUniqueParser());
 }  // namespace lite
 }  // namespace mindspore

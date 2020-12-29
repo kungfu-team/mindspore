@@ -222,8 +222,8 @@ AbstractBasePtr InferImplMakeRowTensor(const AnalysisEnginePtr &, const Primitiv
   auto shp = dense_shape_value->value();
   ShapeVector dense_shape_vec;
   (void)std::transform(std::begin(shp), std::end(shp), std::back_inserter(dense_shape_vec),
-                       [](const ValuePtr &e) -> int {
-                         auto elem = GetValue<int>(e);
+                       [](const ValuePtr &e) -> int64_t {
+                         auto elem = GetValue<int64_t>(e);
                          return elem;
                        });
   if (dense_shape_vec.size() != values_shp.size()) {
@@ -316,11 +316,11 @@ AbstractBasePtr InferImplMakeSparseTensor(const AnalysisEnginePtr &, const Primi
   auto shp = dense_shape_value->value();
   ShapeVector dense_shape_vec;
   (void)std::transform(std::begin(shp), std::end(shp), std::back_inserter(dense_shape_vec),
-                       [](const ValuePtr &e) -> int {
-                         auto elem = GetValue<int>(e);
+                       [](const ValuePtr &e) -> int64_t {
+                         auto elem = GetValue<int64_t>(e);
                          return elem;
                        });
-  if (IntToSize(indices_shp[1]) != dense_shape_vec.size()) {
+  if (LongToSize(indices_shp[1]) != dense_shape_vec.size()) {
     MS_EXCEPTION(TypeError) << "The size of dense_shape must be equal with the second dimension of indices "
                             << indices_shp[1] << ", but got " << dense_shape_vec.size();
   }
@@ -367,6 +367,45 @@ AbstractBasePtr InferImplSparseTensorGetDenseShape(const AnalysisEnginePtr &, co
   return sparse_tensor->dense_shape();
 }
 
+AbstractBasePtr InferImplAllSwap(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                                 const AbstractBasePtrList &args_spec_list) {
+  const std::string op_name = primitive->name();
+  CheckArgsSize(op_name, args_spec_list, 3);
+  auto tensor_in = CheckArg<AbstractTensor>(op_name, args_spec_list, 0);
+  MS_EXCEPTION_IF_NULL(tensor_in);
+  MS_EXCEPTION_IF_NULL(tensor_in->shape());
+  auto tensor_in_shape = tensor_in->shape()->shape();
+
+  auto send_size = CheckArg<AbstractTensor>(op_name, args_spec_list, 1);
+  MS_EXCEPTION_IF_NULL(send_size);
+  auto recv_size = CheckArg<AbstractTensor>(op_name, args_spec_list, 2);
+  MS_EXCEPTION_IF_NULL(recv_size);
+
+  // Get the content of the recv size
+  auto recv_size_value_ptr = recv_size->BuildValue();
+  MS_EXCEPTION_IF_NULL(recv_size_value_ptr);
+  auto recv_size_tensor = recv_size_value_ptr->cast<tensor::TensorPtr>();
+  MS_EXCEPTION_IF_NULL(recv_size_tensor);
+  auto data_pos = reinterpret_cast<int64_t *>(recv_size_tensor->data_c());
+  MS_EXCEPTION_IF_NULL(data_pos);
+  int64_t infer_max_size = 0;
+  for (int64_t i = 0; i < recv_size_tensor->DataSize(); ++i) {
+    infer_max_size += *(data_pos + i);
+  }
+
+  ShapeVector tensor_out_shape = {Shape::SHP_ANY, tensor_in_shape[1]};
+  ShapeVector min_shape = {1, tensor_in_shape[1]};
+
+  ShapeVector max_shape = {infer_max_size / tensor_in_shape[1], tensor_in_shape[1]};
+
+  auto tensor_out = std::make_shared<AbstractTensor>(tensor_in->element(),
+                                                     std::make_shared<Shape>(tensor_out_shape, min_shape, max_shape));
+
+  AbstractTensorPtr ret = std::make_shared<AbstractTensor>(
+    tensor_out->element(), std::make_shared<Shape>(tensor_out_shape, min_shape, max_shape));
+  return ret;
+}
+
 AbstractBasePtr InferImplAllReduce(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
                                    const AbstractBasePtrList &args_spec_list) {
   const std::string op_name = primitive->name();
@@ -405,10 +444,9 @@ AbstractBasePtr InferImplAllGather(const AnalysisEnginePtr &, const PrimitivePtr
   if (tmp_shape.empty()) {
     MS_LOG(EXCEPTION) << "shape size is 0";
   }
-  if (tmp_shape[0] % rank_size != 0) {
-    MS_LOG(EXCEPTION) << "first dimension of x should be divided by rank_size";
+  if (tmp_shape[0] > 0) {
+    tmp_shape[0] = tmp_shape[0] * rank_size;
   }
-  tmp_shape[0] = tmp_shape[0] / rank_size;
   return std::make_shared<AbstractTensor>(x->element(), std::make_shared<Shape>(tmp_shape));
 }
 
@@ -429,6 +467,70 @@ AbstractBasePtr InferImplReduceScatter(const AnalysisEnginePtr &, const Primitiv
   }
   tmp_shape[0] = IntMulWithOverflowCheck(tmp_shape[0], rank_size);
   return std::make_shared<AbstractTensor>(x->element(), std::make_shared<Shape>(tmp_shape));
+}
+
+AbstractBasePtr InferImplMemCpyAsync(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                                     const AbstractBasePtrList &args_spec_list) {
+  const std::string op_name = primitive->name();
+  CheckArgsSize(op_name, args_spec_list, 1);
+  auto x = CheckArg<AbstractTensor>(op_name, args_spec_list, 0);
+  MS_EXCEPTION_IF_NULL(x);
+  MS_EXCEPTION_IF_NULL(x->shape());
+  return std::make_shared<AbstractTensor>(x->element(), std::make_shared<Shape>(x->shape()->shape()));
+}
+
+AbstractBasePtr InferImplCast(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                              const AbstractBasePtrList &args_spec_list) {
+  const std::string op_name = primitive->name();
+  // GPU has 2 inputs while tbe has 1 only. Skip CheckArgsSize.
+  auto input_x = CheckArg<AbstractTensor>(op_name, args_spec_list, 0);
+  MS_EXCEPTION_IF_NULL(input_x);
+  MS_EXCEPTION_IF_NULL(input_x->shape());
+  auto input_type = primitive->GetAttr("dst_type")->cast<TypePtr>();
+  auto ret = std::make_shared<AbstractTensor>(input_type, input_x->shape()->shape());
+  return ret;
+}
+
+AbstractBasePtr InferImplExpandDims(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                                    const AbstractBasePtrList &args_spec_list) {
+  const std::string op_name = primitive->name();
+  CheckArgsSize(op_name, args_spec_list, 1);
+  auto x = CheckArg<AbstractTensor>(op_name, args_spec_list, 0);
+  MS_EXCEPTION_IF_NULL(x);
+  MS_EXCEPTION_IF_NULL(x->shape());
+
+  std::vector<int64_t> shape;
+  std::vector<int64_t> x_shape = x->shape()->shape();
+  shape.insert(shape.end(), x_shape.begin(), x_shape.end());
+  auto axis = primitive->GetAttr("axis");
+  auto value = GetValue<int64_t>(axis);
+  if (value < -(SizeToInt(x_shape.size()) + 1) || value > SizeToInt(x_shape.size())) {
+    MS_LOG(EXCEPTION) << " axis value shoud be in range [-intput_x.dim-1,input_x.dim], but axis value is" << value
+                      << " and input_x.dim is" << x_shape.size();
+  }
+  if (value < 0) {
+    value = value + SizeToInt(x_shape.size()) + 1;
+  }
+  shape.insert(shape.begin() + value, 1);
+
+  auto ret = std::make_shared<AbstractTensor>(x->element(), std::make_shared<Shape>(shape));
+  return ret;
+}
+
+AbstractBasePtr InferImplGpuConvertToDynamicShape(const AnalysisEnginePtr &, const PrimitivePtr &primitive,
+                                                  const AbstractBasePtrList &args_spec_list) {
+  const std::string &op_name = primitive->name();
+  CheckArgsSize(op_name, args_spec_list, 1);
+  AbstractTensorPtr input = CheckArg<AbstractTensor>(op_name, args_spec_list, 0);
+
+  ShapeVector input_shape = input->shape()->shape();
+  int32_t input_rank = input_shape.size();
+  ShapeVector inferred_shape(input_rank, Shape::SHP_ANY);
+  ShapeVector min_shape(input_rank, 1);
+  ShapeVector max_shape = input_shape;
+
+  ShapePtr shape = std::make_shared<Shape>(inferred_shape, min_shape, max_shape);
+  return std::make_shared<AbstractTensor>(input->element(), shape);
 }
 }  // namespace abstract
 }  // namespace mindspore

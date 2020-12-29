@@ -25,8 +25,9 @@ namespace lite {
 class OnnxConstantOfShapeParser : public OnnxNodeParser {
  public:
   OnnxConstantOfShapeParser() : OnnxNodeParser("ConstantOfShape") {}
+  ~OnnxConstantOfShapeParser() override = default;
 
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 }  // namespace lite
 }  // namespace mindspore

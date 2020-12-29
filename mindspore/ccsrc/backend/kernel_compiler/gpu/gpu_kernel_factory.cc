@@ -36,19 +36,20 @@ void GpuKernelFactory::Register(const std::string &kernel_name, const KernelAttr
   map_kernel_name_to_creater_[kernel_name].emplace_back(kernel_attr, creater);
 }
 
-void GpuKernelFactory::CheckIOParam(const std::string &kernel_name, const KernelBuildInfo *kernel_info,
+bool GpuKernelFactory::CheckIOParam(const std::string &kernel_name, const KernelBuildInfo *kernel_info,
                                     std::vector<std::pair<KernelAttr, GpuKernelCreater>> *iter_second,
                                     size_t attr_index) {
   if (kernel_info->GetInputNum() != iter_second->at(attr_index).first.GetInputSize()) {
     if (!iter_second->at(attr_index).first.GetAllSame()) {
-      MS_LOG(EXCEPTION) << "op[" << kernel_name << "] Input size is mismatching!";
+      return false;
     }
   }
   if (kernel_info->GetOutputNum() != iter_second->at(attr_index).first.GetOutputSize()) {
     if (!iter_second->at(attr_index).first.GetAllSame()) {
-      MS_LOG(EXCEPTION) << "op[" << kernel_name << "] Output size is mismatching!";
+      return false;
     }
   }
+  return true;
 }
 
 std::string GpuKernelFactory::SupportedTypeList(const std::string &kernel_name) {
@@ -74,10 +75,55 @@ std::string GpuKernelFactory::SupportedTypeList(const std::string &kernel_name) 
   return type_lists;
 }
 
+bool GpuKernelFactory::ReducePrecision(
+  const std::string &kernel_name, std::shared_ptr<mindspore::kernel::KernelBuildInfo::KernelBuildInfoBuilder> builder) {
+  auto kernel_info = builder->Build();
+  auto iter = map_kernel_name_to_creater_.find(kernel_name);
+  if (map_kernel_name_to_creater_.end() == iter) {
+    MS_LOG(INFO) << "Not registered GPU kernel: op[" << kernel_name << "]!";
+    return false;
+  }
+  reduce_flag_.first.clear();
+  for (size_t attr_index = 0; attr_index < (iter->second).size(); ++attr_index) {
+    auto attr_size = (&(iter->second))->at(attr_index).first.GetInputSize();
+    for (size_t input_index = 0; input_index < kernel_info->GetInputNum(); input_index++) {
+      if (kernel_info->GetInputDeviceType(input_index) == kNumberTypeInt64 &&
+          (iter->second)[attr_index].first.GetInputAttr(input_index % attr_size).first == kNumberTypeInt32) {
+        builder->SetInputDeviceType(kNumberTypeInt32, input_index);
+        reduce_flag_.first.push_back(input_index);
+        MS_LOG(WARNING) << "Kernel [" << kernel_name << "] does not support int64, cast input " << input_index
+                        << " to int32.";
+      }
+    }
+    for (size_t output_index = 0; output_index < kernel_info->GetOutputNum(); output_index++) {
+      if (kernel_info->GetOutputDeviceType(output_index) == kNumberTypeInt64 &&
+          (iter->second)[attr_index].first.GetOutputAttr(output_index % attr_size).first == kNumberTypeInt32) {
+        builder->SetOutputDeviceType(kNumberTypeInt32, output_index);
+        MS_LOG(WARNING) << "Kernel [" << kernel_name << "] does not support int64, cast output " << output_index
+                        << " to int32.";
+      }
+    }
+  }
+  return GpuKernelFactory::SearchRegistered(kernel_name, builder->Build());
+}
+
+void GpuKernelFactory::CheckSM(const KernelBuildInfo *kernel_info, const size_t &input_index) {
+  const int major_sm = GET_MAJOR_SM;
+  const bool check_sm = mindspore::device::gpu::CudaCommon::GetInstance().check_sm();
+  if (check_sm && major_sm < RECOMMEND_SM && kernel_info->GetInputDeviceType(input_index) == kNumberTypeFloat16) {
+    if (major_sm < MINIUM_SM) {
+      MS_LOG(EXCEPTION) << "Half precision ops can be used on Devices which computing capacity is >= " << MINIUM_SM
+                        << ", but the current device's computing capacity is " << major_sm;
+    }
+    MS_LOG(WARNING) << "It is recommended to use devices with a computing capacity >= " << RECOMMEND_SM
+                    << ", but the current device's computing capacity is " << major_sm;
+    mindspore::device::gpu::CudaCommon::GetInstance().set_check_sm(false);
+  }
+}
+
 std::pair<bool, size_t> GpuKernelFactory::GpuKernelAttrCheck(const std::string &kernel_name,
                                                              const KernelBuildInfo *kernel_info) {
   auto iter = map_kernel_name_to_creater_.find(kernel_name);
-  const int marjor_sm = GET_MAJOR_SM;
   if (map_kernel_name_to_creater_.end() == iter) {
     MS_LOG(INFO) << "Not registered GPU kernel: op[" << kernel_name << "]!";
     return std::make_pair(false, 0);
@@ -87,19 +133,14 @@ std::pair<bool, size_t> GpuKernelFactory::GpuKernelAttrCheck(const std::string &
   }
 
   for (size_t attr_index = 0; attr_index < (iter->second).size(); ++attr_index) {
-    CheckIOParam(kernel_name, kernel_info, &(iter->second), attr_index);
+    if (!CheckIOParam(kernel_name, kernel_info, &(iter->second), attr_index)) {
+      continue;
+    }
     bool flag = true;
     auto attr_size = (&(iter->second))->at(attr_index).first.GetInputSize();
     // data type matching check of all input parameters of kernel
     for (size_t input_index = 0; input_index < kernel_info->GetInputNum(); input_index++) {
-      if (marjor_sm < RECOMMEND_SM && kernel_info->GetInputDeviceType(input_index) == kNumberTypeFloat16) {
-        if (marjor_sm < MINIUM_SM) {
-          MS_LOG(EXCEPTION) << "Half precision ops can be used on Devices which computing capacity is >= " << MINIUM_SM
-                            << ", but the current device's computing capacity is " << marjor_sm;
-        }
-        MS_LOG(WARNING) << "It is recommended to use devices with a computing capacity >= " << RECOMMEND_SM
-                        << ", but the current device's computing capacity is " << marjor_sm;
-      }
+      GpuKernelFactory::CheckSM(kernel_info, input_index);
       if (kernel_info->GetInputDeviceType(input_index) !=
           (iter->second)[attr_index].first.GetInputAttr(input_index % attr_size).first) {
         flag = false;

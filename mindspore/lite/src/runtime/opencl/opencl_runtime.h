@@ -27,10 +27,12 @@ j* you may not use this file except in compliance with the License.
 #include "src/common/log_adapter.h"
 #include "src/runtime/opencl/opencl_wrapper.h"
 #include "src/runtime/opencl/opencl_allocator.h"
+#include "schema/gpu_cache_generated.h"
 
 namespace mindspore::lite::opencl {
 
 enum GpuType { OTHER = 0, ADRENO = 1, MALI = 2, MALI_T = 3, MALI_G = 4 };
+enum TuningMode { DEFAULT = 0, FAST = 1, EXTREME = 2 };
 
 struct GpuInfo {
   GpuType type = OTHER;
@@ -59,6 +61,8 @@ class OpenCLRuntime {
   uint32_t DeviceMaxFreq() const;
   uint64_t GetMaxWorkGroupSize(const cl::Kernel &kernel);
   uint32_t GetSubGroupSize(const cl::Kernel &kernel, const cl::NDRange &range = cl::NullRange);
+  uint64_t GetGlobalMemSize() { return global_memery_size_; }
+  uint64_t GetMaxAllocSize() { return max_alloc_size_; }
   GpuInfo GetGpuInfo();
   bool GetFp16Enable() const;
   bool SetFp16Enable(bool enable);
@@ -73,11 +77,12 @@ class OpenCLRuntime {
                                                                                 const T value,
                                                                                 const MemType mem_type = MemType::IMG) {
     switch (mem_type) {
-      case MemType::SVM: {
-        MS_LOG(DEBUG) << "Set kernel arg[" << index << "] SVM pointer " << value;
-        return kernel.setArg(index, value);
-      }
       case MemType::BUF: {
+        auto svm_capabilities = GetSVMCapabilities();
+        if (svm_capabilities) {
+          MS_LOG(DEBUG) << "Set kernel arg[" << index << "] SVM pointer " << value;
+          return kernel.setArg(index, value);
+        }
         cl::Buffer *buffer = reinterpret_cast<cl::Buffer *>(allocator_->GetBuffer(value));
         MS_LOG(DEBUG) << "Set kernel arg[" << index << "] OpenCL Buffer " << buffer << ", host_ptr: " << value;
         return kernel.setArg(index, *buffer);
@@ -106,14 +111,14 @@ class OpenCLRuntime {
   }
 
   cl::Program CreateProgramFromIL(const std::vector<char> &binary, const std::string &flag);
-  cl::Program CreateProgramFromBinary(const std::vector<std::vector<unsigned char>> &binary, const std::string &flag);
+  cl::Program CreateProgramFromBinary(const std::vector<unsigned char> &binary, const std::string &flag);
   cl::Kernel GetKernelFromBinary(const std::string &kernel_name);
   std::vector<std::vector<unsigned char>> GetProgramBinaries(const cl::Program &program);
   bool LoadSource(const std::string &program_name, const std::string &source);
   int BuildKernel(cl::Kernel &kernel, const std::string &program_name, const std::string &kernel_name,
-                  const std::set<std::string> &build_options);
-  int RunKernel(const cl::Kernel &kernel, const std::vector<size_t> &global, const std::vector<size_t> &local,
-                cl::CommandQueue *command_queue);
+                  const std::set<std::string> &build_options = {});
+  int RunKernel(const cl::Kernel &kernel, const cl::NDRange &global, const cl::NDRange &local,
+                cl::CommandQueue *command_queue = nullptr, cl::Event *event = nullptr);
   bool CopyDeviceMemToHost(void *dst, const void *src, size_t size, cl::CommandQueue *command_queue = nullptr,
                            bool sync = false) const;
   bool CopyHostMemToDevice(const void *dst, const void *src, size_t size, cl::CommandQueue *command_queue = nullptr,
@@ -135,6 +140,14 @@ class OpenCLRuntime {
    * @return max_work_group_size
    */
   int GetKernelMaxWorkGroupSize(cl_kernel kernel, cl_device_id device_id);
+  void SetTuningMode(TuningMode mode) { tuning_mode_ = mode; }
+  TuningMode GetTuningMode() const { return tuning_mode_; }
+
+  void InitGpuCache();
+  int LoadCache(const void *buf);
+  void StoreCache();
+  bool isProfiling() const { return profiling_; }
+  void SetProfiling(bool profiling) { profiling_ = profiling; }
 
  private:
   static OpenCLRuntime *GetInstance();
@@ -150,13 +163,16 @@ class OpenCLRuntime {
   static size_t instance_count_;
   static OpenCLRuntime *ocl_runtime_instance_;
   cl::CommandQueue *default_command_queue_{nullptr};
+  cl::CommandQueue *profiling_command_queue_{nullptr};
   cl::Context *context_{nullptr};
   cl::Device *device_{nullptr};
   OpenCLAllocator *allocator_{nullptr};
   std::map<std::string, cl::Program> program_map_;
   cl::Program binary_program_{0};
   uint64_t global_memery_cachesize_{0};
-  int max_work_group_size;
+  uint64_t global_memery_size_{0};
+  uint64_t max_alloc_size_{0};
+  int max_work_group_size_{1};
   uint32_t compute_units_{0};
   uint32_t max_freq_{0};
   std::string default_build_opts_{""};
@@ -168,6 +184,13 @@ class OpenCLRuntime {
   cl_uint image_pitch_align_{0};
   std::vector<size_t> max_work_item_sizes_;
   void *handle_{nullptr};
+  std::map<std::string, std::vector<unsigned char>> binary_map_;
+  std::string cache_path_{"/data/local/tmp/opencl_cache"};
+  const std::string version_{"V0.1"};
+  bool need_write_{false};
+  bool enable_cache_{false};
+  TuningMode tuning_mode_{TuningMode::DEFAULT};
+  bool profiling_{false};
 };
 
 class OpenCLRuntimeWrapper {

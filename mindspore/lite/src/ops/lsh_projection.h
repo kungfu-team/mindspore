@@ -23,16 +23,17 @@ namespace mindspore {
 namespace lite {
 class LshProjection : public PrimitiveC {
  public:
+  LshProjection() = default;
+  ~LshProjection() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(LshProjection, PrimitiveC);
-  LshProjection() = default;
   explicit LshProjection(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
   int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
 #else
-  LshProjection() = default;
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
   int InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) override;
+  int GetLshType() const;
 };
 }  // namespace lite
 }  // namespace mindspore

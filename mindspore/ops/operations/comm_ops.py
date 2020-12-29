@@ -20,12 +20,12 @@ from ..._checkparam import Validator as validator
 from ..._checkparam import Rel
 from ...communication.management import get_rank, get_group_size, GlobalComm, _get_group
 from ...common import dtype as mstype
-from ..primitive import PrimitiveWithInfer, prim_attr_register
-
+from ..primitive import PrimitiveWithInfer, PrimitiveWithCheck, prim_attr_register
+from ...common.api import context
 
 class ReduceOp:
     """
-    Operation options for reduce tensors.
+    Operation options for reducing tensors.
 
     There are four kinds of operation options, "SUM", "MAX", "MIN", and "PROD".
 
@@ -33,6 +33,9 @@ class ReduceOp:
         - MAX: Take the maximum.
         - MIN: Take the minimum.
         - PROD: Take the product.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
     """
     SUM = "sum"
     MAX = "max"
@@ -41,6 +44,12 @@ class ReduceOp:
 
 
 target_dtypes = (mstype.int8, mstype.int32, mstype.float16, mstype.float32)
+
+def check_hcom_group_valid(group):
+    if context.get_context("mode") == context.PYNATIVE_MODE and \
+            context.get_context("device_target") == "Ascend" and \
+            group != GlobalComm.WORLD_COMM_GROUP:
+        raise RuntimeError("Only hccl_world_group is supported in Pynative mode, but got {}".format(group))
 
 class AllReduce(PrimitiveWithInfer):
     """
@@ -67,35 +76,40 @@ class AllReduce(PrimitiveWithInfer):
         Tensor, has the same shape of the input, i.e., :math:`(x_1, x_2, ..., x_R)`.
         The contents depend on the specified operation.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> from mindspore.communication import init
         >>> from mindspore import Tensor
         >>> from mindspore.ops.operations.comm_ops import ReduceOp
         >>> import mindspore.nn as nn
-        >>> import mindspore.ops.operations as P
+        >>> import mindspore.ops.operations as ops
         >>>
         >>> init()
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.allreduce_sum = P.AllReduce(ReduceOp.SUM, group="nccl_world_group")
-        >>>
-        >>>     def construct(self, x):
-        >>>         return self.allreduce_sum(x)
-        >>>
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.allreduce_sum = ops.AllReduce(ReduceOp.SUM, group="nccl_world_group")
+        ...
+        ...     def construct(self, x):
+        ...         return self.allreduce_sum(x)
+        ...
         >>> input_ = Tensor(np.ones([2, 8]).astype(np.float32))
         >>> net = Net()
         >>> output = net(input_)
+        >>> print(output)
+        [[4. 5. 6. 0. 0. 0. 0. 0.]
+         [0. 0. 0. 0. 0. 0. 0. 0.]]
     """
 
     @prim_attr_register
     def __init__(self, op=ReduceOp.SUM, group=GlobalComm.WORLD_COMM_GROUP):
         if not isinstance(op, type(ReduceOp.SUM)):
             raise TypeError("The operation of AllReduce should be str.")
-        if op == ReduceOp.PROD:
-            raise RuntimeError("The operation of AllReduce 'prod' is not supported yet.")
         if not isinstance(_get_group(group), str):
             raise TypeError("The group of AllReduce should be str.")
+        check_hcom_group_valid(group)
         self.op = op
         self.add_prim_attr('group', _get_group(group))
         self.add_prim_attr('fusion', 0)
@@ -105,7 +119,7 @@ class AllReduce(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, target_dtypes, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, target_dtypes, self.name)
         return x_dtype
 
 
@@ -131,24 +145,35 @@ class AllGather(PrimitiveWithInfer):
         Tensor. If the number of devices in the group is N,
         then the shape of output is :math:`(N, x_1, x_2, ..., x_R)`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> import mindspore.ops.operations as P
+        >>> # This example should be run with two devices. Refer to the tutorial > Distirbuted Training on mindspore.cn.
+        >>> import numpy as np
+        >>> import mindspore.ops.operations as ops
         >>> import mindspore.nn as nn
         >>> from mindspore.communication import init
-        >>> from mindspore import Tensor
+        >>> from mindspore import Tensor, context
         >>>
+        >>> context.set_context(mode=context.GRAPH_MODE)
         >>> init()
-        >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.allgather = P.AllGather(group="nccl_world_group")
-        >>>
-        >>>     def construct(self, x):
-        >>>         return self.allgather(x)
-        >>>
+        ... class Net(nn.Cell):
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.allgather = ops.AllGather()
+        ...
+        ...     def construct(self, x):
+        ...         return self.allgather(x)
+        ...
         >>> input_ = Tensor(np.ones([2, 8]).astype(np.float32))
         >>> net = Net()
         >>> output = net(input_)
+        >>> print(output)
+        [[1. 1. 1. 1. 1. 1. 1. 1.]
+         [1. 1. 1. 1. 1. 1. 1. 1.]
+         [1. 1. 1. 1. 1. 1. 1. 1.]
+         [1. 1. 1. 1. 1. 1. 1. 1.]]
     """
 
     @prim_attr_register
@@ -163,11 +188,12 @@ class AllGather(PrimitiveWithInfer):
 
     def infer_shape(self, x_shape):
         validator.check_positive_int(len(x_shape), "x shape", self.name)
-        x_shape[0] = x_shape[0] * self.rank_size
+        if x_shape[0] > 0:
+            x_shape[0] = x_shape[0] * self.rank_size
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, target_dtypes, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, target_dtypes, self.name)
         return x_dtype
 
     def __call__(self, tensor):
@@ -204,20 +230,21 @@ class _HostAllGather(PrimitiveWithInfer):
         if group is None:
             raise ValueError(f"For '{self.name}' group must be set.")
         validator.check_value_type('group', group, (tuple, list), self.name)
-        validator.check_integer("group size", len(group), 2, Rel.GE, self.name)
+        validator.check_int(len(group), 2, Rel.GE, "group size", self.name)
         for r in group:
-            validator.check_int_range("rank_id", r, 0, 7, Rel.INC_BOTH, self.name)
+            validator.check_int_range(r, 0, 7, Rel.INC_BOTH, "rank_id", self.name)
             validator.check_value_type("rank_id", r, (int,), self.name)
         self.group_size = len(group)
         self.add_prim_attr('group', group)
 
     def infer_shape(self, x_shape):
         validator.check_positive_int(len(x_shape), "x shape", self.name)
-        x_shape[0] = x_shape[0] * self.group_size
+        if x_shape[0] > 0:
+            x_shape[0] = x_shape[0] * self.group_size
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, target_dtypes, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, target_dtypes, self.name)
         return x_dtype
 
     def __call__(self, tensor):
@@ -241,25 +268,36 @@ class ReduceScatter(PrimitiveWithInfer):
         TypeError: If any of operation and group is not a string.
         ValueError: If the first dimension of the input cannot be divided by the rank size.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> from mindspore import Tensor
+        >>> # This example should be run with two devices. Refer to the tutorial > Distirbuted Training on mindspore.cn.
+        >>> from mindspore import Tensor, context
         >>> from mindspore.communication import init
         >>> from mindspore.ops.operations.comm_ops import ReduceOp
         >>> import mindspore.nn as nn
-        >>> import mindspore.ops.operations as P
+        >>> import mindspore.ops.operations as ops
+        >>> import numpy as np
         >>>
+        >>> context.set_context(mode=context.GRAPH_MODE)
         >>> init()
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.reducescatter = P.ReduceScatter(ReduceOp.SUM, group="nccl_world_group")
-        >>>
-        >>>     def construct(self, x):
-        >>>         return self.reducescatter(x)
-        >>>
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.reducescatter = ops.ReduceScatter(ReduceOp.SUM)
+        ...
+        ...     def construct(self, x):
+        ...         return self.reducescatter(x)
+        ...
         >>> input_ = Tensor(np.ones([8, 8]).astype(np.float32))
         >>> net = Net()
         >>> output = net(input_)
+        >>> print(output)
+        [[2. 2. 2. 2. 2. 2. 2. 2.]
+         [2. 2. 2. 2. 2. 2. 2. 2.]
+         [2. 2. 2. 2. 2. 2. 2. 2.]
+         [2. 2. 2. 2. 2. 2. 2. 2.]]
     """
 
     @prim_attr_register
@@ -279,7 +317,7 @@ class ReduceScatter(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, target_dtypes, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, target_dtypes, self.name)
         return x_dtype
 
     def __call__(self, tensor):
@@ -313,9 +351,9 @@ class _HostReduceScatter(PrimitiveWithInfer):
             raise ValueError(f"For '{self.name}' group must be set.")
         validator.check_value_type('op', op, (type(ReduceOp.SUM),), self.name)
         validator.check_value_type('group', group, (tuple, list), self.name)
-        validator.check_integer("group size", len(group), 2, Rel.GE, self.name)
+        validator.check_int(len(group), 2, Rel.GE, "group size", self.name)
         for r in group:
-            validator.check_int_range("rank_id", r, 0, 7, Rel.INC_BOTH, self.name)
+            validator.check_int_range(r, 0, 7, Rel.INC_BOTH, "rank_id", self.name)
             validator.check_value_type("rank_id", r, (int,), self.name)
         self.op = op
         self.group_size = len(group)
@@ -328,7 +366,7 @@ class _HostReduceScatter(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, target_dtypes, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, target_dtypes, self.name)
         return x_dtype
 
     def __call__(self, tensor):
@@ -357,30 +395,39 @@ class Broadcast(PrimitiveWithInfer):
     Raises:
         TypeError: If root_rank is not a integer or group is not a string.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> from mindspore import Tensor
         >>> from mindspore.communication import init
         >>> import mindspore.nn as nn
-        >>> import mindspore.ops.operations as P
+        >>> import mindspore.ops.operations as ops
+        >>> import numpy as np
         >>>
         >>> init()
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.broadcast = P.Broadcast(1)
-        >>>
-        >>>     def construct(self, x):
-        >>>         return self.broadcast((x,))
-        >>>
-        >>> input_ = Tensor(np.ones([2, 8]).astype(np.float32))
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.broadcast = ops.Broadcast(1)
+        ...
+        ...     def construct(self, x):
+        ...         return self.broadcast((x,))
+        ...
+        >>> input_ = Tensor(np.ones([2, 4]).astype(np.int32))
         >>> net = Net()
         >>> output = net(input_)
+        >>> print(output)
+        (Tensor(shape[2,4], dtype=Int32, value=
+        [[1, 1, 1, 1],
+         [1, 1, 1, 1]]),)
     """
 
     @prim_attr_register
     def __init__(self, root_rank, group=GlobalComm.WORLD_COMM_GROUP):
         validator.check_value_type('root_rank', root_rank, (int,), self.name)
         validator.check_value_type('group', _get_group(group), (str,), self.name)
+        check_hcom_group_valid(group)
         self.add_prim_attr('group', _get_group(group))
 
     def infer_shape(self, x_shape):
@@ -390,8 +437,61 @@ class Broadcast(PrimitiveWithInfer):
         if not isinstance(x_dtype, tuple):
             raise TypeError(f"{self.name}'s input should be a tuple!")
         for _ele in x_dtype:
-            validator.check_tensor_type_same({'x': _ele}, target_dtypes, self.name)
+            validator.check_tensor_dtype_valid('x', _ele, target_dtypes, self.name)
         return x_dtype
+
+
+class AllSwap(PrimitiveWithCheck):
+    """
+    AllSwap is a collective operation.
+
+    AllSwap sends data from the all processes to the all processes in the specified group. It has two phases:
+
+    - The scatter phase: On each process, the operand is split into the send size of blocks along the
+      0-th axis, and the blocks are scattered to all processes, e.g., the ith block is send to the ith process.
+    - The gather phase: Each process concatenates the received blocks along the 0-th axis.
+
+    Note:
+        The tensors must have the same format in all processes of the collection.
+
+    Args:
+        group (str): The communication group name.
+
+    Inputs:
+        tensor_in (tensor): A 2-D tensor. On each process, divide blocks into number of the send size.
+        send_size (tensor): A 1-D int64 tensor. The element is the send data size for each process.
+        recv_size (tensor): A 1-D int64 tensor. The element is the receive data size for each process.
+
+    Returns:
+        tensor_out (tensor): The result tensor.
+
+    Raises:
+        TypeError: If group is not a string.
+    """
+
+    @prim_attr_register
+    def __init__(self, group=GlobalComm.WORLD_COMM_GROUP):
+        """Initialize AllSwap"""
+        validator.check_value_type('group', _get_group(group), (str,), self.name)
+        self.init_prim_io_names(inputs=['tensor_in', 'send_size', 'recv_size'], outputs=['tensor_out'])
+        self.add_prim_attr('group', _get_group(group))
+
+    def __check__(self, tensor_in, send_size, recv_size):
+        validator.check_subclass("tensor_in", tensor_in['dtype'], mstype.tensor, self.name)
+        validator.check_tensor_dtype_valid("send_size", send_size['dtype'], [mstype.int64],
+                                           self.name)
+        validator.check_tensor_dtype_valid("recv_size", recv_size['dtype'], [mstype.int64],
+                                           self.name)
+
+        validator.check_equal_int(len(tensor_in['shape']), 2, "tensor_in", self.name)
+        validator.check_equal_int(len(send_size['shape']), 1, "send_size", self.name)
+        validator.check_equal_int(len(recv_size['shape']), 1, "recv_size", self.name)
+
+        out_shape = [-1] + [tensor_in['shape'][1]]
+        out = {'shape': out_shape,
+               'dtype': tensor_in['dtype'],
+               'value': None}
+        return out
 
 
 class _AlltoAll(PrimitiveWithInfer):
@@ -432,7 +532,7 @@ class _AlltoAll(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, target_dtypes, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, target_dtypes, self.name)
         return x_dtype
 
     def __call__(self, tensor):
@@ -455,6 +555,7 @@ class _MirrorOperator(PrimitiveWithInfer):
         self.group = group
         self.dev_num = dev_num
         self.mean_flag = mean_flag
+        self.add_prim_attr("fusion", 1)
 
     def infer_shape(self, x_shape):
         return x_shape
@@ -499,13 +600,9 @@ class _VirtualDataset(PrimitiveWithInfer):
         """init"""
 
     def infer_shape(self, *args):
-        if len(args) == 1:
-            return args[0]
         return args
 
     def infer_dtype(self, *args):
-        if len(args) == 1:
-            return args[0]
         return args
 
 

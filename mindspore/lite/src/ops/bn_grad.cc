@@ -16,6 +16,10 @@
 
 #include "src/ops/bn_grad.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -38,21 +42,20 @@ int BNGrad::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inp
     return RET_ERROR;
   }
   if (this->primitive_->value.value == nullptr) {
-    auto attr = new (std::nothrow) schema::BNGradInputT();
+    auto attr = new (std::nothrow) schema::BNGradT();
     if (attr == nullptr) {
       MS_LOG(ERROR) << "new primitiveT value failed";
       return RET_ERROR;
     }
-    attr->momentum = GetValue<float>(prim.GetAttr("momentum"));
-    // FusedBatchNormGrad dows not get this attribute
-    if (prim.GetAttr("eps") != nullptr) {
-      attr->eps = GetValue<float>(prim.GetAttr("eps"));
+    attr->momentum = 0.1f;
+    if (prim.GetAttr("momentum") != nullptr) {
+      attr->momentum = GetValue<float>(prim.GetAttr("momentum"));
+    }
+    attr->eps = 1e-5;
+    if (prim.GetAttr("epsilon") != nullptr) {
+      attr->eps = GetValue<float>(prim.GetAttr("epsilon"));
     }
     this->primitive_->value.value = attr;
-    if (this->primitive_->value.value == nullptr) {
-      MS_LOG(ERROR) << "primitive value is nullptr";
-      return RET_ERROR;
-    }
   }
   return RET_OK;
 }
@@ -71,20 +74,27 @@ int BNGrad::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers:
   return RET_OK;
 }
 
+PrimitiveC *BNGradCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<BNGrad>(primitive); }
+Registry BNGradRegistry(schema::PrimitiveType_BNGrad, BNGradCreator);
+
 float BNGrad::GetEps() const { return this->primitive_->value_as_BNGrad()->eps(); }
 float BNGrad::GetMomentum() const { return this->primitive_->value_as_BNGrad()->momentum(); }
 #endif
 int BNGrad::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Tensor *> outputs) {
-  if (6 != inputs.size()) {
+  if (inputs.size() != 6) {
     MS_LOG(ERROR) << "BNGrad should have five inputs";
     return RET_ERROR;
   }
-  if (3 != outputs.size()) {
+  if (outputs.size() != 3) {
     MS_LOG(ERROR) << "BNGrad should have three outputs";
     return RET_ERROR;
   }
   auto in = inputs[1];
   auto scale = inputs[2];
+
+  if (in->shape().size() != 4) {
+    MS_LOG(ERROR) << "Grad Fused batchnorm only support nhwc input!";
+  }
 
   outputs[0]->set_shape(in->shape());
   outputs[1]->set_shape(scale->shape());
@@ -92,9 +102,9 @@ int BNGrad::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Ten
   outputs[0]->set_data_type(in->data_type());
   outputs[1]->set_data_type(scale->data_type());
   outputs[2]->set_data_type(scale->data_type());
-  outputs[0]->SetFormat(in->GetFormat());
-  outputs[1]->SetFormat(scale->GetFormat());
-  outputs[2]->SetFormat(scale->GetFormat());
+  outputs[0]->set_format(in->format());
+  outputs[1]->set_format(scale->format());
+  outputs[2]->set_format(scale->format());
   return RET_OK;
 }
 }  // namespace lite

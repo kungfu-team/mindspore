@@ -15,13 +15,12 @@
  */
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
-
-#include "src/populate_parameter.h"
+#include "src/ops/populate/populate_register.h"
 #ifdef ENABLE_ARM64
 #include <asm/hwcap.h>
 #include "common/utils.h"
 #include "src/common/log_adapter.h"
-#include "nnacl/optimized_kernel.h"
+#include "src/common/utils.h"
 #endif
 
 using mindspore::kernel::kCPU;
@@ -32,22 +31,28 @@ using mindspore::kernel::KernelKey;
 namespace mindspore::lite {
 KernelRegistry *KernelRegistry::GetInstance() {
   static KernelRegistry instance;
+
+  std::unique_lock<std::mutex> malloc_creator_array(instance.lock_);
+  if (instance.creator_arrays_ == nullptr) {
+    instance.creator_arrays_ = reinterpret_cast<KernelCreator *>(malloc(array_size_ * sizeof(KernelRegistry)));
+    if (instance.creator_arrays_ == nullptr) {
+      return nullptr;
+    }
+  }
   return &instance;
 }
 
 int KernelRegistry::Init() {
 #ifdef ENABLE_ARM64
-  void *optimized_lib_handler = OptimizeModule::GetInstance()->optimized_op_handler_;
-  if (optimized_lib_handler != nullptr) {
-    MS_LOG(INFO) << "load optimize lib success.";
+  if (mindspore::lite::IsSupportSDot()) {
+    MS_LOG(INFO) << "The current device supports Sdot.";
   } else {
-    MS_LOG(INFO) << "load optimize lib failed.";
+    MS_LOG(INFO) << "The current device NOT supports Sdot.";
   }
-  void *float16_op_handler = Float16Module::GetInstance()->float16_op_handler_;
-  if (float16_op_handler != nullptr) {
-    MS_LOG(INFO) << "load float16 lib success.";
+  if (mindspore::lite::IsSupportFloat16()) {
+    MS_LOG(INFO) << "The current device supports float16.";
   } else {
-    MS_LOG(INFO) << "load float16 lib failed.";
+    MS_LOG(INFO) << "The current device NOT supports float16.";
   }
 #endif
   return RET_OK;
@@ -76,7 +81,7 @@ int KernelRegistry::GetCreatorFuncIndex(const kernel::KernelKey desc) {
   return index;
 }
 
-void KernelRegistry::RegKernel(const KernelKey desc, kernel::KernelCreator creator) {
+void KernelRegistry::RegKernel(const KernelKey desc, const kernel::KernelCreator creator) {
   int index = GetCreatorFuncIndex(desc);
   if (index >= array_size_) {
     MS_LOG(ERROR) << "invalid kernel key, arch " << desc.arch << ", data_type" << desc.data_type << ",op type "
@@ -98,16 +103,20 @@ void KernelRegistry::RegKernel(const KERNEL_ARCH arch, const TypeId data_type, c
   creator_arrays_[index] = creator;
 }
 
-bool KernelRegistry::Merge(const std::unordered_map<KernelKey, KernelCreator> &newCreators) { return false; }
-
-const kernel::KernelCreator *KernelRegistry::GetCreatorArrays() { return creator_arrays_; }
+bool KernelRegistry::Merge(const std::unordered_map<KernelKey, KernelCreator> &new_creators) { return false; }
 
 kernel::LiteKernel *KernelRegistry::GetKernel(const std::vector<Tensor *> &in_tensors,
                                               const std::vector<Tensor *> &out_tensors, const PrimitiveC *primitive,
                                               const InnerContext *ctx, const kernel::KernelKey &key) {
   MS_ASSERT(nullptr != primitive);
   MS_ASSERT(nullptr != ctx);
-  auto parameter = kernel::PopulateParameter(primitive);
+  auto func_pointer = PopulateRegistry::GetInstance()->GetParameterCreator(schema::PrimitiveType(primitive->Type()));
+  if (func_pointer == nullptr) {
+    MS_LOG(ERROR) << "ParameterCreator function pointer is nullptr, type: "
+                  << schema::EnumNamePrimitiveType((schema::PrimitiveType)primitive->Type());
+    return nullptr;
+  }
+  auto parameter = func_pointer(primitive);
   if (parameter == nullptr) {
     MS_LOG(ERROR) << "PopulateParameter return nullptr, type: "
                   << schema::EnumNamePrimitiveType((schema::PrimitiveType)primitive->Type());
@@ -117,12 +126,21 @@ kernel::LiteKernel *KernelRegistry::GetKernel(const std::vector<Tensor *> &in_te
   if (creator != nullptr) {
     auto kernel = creator(in_tensors, out_tensors, parameter, ctx, key, primitive);
     if (kernel != nullptr) {
-      return kernel;
+      kernel->set_desc(key);
     }
+    return kernel;
+  } else {
+    free(parameter);
   }
-  free(parameter);
   return nullptr;
 }
 
-KernelRegistry::~KernelRegistry() {}
+KernelRegistry::~KernelRegistry() {
+  KernelRegistry *instance = GetInstance();
+  std::unique_lock<std::mutex> malloc_creator_array(instance->lock_);
+  if (instance->creator_arrays_ != nullptr) {
+    free(instance->creator_arrays_);
+    instance->creator_arrays_ = nullptr;
+  }
+}
 }  // namespace mindspore::lite

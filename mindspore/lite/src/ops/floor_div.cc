@@ -16,6 +16,10 @@
 
 #include "src/ops/floor_div.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifndef PRIMITIVE_WRITEABLE
@@ -29,6 +33,11 @@ int FloorDiv::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffer
   return RET_OK;
 }
 
+PrimitiveC *FloorDivCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<FloorDiv>(primitive);
+}
+Registry FloorDivRegistry(schema::PrimitiveType_FloorDiv, FloorDivCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

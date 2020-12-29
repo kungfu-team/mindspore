@@ -21,6 +21,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <utility>
 
 #include "minddata/dataset/callback/callback_manager.h"
 #include "minddata/dataset/core/constants.h"
@@ -62,7 +63,7 @@ class DataBuffer;
 
 class NodePass;
 
-class Sampler;
+class SamplerRT;
 
 /// \brief The base class DatasetOp is the main tree node.  It is an abstract class, so
 /// the actual implementation of the operators will be derived from here.
@@ -80,7 +81,7 @@ class DatasetOp : public std::enable_shared_from_this<DatasetOp> {
   /// Constructor
   /// \param op_connector_size - The size for the output connector of this operator.
   /// \param sampler - The sampler for the op
-  explicit DatasetOp(int32_t op_connector_size, std::shared_ptr<Sampler> sampler);
+  DatasetOp(int32_t op_connector_size, std::shared_ptr<SamplerRT> sampler);
 
   /// Destructor
   virtual ~DatasetOp() { tree_ = nullptr; }
@@ -109,9 +110,6 @@ class DatasetOp : public std::enable_shared_from_this<DatasetOp> {
   ///     If there are no parents, it returns null regardless of the given index
   /// \param[in] parent_index An operator can have n parents. Indicates which parent to return.
   void Parent(DatasetOp **parent, int32_t parent_index) const;
-
-  // Getter function to get all of our children.
-  std::vector<std::shared_ptr<DatasetOp>> children() const;
 
   // Getter function to get all of our parents.
   std::vector<DatasetOp *> parents() const;
@@ -145,14 +143,14 @@ class DatasetOp : public std::enable_shared_from_this<DatasetOp> {
   /// DatasetOps operate by launching a thread (see ExecutionTree).
   /// This pure virtual version makes the requirement that derived classes must provide a functor
   /// that will execute their main runtime loop code.
-  /// \return Status - The error code return
+  /// \return Status The status code returned
   virtual Status operator()() = 0;
 
   /// \brief Gets the next buffer from the given child
   /// \notes See GetNextInput for similar function that has built-in message handling
   /// \param p_buffer - The shared pointer for the fetched buffer to return (by reference)
   /// \param worker_id - The worker id
-  /// \return Status - The error code return
+  /// \return Status The status code returned
   virtual Status GetNextBuffer(std::unique_ptr<DataBuffer> *p_buffer, int32_t worker_id) {
     return GetNextBuffer(p_buffer, worker_id, false);
   }
@@ -160,7 +158,7 @@ class DatasetOp : public std::enable_shared_from_this<DatasetOp> {
   /// \brief Gets the next buffer from the given child
   /// \notes See GetNextInput for similar function that has built-in message handling
   /// \param p_buffer - The shared pointer for the fetched buffer to return (by reference)
-  /// \return Status - The error code return
+  /// \return Status The status code returned
   virtual Status GetNextBuffer(std::unique_ptr<DataBuffer> *p_buffer) { return GetNextBuffer(p_buffer, 0, false); }
 
   /// \brief Gets the next buffer from the given child
@@ -168,7 +166,7 @@ class DatasetOp : public std::enable_shared_from_this<DatasetOp> {
   /// \param p_buffer - The shared pointer for the fetched buffer to return (by reference)
   /// \param worker_id - The worker id
   /// \param retry_if_eoe Set this flag to true to allow calling pop() again after the first pop() returns EOE.
-  /// \return Status - The error code return
+  /// \return Status The status code returned
   virtual Status GetNextBuffer(std::unique_ptr<DataBuffer> *p_buffer, int32_t worker_id, bool retry_if_eoe);
 
   /// \brief Gets the next buffer from the given child .  This function also has built-in eoe and eof
@@ -176,26 +174,42 @@ class DatasetOp : public std::enable_shared_from_this<DatasetOp> {
   /// those messages are received.
   /// \param p_buffer - The shared pointer for the fetched buffer to return (by reference)
   /// \param worker_id - The worker id
-  /// \return Status - The error code return
+  /// \return Status The status code returned
   Status GetNextInput(std::unique_ptr<DataBuffer> *p_buffer, int32_t worker_id = 0, int32_t child_index = 0);
+
+  /// \brief Gets the batch size
+  /// \return Status - The status code return
+  virtual int64_t GetTreeBatchSize();
+
+  /// \brief Gets the repeat count
+  /// \return Status - The status code return
+  virtual int64_t GetTreeRepeatCount();
+
+  /// \brief Gets the number of classes
+  /// \return Status - The status code return
+  virtual Status GetNumClasses(int64_t *num_classes);
+
+  /// \brief Gets the class indexing
+  /// \return Status - The status code return
+  virtual Status GetClassIndexing(std::vector<std::pair<std::string, std::vector<int32_t>>> *output_class_indexing);
 
   /// \brief Performs handling for when an eoe message is received.
   /// The base class implementation simply flows the eoe message to output. Derived classes
   /// may override if they need to perform special eoe handling.
   /// \param worker_id - The worker id
-  /// \return Status - The error code return
+  /// \return Status The status code returned
   virtual Status EoeReceived(int32_t worker_id);
 
   /// \brief Performs handling for when an eof message is received.
   /// The base class implementation simply flows the eof message to output. Derived classes
   /// may override if they need to perform special eof handling.
   /// \param worker_id - The worker id
-  /// \return Status - The error code return
+  /// \return Status The status code returned
   virtual Status EofReceived(int32_t worker_id);
 
   /// \brief Derived classes may implement the reset function if the operator is stateful and needs
   /// specific reset handling that is not contained in this common code version of the reset
-  /// \return Status - The error code return
+  /// \return Status The status code returned
   virtual Status Reset();
 
   /// \brief During tree prepare phase, operators may have specific pre-operations to perform depending on
@@ -250,7 +264,7 @@ class DatasetOp : public std::enable_shared_from_this<DatasetOp> {
 
   /// \brief Getter function
   /// \return The number of repeats per epoch for the operator
-  int32_t op_num_repeats_per_epoch() { return op_num_repeats_per_epoch_; }
+  int32_t op_num_repeats_per_epoch() const { return op_num_repeats_per_epoch_; }
 
   /// \brief Register the internal worker connectors. No op unless it is a parallel op
   /// \return Status
@@ -325,21 +339,27 @@ class DatasetOp : public std::enable_shared_from_this<DatasetOp> {
   /// \return Name of the current Op
   virtual std::string Name() const = 0;
 
+  /// Op name and ID getter
+  /// \return Name and ID of the current Op
+  std::string NameWithID() const { return Name() + "(ID:" + std::to_string(id()) + ")"; }
+
   /// Execution Tree getter
   /// \return Pointer to the ExecutionTree the current op belongs to, no ownership
   ExecutionTree *Tree() { return tree_; }
 
   /// Getter for the sampler
   /// \return Shared pointer to the sampler (may return nullptr)
-  std::shared_ptr<Sampler> sampler() { return sampler_; }
+  std::shared_ptr<SamplerRT> sampler() { return sampler_; }
 
   /// \brief Getter for the sampler, and it also removes the sampler from the op
   /// \param[out] sampler A pointer to the output sampler that was removed
   /// \return Status error code
-  Status FetchRemoveSampler(std::shared_ptr<Sampler> *sampler);
+  Status FetchRemoveSampler(std::shared_ptr<SamplerRT> *sampler);
 
+#ifndef ENABLE_ANDROID
   // Computes a CRC value for the operator
   static uint32_t GenerateCRC(const std::shared_ptr<DatasetOp> &op);
+#endif
 
   /// \brief A helper templated function for casting "this" pointer to shared_ptr<derived>
   ///     Similar to shared_from_this, except this one will give you the derived class as shared_ptr
@@ -350,7 +370,7 @@ class DatasetOp : public std::enable_shared_from_this<DatasetOp> {
   }
 
   /// \brief Setter for the sampler.  Allows you to overwrite a previous sampler with a new one.
-  void SetSampler(std::shared_ptr<Sampler> sampler) { sampler_ = sampler; }
+  void SetSampler(std::shared_ptr<SamplerRT> sampler) { sampler_ = sampler; }
 
   /// \brief Checks if this is a leaf node (0 children)
   /// \return boolean returns true if it's a leaf
@@ -366,6 +386,12 @@ class DatasetOp : public std::enable_shared_from_this<DatasetOp> {
   /// They would automatically wait on the QueueList when they are done.
   /// \return Status
   virtual Status WaitForWorkers() { return Status::OK(); }
+
+  /// \brief Add callback to DatasetOp, only MapOp supports Callback at the moment
+  void AddCallbacks(std::vector<std::shared_ptr<DSCallback>> callbacks) { callback_manager_.AddCallbacks(callbacks); }
+
+  /// \brief Remove all callbacks from DatasetOp
+  void ClearCallbacks() { callback_manager_.ClearCallbacks(); }
 
  protected:
   /// \brief Removes a parent operator from this operator
@@ -391,7 +417,7 @@ class DatasetOp : public std::enable_shared_from_this<DatasetOp> {
 
   std::vector<std::shared_ptr<DatasetOp>> child_;                // Child nodes
   std::vector<DatasetOp *> parent_;                              // Parent nodes. No ownership
-  std::shared_ptr<Sampler> sampler_;                             // Some leaf ops might have a sampler
+  std::shared_ptr<SamplerRT> sampler_;                           // Some leaf ops might have a sampler
   int32_t oc_queue_size_;                                        // Capacity for each out_connector_
   int32_t operator_id_;                                          // Generated id for the node
   ExecutionTree *tree_;                                          // Back pointer to our tree.
@@ -404,6 +430,8 @@ class DatasetOp : public std::enable_shared_from_this<DatasetOp> {
   std::unordered_map<std::string, int32_t> column_name_id_map_;  // Mapping between col index and col name
   std::mutex column_name_map_mutex_;                             // For protecting shared access to the column map
   CallbackManager callback_manager_;                             // Manages callbacks associated with a DatasetOp
+  int64_t dataset_size_;                                         // Size of the dataset
+  int64_t num_classes_;                                          // Number of classes
 
  private:
   /// Sets the operator id.

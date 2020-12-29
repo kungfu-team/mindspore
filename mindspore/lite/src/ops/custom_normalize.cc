@@ -15,6 +15,12 @@
  */
 #include "src/ops/custom_normalize.h"
 
+#include "src/common/string_util.h"
+
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -28,10 +34,33 @@ int CustomNormalize::UnPackToFlatBuilder(const schema::Primitive *primitive, fla
   fbb->Finish(prim_offset);
   return RET_OK;
 }
-#endif
-int CustomNormalize::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
-  PrimitiveC::InferShape(inputs_, outputs_);
-  return RET_INFER_INVALID;
+
+PrimitiveC *CustomNormalizeCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<CustomNormalize>(primitive);
 }
+Registry CustomNormalizeRegistry(schema::PrimitiveType_CustomNormalize, CustomNormalizeCreator);
+#endif
+
+int CustomNormalize::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
+  auto input = inputs_.at(0);
+  auto output = outputs_.at(0);
+  MS_ASSERT(input != nullptr);
+  MS_ASSERT(output != nullptr);
+
+  output->set_data_type(input->data_type());
+  output->set_format(input->format());
+
+  if (input->data_c() == nullptr) {
+    MS_LOG(INFO) << "Do infer shape in runtime.";
+    return RET_INFER_INVALID;
+  }
+  std::vector<int> shape;
+  int string_num = lite::GetStringCount(input);
+  shape.push_back(string_num == 0 ? 1 : string_num);
+
+  output->set_shape(shape);
+  return RET_OK;
+}
+
 }  // namespace lite
 }  // namespace mindspore

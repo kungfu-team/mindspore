@@ -41,6 +41,7 @@ context.set_context(mode=context.GRAPH_MODE)
 
 grad = C.GradOperation()
 
+
 def test_multiply():
     """ test_multiply """
     input_x = Tensor(np.array([[-0.1, 0.3, 3.6], [0.4, 0.5, -3.2]]))
@@ -104,7 +105,6 @@ def test_pow():
     result = testpow(input_tensor, power)
     assert np.all(result.asnumpy() == expect)
     net = PowNet()
-    net(input_tensor, True)
     net(input_tensor, power2)
 
 

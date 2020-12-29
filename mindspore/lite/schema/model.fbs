@@ -18,6 +18,11 @@ include "ops.fbs";
 
 namespace mindspore.schema;
 
+// This corresponds to the version.
+file_identifier "MSL1";
+// File extension of any written files.
+file_extension "ms";
+
 enum NodeType: int {
     ValueNode,  // const
     Parameter,  // var
@@ -32,8 +37,9 @@ table QuantParam {
     narrowRange: bool = true;
     numBits: int = 8;
     inited: bool = false;
-    var_corr: double = 1;
-    mean_corr: double = 0;
+    varCorr: float = 1;
+    meanCorr: float = 0;
+    dstDtype: int = 32;
 }
 
 table Tensor {
@@ -47,6 +53,8 @@ table Tensor {
     offset: int;
     data: [ubyte];
     quantParams: [QuantParam];
+    quantClusters: [float];
+    name: string;
 }
 
 union PrimitiveType {
@@ -64,7 +72,7 @@ union PrimitiveType {
     Resize,
     DetectionPostProcess,
     FullConnection,
-    Mean,
+    Mean,  // DEPRECATED
     DeConv2D,
     Scale,
     Reshape,
@@ -94,11 +102,11 @@ union PrimitiveType {
     Tile,
     Cast,
     Shape,
-    Nchw2Nhwc,
-    Nhwc2Nchw,
+    Nchw2Nhwc,  // DEPRECATED
+    Nhwc2Nchw,  // DEPRECATED
     QuantDTypeCast,
     Split,
-    Permute,
+    Permute,  // DEPRECATED
     FakeQuantWithMinMaxVars,
     Equal,
     Less,
@@ -182,7 +190,7 @@ union PrimitiveType {
     Conv2DGradInput,
     PoolingGrad,
     BNGrad,
-    BNGradInput,
+    Assign,
     ApplyMomentum,
     BiasGrad,
     SoftmaxCrossEntropy,
@@ -217,6 +225,44 @@ union PrimitiveType {
     FftReal,
     FftImag,
     Sgd,
+    Adam,
+    GroupConv2DGradInput,
+    Loop,
+    NonMaxSuppression,
+    InstanceNorm,
+    Identity,
+    LayerNorm,
+    While,
+    ControlDepend,
+    UnsortedSegmentSum,
+    AssignAdd,
+    OnesLike,
+    BinaryCrossEntropyGrad,
+    BinaryCrossEntropy,
+    LpNormalization,
+    DropoutGrad,
+    MaximumGrad,
+    MinimumGrad,
+    Switch,
+    Partial,
+    TensorListFromTensor,
+    TensorListStack,
+    TensorListGetItem,
+    TensorListSetItem,
+    TensorListReserve,
+    All,
+    Assert,
+    Adder,
+    SparseSoftmaxCrossEntropy,
+    SmoothL1Loss,
+    SmoothL1LossGrad,
+    SigmoidCrossEntropyWithLogits,
+    SigmoidCrossEntropyWithLogitsGrad,
+    Reciprocal,
+    Merge,
+    Mod,
+    GeLU,
+    Gru,
 }
 
 enum QuantType: int {
@@ -239,6 +285,14 @@ table CNode {
     quantType: QuantType = QUANT_NONE;
 }
 
+table SubGraph {
+    name:string;
+    inputIndices: [uint];
+    outputIndices: [uint];
+    nodeIndices: [uint];
+    tensorIndices: [uint];
+}
+
 table MetaGraph {
     name: string;
     version: string;
@@ -248,6 +302,7 @@ table MetaGraph {
     mempoolSize: uint;
     nodes: [CNode];
     allTensors: [Tensor]; // weight + input + output
+    subGraph : [SubGraph];
 }
 
 root_type MetaGraph;

@@ -16,13 +16,14 @@
 """Operators for math."""
 
 import copy
+
 import numpy as np
 from ... import context
 from .. import signature as sig
 from ..._checkparam import Validator as validator
 from ..._checkparam import Rel
 from ...common import dtype as mstype
-from ...common.tensor import Tensor
+from ...common.tensor import Tensor, MetaTensor
 from .._utils import get_broadcast_shape
 from ..primitive import PrimitiveWithInfer, PrimitiveWithCheck, prim_attr_register, _run_op
 
@@ -31,7 +32,7 @@ def _infer_shape_reduce(x, axis, keep_dims, prim_name):
     """Common infer for reduce operator"""
 
     def reduce_one_axis(one_axis):
-        validator.check_int_range('axis', one_axis, -dim, dim, Rel.INC_LEFT, prim_name)
+        validator.check_int_range(one_axis, -dim, dim, Rel.INC_LEFT, 'axis', prim_name)
         if one_axis < 0:
             one_axis += dim
         axis_reduce.add(one_axis)
@@ -85,7 +86,7 @@ class _MathBinaryOp(_BinaryOp):
     @staticmethod
     def do_infer_dtype(x_dtype, y_dtype, valid_dtype=mstype.number_type, prim_name=None):
         args_type = {"x": x_dtype, "y": y_dtype}
-        validator.check_tensor_type_same(args_type, valid_dtype, prim_name)
+        validator.check_tensors_dtypes_same_and_valid(args_type, valid_dtype, prim_name)
         return x_dtype
 
     def infer_dtype(self, x_dtype, y_dtype):
@@ -105,8 +106,8 @@ class _BitwiseBinaryOp(_MathBinaryOp):
     @staticmethod
     def _check_bitwise_op_input_type(x1_type, x2_type, prim):
         args = {'x1': x1_type, 'x2': x2_type}
-        valid_types = mstype.int_type + mstype.uint_type
-        validator.check_tensor_type_same(args, valid_types, prim)
+        valid_dtypes = mstype.int_type + mstype.uint_type
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, prim)
         return x1_type
 
     def infer_dtype(self, x1_type, x2_type):
@@ -134,12 +135,16 @@ class TensorAdd(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
-        >>> add = P.TensorAdd()
-        >>> input_x = Tensor(np.array([1,2,3]).astype(np.float32))
-        >>> input_y = Tensor(np.array([4,5,6]).astype(np.float32))
-        >>> add(input_x, input_y)
-        [5,7,9]
+        >>> add = ops.TensorAdd()
+        >>> input_x = Tensor(np.array([1, 2, 3]).astype(np.float32))
+        >>> input_y = Tensor(np.array([4, 5, 6]).astype(np.float32))
+        >>> output = add(input_x, input_y)
+        >>> print(output)
+        [5. 7. 9.]
     """
 
     def infer_value(self, x, y):
@@ -168,20 +173,25 @@ class AssignAdd(PrimitiveWithInfer):
         - **value** (Union[numbers.Number, Tensor]) - The value to be added to the `variable`.
           It must have the same shape as `variable` if it is a Tensor.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
-        >>> class Net(Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.AssignAdd = P.AssignAdd()
-        >>>         self.variable = mindspore.Parameter(initializer(1, [1], mindspore.int64), name="global_step")
-        >>>
-        >>>     def construct(self, x):
-        >>>         self.AssignAdd(self.variable, x)
-        >>>         return self.variable
-        >>>
+        >>> class Net(nn.Cell):
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.AssignAdd = ops.AssignAdd()
+        ...         self.variable = mindspore.Parameter(initializer(1, [1], mindspore.int64), name="global_step")
+        ...
+        ...     def construct(self, x):
+        ...         self.AssignAdd(self.variable, x)
+        ...         return self.variable
+        ...
         >>> net = Net()
         >>> value = Tensor(np.ones([1]).astype(np.int64)*100)
-        >>> net(value)
+        >>> output = net(value)
+        >>> print(output)
+        Parameter (name=global_step)
     """
     __mindspore_signature__ = (
         sig.make_sig('x', sig.sig_rw.RW_WRITE, dtype=sig.sig_dtype.T),
@@ -198,7 +208,7 @@ class AssignAdd(PrimitiveWithInfer):
 
     def infer_dtype(self, variable, value):
         args = {"variable": variable, "value": value}
-        validator.check_scalar_or_tensor_type_same(args, mstype.number_type, self.name)
+        validator.check_scalar_or_tensor_types_same(args, mstype.number_type, self.name)
         return value
 
 
@@ -218,20 +228,25 @@ class AssignSub(PrimitiveWithInfer):
         - **value** (Union[numbers.Number, Tensor]) - The value to be subtracted from the `variable`.
           It must have the same shape as `variable` if it is a Tensor.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> class Net(Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.AssignSub = P.AssignSub()
-        >>>         self.variable = mindspore.Parameter(initializer(1, [1], mindspore.int32), name="global_step")
-        >>>
-        >>>     def construct(self, x):
-        >>>         self.AssignSub(self.variable, x)
-        >>>         return self.variable
-        >>>
+        >>> class Net(nn.Cell):
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.AssignSub = ops.AssignSub()
+        ...         self.variable = mindspore.Parameter(initializer(1, [1], mindspore.int32), name="global_step")
+        ...
+        ...     def construct(self, x):
+        ...         self.AssignSub(self.variable, x)
+        ...         return self.variable
+        ...
         >>> net = Net()
         >>> value = Tensor(np.ones([1]).astype(np.int32)*100)
-        >>> net(value)
+        >>> output = net(value)
+        >>> print(output)
+        Parameter (name=global_step)
     """
 
     __mindspore_signature__ = (
@@ -248,7 +263,7 @@ class AssignSub(PrimitiveWithInfer):
 
     def infer_dtype(self, variable, value):
         args = {"variable": variable, "value": value}
-        validator.check_scalar_or_tensor_type_same(args, mstype.number_type, self.name)
+        validator.check_scalar_or_tensor_types_same(args, mstype.number_type, self.name)
         return value
 
 
@@ -283,7 +298,7 @@ class _Reduce(PrimitiveWithInfer):
         axis_v = axis['value']
         input_shp = input_x['shape']
         args = {'input_x': input_x['dtype']}
-        validator.check_tensor_type_same(args, valid_dtype, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtype, self.name)
 
         if axis_v is None:
             raise ValueError(f"For {self.name}, axis must be const.")
@@ -305,7 +320,16 @@ class _Reduce(PrimitiveWithInfer):
                 value = np_reduce_func(value, axis_v, keepdims=self.keep_dims)
                 value = np.array(value)
                 value = Tensor(value)
+        if 'max_shape' and 'min_shape' in input_x:
+            output_max_shape = _infer_shape_reduce(input_x['max_shape'], axis_v, self.keep_dims, self.name)
+            output_min_shape = _infer_shape_reduce(input_x['min_shape'], axis_v, self.keep_dims, self.name)
+        else:
+            output_max_shape = input_shp
+            output_min_shape = input_shp
+
         return {'shape': input_shp,
+                'min_shape': output_min_shape,
+                'max_shape': output_max_shape,
                 'dtype': input_x['dtype'],
                 'value': value}
 
@@ -315,7 +339,7 @@ class _Reduce(PrimitiveWithInfer):
 
 class ReduceMean(_Reduce):
     """
-     Reduce a dimension of a tensor by averaging all elements in the dimension.
+     Reduces a dimension of a tensor by averaging all elements in the dimension.
 
      The dtype of the tensor to be reduced is number.
 
@@ -326,7 +350,7 @@ class ReduceMean(_Reduce):
     Inputs:
         - **input_x** (Tensor[Number]) - The input tensor.
         - **axis** (Union[int, tuple(int), list(int)]) - The dimensions to reduce. Default: (), reduce all dimensions.
-          Only constant value is allowed.
+          Only constant value is allowed. Must be in the range [-rank(input_x), rank(input_x)).
 
     Outputs:
         Tensor, has the same dtype as the `input_x`.
@@ -338,16 +362,22 @@ class ReduceMean(_Reduce):
         - If axis is tuple(int), set as (2, 3), and keep_dims is False,
           the shape of output is :math:`(x_1, x_4, ..., x_R)`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.random.randn(3, 4, 5, 6).astype(np.float32))
-        >>> op = P.ReduceMean(keep_dims=True)
+        >>> op = ops.ReduceMean(keep_dims=True)
         >>> output = op(input_x, 1)
+        >>> result = output.shape
+        >>> print(result)
+        (3, 1, 5, 6)
     """
 
 
 class ReduceSum(_Reduce):
     """
-    Reduce a dimension of a tensor by summing all elements in the dimension.
+    Reduces a dimension of a tensor by summing all elements in the dimension.
 
     The dtype of the tensor to be reduced is number.
 
@@ -358,7 +388,7 @@ class ReduceSum(_Reduce):
     Inputs:
          - **input_x** (Tensor[Number]) - The input tensor.
          - **axis** (Union[int, tuple(int), list(int)]) - The dimensions to reduce. Default: (), reduce all dimensions.
-           Only constant value is allowed.
+           Only constant value is allowed. Must be in the range [-rank(input_x), rank(input_x)).
 
     Outputs:
         Tensor, has the same dtype as the `input_x`.
@@ -370,10 +400,15 @@ class ReduceSum(_Reduce):
         - If axis is tuple(int), set as (2, 3), and keep_dims is False,
           the shape of output is :math:`(x_1, x_4, ..., x_R)`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.random.randn(3, 4, 5, 6).astype(np.float32))
-        >>> op = P.ReduceSum(keep_dims=True)
+        >>> op = ops.ReduceSum(keep_dims=True)
         >>> output = op(input_x, 1)
+        >>> output.shape
+        (3, 1, 5, 6)
     """
 
     @prim_attr_register
@@ -385,7 +420,7 @@ class ReduceSum(_Reduce):
 
 class ReduceAll(_Reduce):
     """
-    Reduce a dimension of a tensor by the "logical and" of all elements in the dimension.
+    Reduces a dimension of a tensor by the "logicalAND" of all elements in the dimension.
 
     The dtype of the tensor to be reduced is bool.
 
@@ -397,7 +432,7 @@ class ReduceAll(_Reduce):
     Inputs:
         - **input_x** (Tensor[bool]) - The input tensor.
         - **axis** (Union[int, tuple(int), list(int)]) - The dimensions to reduce. Default: (), reduce all dimensions.
-          Only constant value is allowed.
+          Only constant value is allowed. Must be in the range [-rank(input_x), rank(input_x)).
 
     Outputs:
         Tensor, the dtype is bool.
@@ -409,10 +444,16 @@ class ReduceAll(_Reduce):
         - If axis is tuple(int), set as (2, 3), and keep_dims is False,
           the shape of output is :math:`(x_1, x_4, ..., x_R)`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([[True, False], [True, True]]))
-        >>> op = P.ReduceAll(keep_dims=True)
+        >>> op = ops.ReduceAll(keep_dims=True)
         >>> output = op(input_x, 1)
+        >>> print(output)
+        [[False]
+         [ True]]
     """
 
     def __infer__(self, input_x, axis):
@@ -421,7 +462,7 @@ class ReduceAll(_Reduce):
 
 class ReduceAny(_Reduce):
     """
-    Reduce a dimension of a tensor by the "logical OR" of all elements in the dimension.
+    Reduces a dimension of a tensor by the "logical OR" of all elements in the dimension.
 
     The dtype of the tensor to be reduced is bool.
 
@@ -433,7 +474,7 @@ class ReduceAny(_Reduce):
     Inputs:
         - **input_x** (Tensor[bool]) - The input tensor.
         - **axis** (Union[int, tuple(int), list(int)]) - The dimensions to reduce. Default: (), reduce all dimensions.
-          Only constant value is allowed.
+          Only constant value is allowed. Must be in the range [-rank(input_x), rank(input_x)).
 
     Outputs:
         Tensor, the dtype is bool.
@@ -445,12 +486,16 @@ class ReduceAny(_Reduce):
         - If axis is tuple(int), set as (2, 3), and keep_dims is False,
           the shape of output is :math:`(x_1, x_4, ..., x_R)`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([[True, False], [True, True]]))
-        >>> op = P.ReduceAny(keep_dims=True)
+        >>> op = ops.ReduceAny(keep_dims=True)
         >>> output = op(input_x, 1)
-        [[True],
-         [True]]
+        >>> print(output)
+        [[ True]
+         [ True]]
     """
 
     def __infer__(self, input_x, axis):
@@ -459,7 +504,7 @@ class ReduceAny(_Reduce):
 
 class ReduceMax(_Reduce):
     """
-    Reduce a dimension of a tensor by the maximum value in this dimension.
+    Reduces a dimension of a tensor by the maximum value in this dimension.
 
     The dtype of the tensor to be reduced is number.
 
@@ -471,7 +516,7 @@ class ReduceMax(_Reduce):
     Inputs:
          - **input_x** (Tensor[Number]) - The input tensor.
          - **axis** (Union[int, tuple(int), list(int)]) - The dimensions to reduce. Default: (), reduce all dimensions.
-           Only constant value is allowed.
+           Only constant value is allowed. Must be in the range [-rank(input_x), rank(input_x)).
 
     Outputs:
         Tensor, has the same dtype as the `input_x`.
@@ -483,10 +528,16 @@ class ReduceMax(_Reduce):
         - If axis is tuple(int), set as (2, 3), and keep_dims is False,
           the shape of output is :math:`(x_1, x_4, ..., x_R)`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.random.randn(3, 4, 5, 6).astype(np.float32))
-        >>> op = P.ReduceMax(keep_dims=True)
+        >>> op = ops.ReduceMax(keep_dims=True)
         >>> output = op(input_x, 1)
+        >>> result = output.shape
+        >>> print(result)
+        (3, 1, 5, 6)
     """
 
     @prim_attr_register
@@ -495,10 +546,13 @@ class ReduceMax(_Reduce):
         super(ReduceMax, self).__init__(keep_dims)
         self.__setattr_flag__ = True
 
+    def __infer__(self, input_x, axis):
+        return self.do_infer(input_x, axis, mstype.number_type + (mstype.bool_,))
+
 
 class ReduceMin(_Reduce):
     """
-    Reduce a dimension of a tensor by the minimum value in the dimension.
+    Reduces a dimension of a tensor by the minimum value in the dimension.
 
     The dtype of the tensor to be reduced is number.
 
@@ -510,7 +564,7 @@ class ReduceMin(_Reduce):
     Inputs:
         - **input_x** (Tensor[Number]) - The input tensor.
         - **axis** (Union[int, tuple(int), list(int)]) - The dimensions to reduce. Default: (), reduce all dimensions.
-          Only constant value is allowed.
+          Only constant value is allowed. Must be in the range [-rank(input_x), rank(input_x)).
 
     Outputs:
         Tensor, has the same dtype as the `input_x`.
@@ -522,16 +576,22 @@ class ReduceMin(_Reduce):
         - If axis is tuple(int), set as (2, 3), and keep_dims is False,
           the shape of output is :math:`(x_1, x_4, ..., x_R)`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.random.randn(3, 4, 5, 6).astype(np.float32))
-        >>> op = P.ReduceMin(keep_dims=True)
+        >>> op = ops.ReduceMin(keep_dims=True)
         >>> output = op(input_x, 1)
+        >>> result = output.shape
+        >>> print(result)
+        (3, 1, 5, 6)
     """
 
 
 class ReduceProd(_Reduce):
     """
-    Reduce a dimension of a tensor by multiplying all elements in the dimension.
+    Reduces a dimension of a tensor by multiplying all elements in the dimension.
 
     The dtype of the tensor to be reduced is number.
 
@@ -543,7 +603,7 @@ class ReduceProd(_Reduce):
     Inputs:
         - **input_x** (Tensor[Number]) - The input tensor.
         - **axis** (Union[int, tuple(int), list(int)]) - The dimensions to reduce. Default: (), reduce all dimensions.
-          Only constant value is allowed.
+          Only constant value is allowed. Must be in the range [-rank(input_x), rank(input_x)).
 
     Outputs:
         Tensor, has the same dtype as the `input_x`.
@@ -555,16 +615,22 @@ class ReduceProd(_Reduce):
         - If axis is tuple(int), set as (2, 3), and keep_dims is False,
           the shape of output is :math:`(x_1, x_4, ..., x_R)`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.random.randn(3, 4, 5, 6).astype(np.float32))
-        >>> op = P.ReduceProd(keep_dims=True)
+        >>> op = ops.ReduceProd(keep_dims=True)
         >>> output = op(input_x, 1)
+        >>> result = output.shape
+        >>> print(result)
+        (3, 1, 5, 6)
     """
 
 
 class CumProd(PrimitiveWithInfer):
     """
-    Compute the cumulative product of the tensor x along axis.
+    Computes the cumulative product of the tensor x along axis.
 
     Args:
         exclusive (bool): If true, perform exclusive cumulative product. Default: False.
@@ -578,16 +644,28 @@ class CumProd(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape and dtype as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
+        >>> a, b, c, = 1, 2, 3
         >>> input_x = Tensor(np.array([a, b, c]).astype(np.float32))
-        >>> op0 = P.CumProd()
-        >>> output = op0(input_x, 0) # output=[a, a * b, a * b * c]
-        >>> op1 = P.CumProd(exclusive=True)
-        >>> output = op1(input_x, 0) # output=[1, a, a * b]
-        >>> op2 = P.CumProd(reverse=True)
-        >>> output = op2(input_x, 0) # output=[a * b * c, b * c, c]
-        >>> op3 = P.CumProd(exclusive=True, reverse=True)
-        >>> output = op3(input_x, 0) # output=[b * c, c, 1]
+        >>> op0 = ops.CumProd()
+        >>> output0 = op0(input_x, 0) # output=[a, a * b, a * b * c]
+        >>> op1 = ops.CumProd(exclusive=True)
+        >>> output1 = op1(input_x, 0) # output=[1, a, a * b]
+        >>> op2 = ops.CumProd(reverse=True)
+        >>> output2 = op2(input_x, 0) # output=[a * b * c, b * c, c]
+        >>> op3 = ops.CumProd(exclusive=True, reverse=True)
+        >>> output3 = op3(input_x, 0) # output=[b * c, c, 1]
+        >>> print(output0)
+        [1. 2. 6.]
+        >>> print(output1)
+        [1. 1. 2.]
+        >>> print(output2)
+        [6. 6. 3.]
+        >>> print(output3)
+        [6. 3. 1.]
     """
 
     @prim_attr_register
@@ -602,7 +680,7 @@ class CumProd(PrimitiveWithInfer):
 
     def infer_dtype(self, x_type, axis_type):
         cls_name = self.name
-        validator.check_tensor_type_same({'x': x_type}, mstype.number_type, cls_name)
+        validator.check_tensor_dtype_valid('x', x_type, mstype.number_type, cls_name)
         validator.check_subclass("axis", axis_type, mstype.int_, cls_name)
         return x_type
 
@@ -623,18 +701,23 @@ class MatMul(PrimitiveWithInfer):
 
     Inputs:
         - **input_x** (Tensor) - The first tensor to be multiplied. The shape of the tensor is :math:`(N, C)`. If
-          `transpose_a` is True, its shape must be :math:`(N, C)` after transposing.
+          `transpose_a` is True, its shape must be :math:`(N, C)` after transpose.
         - **input_y** (Tensor) - The second tensor to be multiplied. The shape of the tensor is :math:`(C, M)`. If
           `transpose_b` is True, its shape must be :math:`(C, M)` after transpose.
 
     Outputs:
         Tensor, the shape of the output tensor is :math:`(N, M)`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x1 = Tensor(np.ones(shape=[1, 3]), mindspore.float32)
         >>> input_x2 = Tensor(np.ones(shape=[3, 4]), mindspore.float32)
-        >>> matmul = P.MatMul()
+        >>> matmul = ops.MatMul()
         >>> output = matmul(input_x1, input_x2)
+        >>> print(output)
+        [[3. 3. 3. 3.]]
     """
 
     @prim_attr_register
@@ -662,9 +745,7 @@ class MatMul(PrimitiveWithInfer):
         # validate whether last two dims satisfying matrix multiply
         x1_last = x1[-2:]
         x2_last = x2[-2:]
-        # x1_col = x1_last[1] if (not transpose_a) else x1_last[0]
         x1_col = x1_last[not self.transpose_a]
-        # x2_row = x2_last[0] if (not transpose_b) else x2_last[1]
         x2_row = x2_last[self.transpose_b]
         if x1_col != x2_row:
             raise ValueError(f'For \'{cls_name}\' evaluator shapes of inputs can not do this operator,'
@@ -679,7 +760,7 @@ class MatMul(PrimitiveWithInfer):
 
     def infer_dtype(self, x1, x2):
         args = {"x1": x1, "x2": x2}
-        validator.check_tensor_type_same(args, mstype.float_type + mstype.int_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, mstype.float_type + mstype.int_type, self.name)
         if x1.element_type() == mstype.int8:
             return mstype.tensor_type(mstype.int32)
         return x1
@@ -709,16 +790,37 @@ class BatchMatMul(MatMul):
     Outputs:
         Tensor, the shape of the output tensor is :math:`(*B, N, M)`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.ones(shape=[2, 4, 1, 3]), mindspore.float32)
         >>> input_y = Tensor(np.ones(shape=[2, 4, 3, 4]), mindspore.float32)
-        >>> batmatmul = P.BatchMatMul()
+        >>> batmatmul = ops.BatchMatMul()
         >>> output = batmatmul(input_x, input_y)
+        >>> print(output)
+        [[[[3. 3. 3. 3.]]
+          [[3. 3. 3. 3.]]
+          [[3. 3. 3. 3.]]
+          [[3. 3. 3. 3.]]],
+         [[[3. 3. 3. 3.]]
+          [[3. 3. 3. 3.]]
+          [[3. 3. 3. 3.]]
+          [[3. 3. 3. 3.]]]]
         >>>
         >>> input_x = Tensor(np.ones(shape=[2, 4, 3, 1]), mindspore.float32)
         >>> input_y = Tensor(np.ones(shape=[2, 4, 3, 4]), mindspore.float32)
-        >>> batmatmul = P.BatchMatMul(transpose_a=True)
+        >>> batmatmul = ops.BatchMatMul(transpose_a=True)
         >>> output = batmatmul(input_x, input_y)
+        >>> print(output)
+        [[[[3. 3. 3. 3.]]
+          [[3. 3. 3. 3.]]
+          [[3. 3. 3. 3.]]
+          [[3. 3. 3. 3.]]],
+         [[[3. 3. 3. 3.]]
+          [[3. 3. 3. 3.]]
+          [[3. 3. 3. 3.]]
+          [[3. 3. 3. 3.]]]]
     """
 
     @prim_attr_register
@@ -750,10 +852,14 @@ class CumSum(PrimitiveWithInfer):
     Outputs:
         Tensor, the shape of the output tensor is consistent with the input tensor's.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
-        >>> input = Tensor(np.array([[3, 4, 6, 10],[1, 6, 7, 9],[4, 3, 8, 7],[1, 3, 7, 9]]).astype(np.float32))
-        >>> cumsum = P.CumSum()
+        >>> input = Tensor(np.array([[3, 4, 6, 10], [1, 6, 7, 9], [4, 3, 8, 7], [1, 3, 7, 9]]).astype(np.float32))
+        >>> cumsum = ops.CumSum()
         >>> output = cumsum(input, 1)
+        >>> print(output)
         [[ 3.  7. 13. 23.]
          [ 1.  7. 14. 23.]
          [ 4.  7. 15. 22.]
@@ -774,8 +880,8 @@ class CumSum(PrimitiveWithInfer):
         if axis['value'] is None:
             raise ValueError(f"For {self.name}, axis must be const.")
         validator.check_value_type('axis', axis['value'], [int], cls_name)
-        valid_types = [mstype.uint8, mstype.int8, mstype.int32, mstype.float16, mstype.float32]
-        validator.check_tensor_type_same({'x': x['dtype']}, valid_types, cls_name)
+        valid_dtypes = [mstype.uint8, mstype.int8, mstype.int32, mstype.float16, mstype.float32]
+        validator.check_tensor_dtype_valid('x', x['dtype'], valid_dtypes, cls_name)
         return {'shape': x_shp,
                 'dtype': x['dtype'],
                 'value': None}
@@ -794,20 +900,24 @@ class AddN(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape and dtype as each entry of the `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> class NetAddN(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(NetAddN, self).__init__()
-        >>>         self.addN = P.AddN()
-        >>>
-        >>>     def construct(self, *z):
-        >>>         return self.addN(z)
-        >>>
+        ...     def __init__(self):
+        ...         super(NetAddN, self).__init__()
+        ...         self.addN = ops.AddN()
+        ...
+        ...     def construct(self, *z):
+        ...         return self.addN(z)
+        ...
         >>> net = NetAddN()
         >>> input_x = Tensor(np.array([1, 2, 3]), mindspore.float32)
         >>> input_y = Tensor(np.array([4, 5, 6]), mindspore.float32)
-        >>> net(input_x, input_y, input_x, input_y)
-        [10.0, 14.0, 18.0]
+        >>> output = net(input_x, input_y, input_x, input_y)
+        >>> print(output)
+        [10. 14. 18.]
     """
 
     @prim_attr_register
@@ -823,7 +933,7 @@ class AddN(PrimitiveWithInfer):
 
     def infer_shape(self, inputs):
         cls_name = self.name
-        validator.check_integer("inputs", len(inputs), 1, Rel.GE, cls_name)
+        validator.check_int(len(inputs), 1, Rel.GE, "inputs", cls_name)
         self.add_prim_attr('n', len(inputs))
         shp0 = inputs[0]
         for i, shp in enumerate(inputs):
@@ -833,7 +943,7 @@ class AddN(PrimitiveWithInfer):
     def infer_dtype(self, inputs):
         cls_name = self.name
         validator.check_value_type("inputs", inputs, [tuple, list], cls_name)
-        validator.check_integer("inputs", len(inputs), 1, Rel.GE, cls_name)
+        validator.check_int(len(inputs), 1, Rel.GE, "inputs", cls_name)
         args = {}
         contains_undetermined = False
         for i, dtype in enumerate(inputs):
@@ -841,7 +951,7 @@ class AddN(PrimitiveWithInfer):
             if dtype == mstype.undetermined:
                 contains_undetermined = True
         if not contains_undetermined:
-            validator.check_tensor_type_same(args, mstype.number_type + (mstype.bool_,), cls_name)
+            validator.check_tensors_dtypes_same_and_valid(args, mstype.number_type + (mstype.bool_,), cls_name)
         return inputs[0]
 
     def infer_value(self, inputs):
@@ -876,20 +986,24 @@ class AccumulateNV2(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape and dtype as each entry of the `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> class NetAccumulateNV2(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(NetAccumulateNV2, self).__init__()
-        >>>         self.accumulateNV2 = P.AccumulateNV2()
-        >>>
-        >>>     def construct(self, *z):
-        >>>         return self.accumulateNV2(z)
-        >>>
+        ...     def __init__(self):
+        ...         super(NetAccumulateNV2, self).__init__()
+        ...         self.accumulateNV2 = ops.AccumulateNV2()
+        ...
+        ...     def construct(self, *z):
+        ...         return self.accumulateNV2(z)
+        ...
         >>> net = NetAccumulateNV2()
         >>> input_x = Tensor(np.array([1, 2, 3]), mindspore.float32)
         >>> input_y = Tensor(np.array([4, 5, 6]), mindspore.float32)
-        >>> net(input_x, input_y, input_x, input_y)
-        Tensor([10., 14., 18.], shape=(3,), dtype=mindspore.float32)
+        >>> output = net(input_x, input_y, input_x, input_y)
+        >>> print(output)
+        [10. 14. 18.]
     """
 
     @prim_attr_register
@@ -906,7 +1020,7 @@ class AccumulateNV2(PrimitiveWithInfer):
 
     def infer_shape(self, inputs):
         cls_name = self.name
-        validator.check_integer("inputs", len(inputs), 1, Rel.GE, cls_name)
+        validator.check_int(len(inputs), 1, Rel.GE, "inputs", cls_name)
         self.add_prim_attr('n', len(inputs))
         shp0 = inputs[0]
         for i, shp in enumerate(inputs):
@@ -916,11 +1030,11 @@ class AccumulateNV2(PrimitiveWithInfer):
     def infer_dtype(self, inputs):
         cls_name = self.name
         validator.check_value_type("inputs", inputs, [tuple, list], cls_name)
-        validator.check_integer("inputs", len(inputs), 1, Rel.GE, cls_name)
+        validator.check_int(len(inputs), 1, Rel.GE, "inputs", cls_name)
         args = {}
         for i, dtype in enumerate(inputs):
             args[f"inputs[{i}]"] = dtype
-        validator.check_tensor_type_same(args, mstype.number_type + (mstype.bool_,), cls_name)
+        validator.check_tensors_dtypes_same_and_valid(args, mstype.number_type + (mstype.bool_,), cls_name)
         return inputs[0]
 
 
@@ -934,10 +1048,14 @@ class Neg(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape and dtype as input.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
-        >>> neg = P.Neg()
+        >>> neg = ops.Neg()
         >>> input_x = Tensor(np.array([1, 2, -1, 2, 0, -3.5]), mindspore.float32)
-        >>> result = neg(input_x)
+        >>> output = neg(input_x)
+        >>> print(output)
         [-1.  -2.   1.  -2.   0.   3.5]
     """
 
@@ -946,12 +1064,12 @@ class Neg(PrimitiveWithInfer):
         """Initialize Neg"""
         self.init_prim_io_names(inputs=['x'], outputs=['y'])
 
-    def infer_shape(self, input_x):
-        return input_x
+    def infer_shape(self, x_shape):
+        return x_shape
 
-    def infer_dtype(self, input_x):
-        validator.check_tensor_type_same({"input_x": input_x}, mstype.number_type, self.name)
-        return input_x
+    def infer_dtype(self, x_dtype):
+        validator.check_tensor_dtype_valid("x", x_dtype, mstype.number_type, self.name)
+        return x_dtype
 
     def infer_value(self, input_x):
         if input_x is not None:
@@ -978,15 +1096,19 @@ class InplaceAdd(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape and dtype as input_x.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> indices = (0, 1)
         >>> input_x = Tensor(np.array([[1, 2], [3, 4], [5, 6]]), mindspore.float32)
         >>> input_v = Tensor(np.array([[0.5, 1.0], [1.0, 1.5]]), mindspore.float32)
-        >>> inplaceAdd = P.InplaceAdd(indices)
-        >>> inplaceAdd(input_x, input_v)
-        [[1.5 3.]
-         [4. 5.5]
-         [5. 6.]]
+        >>> inplaceAdd = ops.InplaceAdd(indices)
+        >>> output = inplaceAdd(input_x, input_v)
+        >>> print(output)
+        [[1.5 3. ]
+         [4.  5.5]
+         [5.  6. ]]
     """
 
     @prim_attr_register
@@ -1003,7 +1125,7 @@ class InplaceAdd(PrimitiveWithInfer):
     def infer_dtype(self, x_dtype, v_dtype):
         args = {'x': x_dtype, 'v': v_dtype}
         valid_type = [mstype.int32, mstype.float16, mstype.float32]
-        validator.check_tensor_type_same(args, valid_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_type, self.name)
         return x_dtype
 
     def infer_shape(self, x_shape, v_shape):
@@ -1036,15 +1158,19 @@ class InplaceSub(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape and dtype as input_x.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> indices = (0, 1)
         >>> input_x = Tensor(np.array([[1, 2], [3, 4], [5, 6]]), mindspore.float32)
         >>> input_v = Tensor(np.array([[0.5, 1.0], [1.0, 1.5]]), mindspore.float32)
-        >>> inplaceSub = P.InplaceSub(indices)
-        >>> inplaceSub(input_x, input_v)
-        [[0.5 1.]
-         [2. 2.5]
-         [5. 6.]]
+        >>> inplaceSub = ops.InplaceSub(indices)
+        >>> output = inplaceSub(input_x, input_v)
+        >>> print(output)
+        [[0.5 1. ]
+         [2.  2.5]
+         [5.  6. ]]
     """
 
     @prim_attr_register
@@ -1061,7 +1187,7 @@ class InplaceSub(PrimitiveWithInfer):
     def infer_dtype(self, x_dtype, v_dtype):
         args = {'x': x_dtype, 'v': v_dtype}
         valid_type = [mstype.int32, mstype.float16, mstype.float32]
-        validator.check_tensor_type_same(args, valid_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_type, self.name)
         return x_dtype
 
     def infer_shape(self, x_shape, v_shape):
@@ -1099,12 +1225,16 @@ class Sub(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1, 2, 3]), mindspore.int32)
         >>> input_y = Tensor(np.array([4, 5, 6]), mindspore.int32)
-        >>> sub = P.Sub()
-        >>> sub(input_x, input_y)
-        [-3, -3, -3]
+        >>> sub = ops.Sub()
+        >>> output = sub(input_x, input_y)
+        >>> print(output)
+        [-3 -3 -3]
     """
 
     def infer_value(self, x, y):
@@ -1138,12 +1268,16 @@ class Mul(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1.0, 2.0, 3.0]), mindspore.float32)
         >>> input_y = Tensor(np.array([4.0, 5.0, 6.0]), mindspore.float32)
-        >>> mul = P.Mul()
-        >>> mul(input_x, input_y)
-        [4, 10, 18]
+        >>> mul = ops.Mul()
+        >>> output = mul(input_x, input_y)
+        >>> print(output)
+        [ 4. 10. 18.]
     """
 
     def infer_value(self, x, y):
@@ -1177,12 +1311,16 @@ class SquaredDifference(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([1.0, 2.0, 3.0]), mindspore.float32)
         >>> input_y = Tensor(np.array([2.0, 4.0, 6.0]), mindspore.float32)
-        >>> squared_difference = P.SquaredDifference()
-        >>> squared_difference(input_x, input_y)
-        [1.0, 4.0, 9.0]
+        >>> squared_difference = ops.SquaredDifference()
+        >>> output = squared_difference(input_x, input_y)
+        >>> print(output)
+        [1. 4. 9.]
     """
 
     def infer_dtype(self, x_dtype, y_dtype):
@@ -1190,7 +1328,7 @@ class SquaredDifference(_MathBinaryOp):
         return _MathBinaryOp.do_infer_dtype(x_dtype, y_dtype, valid_type, self.name)
 
 
-class Square(PrimitiveWithInfer):
+class Square(PrimitiveWithCheck):
     """
     Returns square of a tensor element-wise.
 
@@ -1200,11 +1338,15 @@ class Square(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape and dtype as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1.0, 2.0, 3.0]), mindspore.float32)
-        >>> square = P.Square()
-        >>> square(input_x)
-        [1.0, 4.0, 9.0]
+        >>> square = ops.Square()
+        >>> output = square(input_x)
+        >>> print(output)
+        [1. 4. 9.]
     """
 
     @prim_attr_register
@@ -1212,12 +1354,9 @@ class Square(PrimitiveWithInfer):
         """Initialize Square"""
         self.init_prim_io_names(inputs=['input_x'], outputs=['output'])
 
-    def infer_shape(self, x_shape):
-        return x_shape
-
-    def infer_dtype(self, x_type):
-        validator.check_tensor_type_same({"x": x_type}, mstype.number_type, self.name)
-        return x_type
+    def __check__(self, x):
+        x_dtype = x["dtype"]
+        validator.check_tensor_dtype_valid("x", x_dtype, mstype.number_type, self.name)
 
     def infer_value(self, x):
         if x is not None:
@@ -1238,11 +1377,16 @@ class Rsqrt(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same type and shape as `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_tensor = Tensor([[4, 4], [9, 9]], mindspore.float32)
-        >>> rsqrt = P.Rsqrt()
-        >>> rsqrt(input_tensor)
-        [[0.5, 0.5], [0.333333, 0.333333]]
+        >>> rsqrt = ops.Rsqrt()
+        >>> output = rsqrt(input_tensor)
+        >>> print(output)
+        [[0.5        0.5       ]
+         [0.33333334 0.33333334]]
     """
 
     @prim_attr_register
@@ -1253,9 +1397,9 @@ class Rsqrt(PrimitiveWithInfer):
     def infer_shape(self, x_shape):
         return x_shape
 
-    def infer_dtype(self, x_type):
-        validator.check_tensor_type_same({"x": x_type}, mstype.number_type, self.name)
-        return x_type
+    def infer_dtype(self, x_dtype):
+        validator.check_tensor_dtype_valid("x", x_dtype, mstype.number_type, self.name)
+        return x_dtype
 
     def infer_value(self, x):
         if x is not None:
@@ -1276,11 +1420,15 @@ class Sqrt(PrimitiveWithCheck):
     Outputs:
         Tensor, has the same shape as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1.0, 4.0, 9.0]), mindspore.float32)
-        >>> sqrt = P.Sqrt()
-        >>> sqrt(input_x)
-        [1.0, 2.0, 3.0]
+        >>> sqrt = ops.Sqrt()
+        >>> output = sqrt(input_x)
+        >>> print(output)
+        [1. 2. 3.]
     """
 
     @prim_attr_register
@@ -1289,7 +1437,7 @@ class Sqrt(PrimitiveWithCheck):
         self.init_prim_io_names(inputs=['x'], outputs=['output'])
 
     def check_dtype(self, x_type):
-        validator.check_tensor_type_same({"x": x_type}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid("x", x_type, mstype.number_type, self.name)
 
     def infer_value(self, x):
         if x is not None:
@@ -1310,11 +1458,15 @@ class Reciprocal(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1.0, 2.0, 4.0]), mindspore.float32)
-        >>> reciprocal = P.Reciprocal()
-        >>> reciprocal(input_x)
-        [1.0, 0.5, 0.25]
+        >>> reciprocal = ops.Reciprocal()
+        >>> output = reciprocal(input_x)
+        >>> print(output)
+        [1.   0.5  0.25]
     """
 
     @prim_attr_register
@@ -1363,18 +1515,23 @@ class Pow(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1.0, 2.0, 4.0]), mindspore.float32)
         >>> input_y = 3.0
-        >>> pow = P.Pow()
-        >>> pow(input_x, input_y)
-        [1.0, 8.0, 64.0]
+        >>> pow = ops.Pow()
+        >>> output = pow(input_x, input_y)
+        >>> print(output)
+        [ 1.  8. 64.]
         >>>
         >>> input_x = Tensor(np.array([1.0, 2.0, 4.0]), mindspore.float32)
         >>> input_y = Tensor(np.array([2.0, 4.0, 3.0]), mindspore.float32)
-        >>> pow = P.Pow()
-        >>> pow(input_x, input_y)
-        [1.0, 16.0, 64.0]
+        >>> pow = ops.Pow()
+        >>> output = pow(input_x, input_y)
+        >>> print(output)
+        [ 1. 16. 64.]
     """
 
     def infer_value(self, x, power):
@@ -1397,11 +1554,15 @@ class Exp(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape and dtype as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1.0, 2.0, 4.0]), mindspore.float32)
-        >>> exp = P.Exp()
-        >>> exp(input_x)
-        [ 2.71828183,  7.3890561 , 54.59815003]
+        >>> exp = ops.Exp()
+        >>> output = exp(input_x)
+        >>> print(output)
+        [ 2.718282  7.389056 54.598152]
     """
 
     @prim_attr_register
@@ -1435,11 +1596,15 @@ class Expm1(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([0.0, 1.0, 2.0, 4.0]), mindspore.float32)
-        >>> expm1 = P.Expm1()
-        >>> expm1(input_x)
-        [ 0.,  1.71828183,  6.3890561 , 53.59815003]
+        >>> expm1 = ops.Expm1()
+        >>> output = expm1(input_x)
+        >>> print(output)
+        [ 0.        1.718282  6.389056 53.598152]
     """
 
     @prim_attr_register
@@ -1451,8 +1616,7 @@ class Expm1(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_type):
-        validator.check_subclass("x", x_type, mstype.tensor, self.name)
-        validator.check_tensor_type_same({"x": x_type}, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid("x", x_type, [mstype.float16, mstype.float32], self.name)
         return x_type
 
 
@@ -1473,18 +1637,22 @@ class HistogramFixedWidth(PrimitiveWithInfer):
     Outputs:
         Tensor, the type is int32.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> x = Tensor([-1.0, 0.0, 1.5, 2.0, 5.0, 15], mindspore.float16)
         >>> range = Tensor([0.0, 5.0], mindspore.float16)
-        >>> hist = P.HistogramFixedWidth(5)
-        >>> hist(x, range)
+        >>> hist = ops.HistogramFixedWidth(5)
+        >>> output = hist(x, range)
+        >>> print(output)
         [2 1 1 0 2]
     """
 
     @prim_attr_register
     def __init__(self, nbins, dtype='int32'):
         self.nbins = validator.check_value_type("nbins", nbins, [int], self.name)
-        validator.check_integer("nbins", nbins, 1, Rel.GE, self.name)
+        validator.check_int(nbins, 1, Rel.GE, "nbins", self.name)
         valid_values = ['int32', 'int64']
         self.dtype = validator.check_string(dtype, valid_values, "dtype", self.name)
         self.init_prim_io_names(inputs=['x', 'range'], outputs=['y'])
@@ -1493,10 +1661,9 @@ class HistogramFixedWidth(PrimitiveWithInfer):
         return (self.nbins,)
 
     def infer_dtype(self, x_dtype, range_dtype):
-        validator.check_subclass("x", x_dtype, mstype.tensor, self.name)
-        valid_types = (mstype.float16, mstype.float32, mstype.int32)
-        validator.check_tensor_type_same({"x": x_dtype}, valid_types, self.name)
-        validator.check_tensor_type_same({"range": range_dtype}, valid_types, self.name)
+        valid_dtypes = (mstype.float16, mstype.float32, mstype.int32)
+        validator.check_tensor_dtype_valid("x", x_dtype, valid_dtypes, self.name)
+        validator.check_tensor_dtype_valid("range", range_dtype, valid_dtypes, self.name)
         y_dtype = mstype.int32
         return y_dtype
 
@@ -1511,11 +1678,15 @@ class Log(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1.0, 2.0, 4.0]), mindspore.float32)
-        >>> log = P.Log()
-        >>> log(input_x)
-        [0.0, 0.69314718, 1.38629436]
+        >>> log = ops.Log()
+        >>> output = log(input_x)
+        >>> print(output)
+        [0.        0.6931472 1.3862944]
     """
 
     @prim_attr_register
@@ -1548,24 +1719,28 @@ class Log1p(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([1.0, 2.0, 4.0]), mindspore.float32)
-        >>> log1p = P.Log1p()
-        >>> log1p(input_x)
-        [0.6931472, 1.0986123, 1.609438]
+        >>> log1p = ops.Log1p()
+        >>> output = log1p(input_x)
+        >>> print(output)
+        [0.6931472 1.0986123 1.609438 ]
     """
 
     @prim_attr_register
     def __init__(self):
         self.init_prim_io_names(inputs=['x'], outputs=['y'])
 
-    def infer_shape(self, x):
-        return x
+    def infer_shape(self, x_shape):
+        return x_shape
 
-    def infer_dtype(self, x):
-        validator.check_subclass("x", x, mstype.tensor, self.name)
-        validator.check_tensor_type_same({"x": x}, [mstype.float16, mstype.float32], self.name)
-        return x
+    def infer_dtype(self, x_dtype):
+        validator.check_subclass("x", x_dtype, mstype.tensor, self.name)
+        validator.check_tensor_dtype_valid("x", x_dtype, [mstype.float16, mstype.float32], self.name)
+        return x_dtype
 
 
 class Erf(PrimitiveWithInfer):
@@ -1578,11 +1753,15 @@ class Erf(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape and dtype as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([-1, 0, 1, 2, 3]), mindspore.float32)
-        >>> erf = P.Erf()
-        >>> erf(input_x)
-        [-0.8427168, 0., 0.8427168, 0.99530876, 0.99997765]
+        >>> erf = ops.Erf()
+        >>> output = erf(input_x)
+        >>> print(output)
+        [-0.8427168   0.          0.8427168   0.99530876  0.99997765]
     """
 
     @prim_attr_register
@@ -1593,9 +1772,9 @@ class Erf(PrimitiveWithInfer):
     def infer_shape(self, x_shape):
         return x_shape
 
-    def infer_dtype(self, x_type):
-        validator.check_tensor_type_same({"x": x_type}, [mstype.float16, mstype.float32], self.name)
-        return x_type
+    def infer_dtype(self, x_dtype):
+        validator.check_tensor_dtype_valid("x", x_dtype, [mstype.float16, mstype.float32], self.name)
+        return x_dtype
 
 
 class Erfc(PrimitiveWithInfer):
@@ -1608,11 +1787,15 @@ class Erfc(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape and dtype as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([-1, 0, 1, 2, 3]), mindspore.float32)
-        >>> erfc = P.Erfc()
-        >>> erfc(input_x)
-        [1.8427168, 0., 0.1572832, 0.00469124, 0.00002235]
+        >>> erfc = ops.Erfc()
+        >>> output = erfc(input_x)
+        >>> print(output)
+        [1.8427168e+00 1.0000000e+00 1.5728319e-01 4.6912432e-03 2.2351742e-05]
     """
 
     @prim_attr_register
@@ -1624,7 +1807,7 @@ class Erfc(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_type):
-        validator.check_tensor_type_same({"x": x_type}, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid("x", x_type, [mstype.float16, mstype.float32], self.name)
         return x_type
 
 
@@ -1649,12 +1832,16 @@ class Minimum(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1.0, 5.0, 3.0]), mindspore.float32)
         >>> input_y = Tensor(np.array([4.0, 2.0, 6.0]), mindspore.float32)
-        >>> minimum = P.Minimum()
-        >>> minimum(input_x, input_y)
-        [1.0, 2.0, 3.0]
+        >>> minimum = ops.Minimum()
+        >>> output = minimum(input_x, input_y)
+        >>> print(output)
+        [1. 2. 3.]
     """
 
     def infer_value(self, x, y):
@@ -1688,12 +1875,16 @@ class Maximum(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1.0, 5.0, 3.0]), mindspore.float32)
         >>> input_y = Tensor(np.array([4.0, 2.0, 6.0]), mindspore.float32)
-        >>> maximum = P.Maximum()
-        >>> maximum(input_x, input_y)
-        [4.0, 5.0, 6.0]
+        >>> maximum = ops.Maximum()
+        >>> output = maximum(input_x, input_y)
+        >>> print(output)
+        [4. 5. 6.]
     """
 
     def infer_value(self, x, y):
@@ -1708,7 +1899,7 @@ class Maximum(_MathBinaryOp):
 
 class RealDiv(_MathBinaryOp):
     """
-    Divide the first input tensor by the second input tensor in floating-point type element-wise.
+    Divides the first input tensor by the second input tensor in floating-point type element-wise.
 
     Inputs of `input_x` and `input_y` comply with the implicit type conversion rules to make the data types consistent.
     The inputs must be two tensors or one tensor and one scalar.
@@ -1727,12 +1918,16 @@ class RealDiv(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1.0, 2.0, 3.0]), mindspore.float32)
         >>> input_y = Tensor(np.array([4.0, 5.0, 6.0]), mindspore.float32)
-        >>> realdiv = P.RealDiv()
-        >>> realdiv(input_x, input_y)
-        [0.25, 0.4, 0.5]
+        >>> realdiv = ops.RealDiv()
+        >>> output = realdiv(input_x, input_y)
+        >>> print(output)
+        [0.25 0.4  0.5 ]
     """
 
     def infer_value(self, x, y):
@@ -1767,12 +1962,16 @@ class Div(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([-4.0, 5.0, 6.0]), mindspore.float32)
         >>> input_y = Tensor(np.array([3.0, 2.0, 3.0]), mindspore.float32)
-        >>> div = P.Div()
-        >>> div(input_x, input_y)
-        [-1.3, 2.5, 2.0]
+        >>> div = ops.Div()
+        >>> output = div(input_x, input_y)
+        >>> print(output)
+        [-1.3333334  2.5        2.        ]
     """
 
     def infer_value(self, x, y):
@@ -1786,7 +1985,7 @@ class Div(_MathBinaryOp):
 
 class DivNoNan(_MathBinaryOp):
     """
-    Computes a safe divide which returns 0 if the y is zero.
+    Computes a safe divide and returns 0 if the y is zero.
 
     Inputs of `input_x` and `input_y` comply with the implicit type conversion rules to make the data types consistent.
     The inputs must be two tensors or one tensor and one scalar.
@@ -1805,13 +2004,22 @@ class DivNoNan(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([-1.0, 0., 1.0, 5.0, 6.0]), mindspore.float32)
         >>> input_y = Tensor(np.array([0., 0., 0., 2.0, 3.0]), mindspore.float32)
-        >>> div_no_nan = P.DivNoNan()
-        >>> div_no_nan(input_x, input_y)
-        [0., 0., 0., 2.5, 2.0]
+        >>> div_no_nan = ops.DivNoNan()
+        >>> output = div_no_nan(input_x, input_y)
+        >>> print(output)
+        [0.  0.  0.  2.5 2. ]
     """
+
+    @prim_attr_register
+    def __init__(self):
+        """Initialize _BinaryOp"""
+        self.init_prim_io_names(inputs=['x', 'y'], outputs=['output'])
 
     def infer_value(self, x, y):
         if x is not None and y is not None:
@@ -1826,7 +2034,7 @@ class DivNoNan(_MathBinaryOp):
 
 class FloorDiv(_MathBinaryOp):
     """
-    Divide the first input tensor by the second input tensor element-wise and round down to the closest integer.
+    Divides the first input tensor by the second input tensor element-wise and round down to the closest integer.
 
     Inputs of `input_x` and `input_y` comply with the implicit type conversion rules to make the data types consistent.
     The inputs must be two tensors or one tensor and one scalar.
@@ -1845,18 +2053,22 @@ class FloorDiv(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([2, 4, -1]), mindspore.int32)
         >>> input_y = Tensor(np.array([3, 3, 3]), mindspore.int32)
-        >>> floor_div = P.FloorDiv()
-        >>> floor_div(input_x, input_y)
-        [0, 1, -1]
+        >>> floor_div = ops.FloorDiv()
+        >>> output = floor_div(input_x, input_y)
+        >>> print(output)
+        [ 0  1 -1]
     """
 
 
 class TruncateDiv(_MathBinaryOp):
     """
-    Divide the first input tensor by the second input tensor element-wise for integer types, negative numbers will
+    Divides the first input tensor by the second input tensor element-wise for integer types, negative numbers will
     round fractional quantities towards zero.
 
     Inputs of `input_x` and `input_y` comply with the implicit type conversion rules to make the data types consistent.
@@ -1876,18 +2088,22 @@ class TruncateDiv(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([2, 4, -1]), mindspore.int32)
         >>> input_y = Tensor(np.array([3, 3, 3]), mindspore.int32)
-        >>> truncate_div = P.TruncateDiv()
-        >>> truncate_div(input_x, input_y)
-        [0, 1, 0]
+        >>> truncate_div = ops.TruncateDiv()
+        >>> output = truncate_div(input_x, input_y)
+        >>> print(output)
+        [0 1 0]
     """
 
 
 class TruncateMod(_MathBinaryOp):
     """
-    Returns element-wise remainder of division.
+    Returns the remainder of division element-wise.
 
     Inputs of `input_x` and `input_y` comply with the implicit type conversion rules to make the data types consistent.
     The inputs must be two tensors or one tensor and one scalar.
@@ -1906,12 +2122,16 @@ class TruncateMod(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([2, 4, -1]), mindspore.int32)
         >>> input_y = Tensor(np.array([3, 3, 3]), mindspore.int32)
-        >>> truncate_mod = P.TruncateMod()
-        >>> truncate_mod(input_x, input_y)
-        [2, 1, -1]
+        >>> truncate_mod = ops.TruncateMod()
+        >>> output = truncate_mod(input_x, input_y)
+        >>> print(output)
+        [ 2  1 -1]
     """
 
 
@@ -1937,11 +2157,16 @@ class Mod(_MathBinaryOp):
     Raises:
         ValueError: When `input_x` and `input_y` are not the same dtype.
 
+    Supported Platforms:
+        ``Ascend`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([-4.0, 5.0, 6.0]), mindspore.float32)
         >>> input_y = Tensor(np.array([3.0, 2.0, 3.0]), mindspore.float32)
-        >>> mod = P.Mod()
-        >>> mod(input_x, input_y)
+        >>> mod = ops.Mod()
+        >>> output = mod(input_x, input_y)
+        >>> print(output)
+        [-1.  1.  0.]
     """
 
     def infer_value(self, x, y):
@@ -1954,7 +2179,7 @@ class Mod(_MathBinaryOp):
 
 class Floor(PrimitiveWithInfer):
     """
-    Round a tensor down to the closest integer element-wise.
+    Rounds a tensor down to the closest integer element-wise.
 
     Inputs:
         - **input_x** (Tensor) - The input tensor. Its element data type must be float.
@@ -1962,11 +2187,15 @@ class Floor(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1.1, 2.5, -1.5]), mindspore.float32)
-        >>> floor = P.Floor()
-        >>> floor(input_x)
-        [1.0, 2.0, -2.0]
+        >>> floor = ops.Floor()
+        >>> output = floor(input_x)
+        >>> print(output)
+        [ 1.  2. -2.]
     """
 
     @prim_attr_register
@@ -1977,13 +2206,13 @@ class Floor(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({"x": x_dtype}, mstype.float_type, self.name)
+        validator.check_tensor_dtype_valid("x", x_dtype, mstype.float_type, self.name)
         return x_dtype
 
 
 class FloorMod(_MathBinaryOp):
     """
-    Compute the remainder of division element-wise.
+    Computes the remainder of division element-wise.
 
     Inputs of `input_x` and `input_y` comply with the implicit type conversion rules to make the data types consistent.
     The inputs must be two tensors or one tensor and one scalar.
@@ -2002,18 +2231,22 @@ class FloorMod(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([2, 4, -1]), mindspore.int32)
         >>> input_y = Tensor(np.array([3, 3, 3]), mindspore.int32)
-        >>> floor_mod = P.FloorMod()
-        >>> floor_mod(input_x, input_y)
-        [2, 1, 2]
+        >>> floor_mod = ops.FloorMod()
+        >>> output = floor_mod(input_x, input_y)
+        >>> print(output)
+        [2 1 2]
     """
 
 
 class Ceil(PrimitiveWithInfer):
     """
-    Round a tensor up to the closest integer element-wise.
+    Rounds a tensor up to the closest integer element-wise.
 
     Inputs:
         - **input_x** (Tensor) - The input tensor. It's element data type must be float16 or float32.
@@ -2021,11 +2254,15 @@ class Ceil(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([1.1, 2.5, -1.5]), mindspore.float32)
-        >>> ceil_op = P.Ceil()
-        >>> ceil_op(input_x)
-        [2.0, 3.0, -1.0]
+        >>> ceil_op = ops.Ceil()
+        >>> output = ceil_op(input_x)
+        >>> print(output)
+        [ 2.  3. -1.]
     """
 
     @prim_attr_register
@@ -2036,13 +2273,13 @@ class Ceil(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({"x": x_dtype}, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid("x", x_dtype, [mstype.float16, mstype.float32], self.name)
         return x_dtype
 
 
 class Xdivy(_MathBinaryOp):
     """
-    Divide the first input tensor by the second input tensor element-wise. Returns zero when `x` is zero.
+    Divides the first input tensor by the second input tensor element-wise. Returns zero when `x` is zero.
 
     Inputs of `input_x` and `input_y` comply with the implicit type conversion rules to make the data types consistent.
     The inputs must be two tensors or one tensor and one scalar.
@@ -2061,12 +2298,16 @@ class Xdivy(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([2, 4, -1]), mindspore.float32)
         >>> input_y = Tensor(np.array([2, 2, 2]), mindspore.float32)
-        >>> xdivy = P.Xdivy()
-        >>> xdivy(input_x, input_y)
-        [1.0, 2.0, -0.5]
+        >>> xdivy = ops.Xdivy()
+        >>> output = xdivy(input_x, input_y)
+        >>> print(output)
+        [ 1.   2.  -0.5]
     """
 
     def infer_dtype(self, x_dtype, y_dtype):
@@ -2075,7 +2316,7 @@ class Xdivy(_MathBinaryOp):
 
 class Xlogy(_MathBinaryOp):
     """
-    Computes first input tensor multiplied by the logarithm of second input tensor element-wise.
+    Computes the first input tensor multiplied by the logarithm of second input tensor element-wise.
     Returns zero when `x` is zero.
 
     Inputs of `input_x` and `input_y` comply with the implicit type conversion rules to make the data types consistent.
@@ -2096,12 +2337,16 @@ class Xlogy(_MathBinaryOp):
         Tensor, the shape is the same as the one after broadcasting,
         and the data type is the one with higher precision or higher digits among the two inputs.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([-5, 0, 4]), mindspore.float32)
         >>> input_y = Tensor(np.array([2, 2, 2]), mindspore.float32)
-        >>> xlogy = P.Xlogy()
-        >>> xlogy(input_x, input_y)
-        [-3.465736, 0.0, 2.7725887]
+        >>> xlogy = ops.Xlogy()
+        >>> output = xlogy(input_x, input_y)
+        >>> print(output)
+        [-3.465736   0.        2.7725887]
     """
 
     def infer_dtype(self, x_dtype, y_dtype):
@@ -2110,7 +2355,7 @@ class Xlogy(_MathBinaryOp):
 
 class Acosh(PrimitiveWithInfer):
     """
-    Compute inverse hyperbolic cosine of the input element-wise.
+    Computes inverse hyperbolic cosine of the input element-wise.
 
     Inputs:
         - **input_x** (Tensor) - The shape of tensor is :math:`(x_1, x_2, ..., x_R)`.
@@ -2118,10 +2363,15 @@ class Acosh(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> acosh = P.Acosh()
+        >>> acosh = ops.Acosh()
         >>> input_x = Tensor(np.array([1.0, 1.5, 3.0, 100.0]), mindspore.float32)
         >>> output = acosh(input_x)
+        >>> print(output)
+        [0. 0.9624236 1.7627472 5.298292]
     """
 
     @prim_attr_register
@@ -2132,7 +2382,7 @@ class Acosh(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, mstype.number_type, self.name)
         return x_dtype
 
 
@@ -2146,11 +2396,15 @@ class Cosh(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> cosh = P.Cosh()
+        >>> cosh = ops.Cosh()
         >>> input_x = Tensor(np.array([0.24, 0.83, 0.31, 0.09]), mindspore.float32)
         >>> output = cosh(input_x)
-        [1.0289385 1.364684 1.048436 1.4228927]
+        >>> print(output)
+        [1.0289385 1.364684 1.048436 1.0040528]
     """
 
     @prim_attr_register
@@ -2161,13 +2415,13 @@ class Cosh(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, mstype.number_type, self.name)
         return x_dtype
 
 
 class Asinh(PrimitiveWithInfer):
     """
-    Compute inverse hyperbolic sine of the input element-wise.
+    Computes inverse hyperbolic sine of the input element-wise.
 
     Inputs:
         - **input_x** (Tensor) - The shape of tensor is :math:`(x_1, x_2, ..., x_R)`.
@@ -2175,11 +2429,15 @@ class Asinh(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> asinh = P.Asinh()
+        >>> asinh = ops.Asinh()
         >>> input_x = Tensor(np.array([-5.0, 1.5, 3.0, 100.0]), mindspore.float32)
         >>> output = asinh(input_x)
-        [-2.3212, 1.1976, 1.8184, 5.2983]
+        >>> print(output)
+        [-2.3124385  1.1947632  1.8184465  5.298342 ]
     """
 
     @prim_attr_register
@@ -2190,13 +2448,13 @@ class Asinh(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, mstype.number_type, self.name)
         return x_dtype
 
 
 class Sinh(PrimitiveWithInfer):
     """
-    Computes hyperbolic sine of input element-wise.
+    Computes hyperbolic sine of the input element-wise.
 
     Inputs:
         - **input_x** (Tensor) - The shape of tensor is :math:`(x_1, x_2, ..., x_R)`.
@@ -2204,11 +2462,15 @@ class Sinh(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> sinh = P.Sinh()
+        >>> sinh = ops.Sinh()
         >>> input_x = Tensor(np.array([0.62, 0.28, 0.43, 0.62]), mindspore.float32)
         >>> output = sinh(input_x)
-        [0.6604918 0.28367308 0.44337422 0.6604918]
+        >>> print(output)
+        [0.6604918  0.28367308 0.44337422 0.6604918 ]
     """
 
     @prim_attr_register
@@ -2219,7 +2481,7 @@ class Sinh(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, mstype.number_type, self.name)
         return x_dtype
 
 
@@ -2231,7 +2493,7 @@ class _LogicBinaryOp(_BinaryOp):
     @staticmethod
     def do_infer_dtype(x_dtype, y_dtype, valid_type=mstype.number_type, prim_name=None):
         args_dtype = {"x": x_dtype, "y": y_dtype}
-        validator.check_tensor_type_same(args_dtype, valid_type, prim_name)
+        validator.check_tensors_dtypes_same_and_valid(args_dtype, valid_type, prim_name)
         return mstype.tensor_type(mstype.bool_)
 
     def infer_dtype(self, x_dtype, y_dtype):
@@ -2256,26 +2518,40 @@ class Equal(_LogicBinaryOp):
     Outputs:
         Tensor, the shape is the same as the one after broadcasting,and the data type is bool.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1, 2, 3]), mindspore.float32)
-        >>> equal = P.Equal()
-        >>> equal(input_x, 2.0)
-        [False, True, False]
+        >>> equal = ops.Equal()
+        >>> output = equal(input_x, 2.0)
+        >>> print(output)
+        [False True False]
         >>>
         >>> input_x = Tensor(np.array([1, 2, 3]), mindspore.int32)
         >>> input_y = Tensor(np.array([1, 2, 4]), mindspore.int32)
-        >>> equal = P.Equal()
-        >>> equal(input_x, input_y)
-        [True, True, False]
+        >>> equal = ops.Equal()
+        >>> output = equal(input_x, input_y)
+        >>> print(output)
+        [ True  True False]
     """
 
     def infer_dtype(self, x_dtype, y_dtype):
         return _LogicBinaryOp.do_infer_dtype(x_dtype, y_dtype, mstype.number_type + (mstype.bool_,), self.name)
 
+    def infer_value(self, x, y):
+        if x is None or y is None:
+            return None
+        if isinstance(x, MetaTensor):
+            x = x.to_tensor()
+        if isinstance(y, MetaTensor):
+            y = y.to_tensor()
+        return Tensor(x.asnumpy() == y.asnumpy())
+
 
 class ApproximateEqual(_LogicBinaryOp):
     """
-    Returns true if abs(x1-x2) is smaller than tolerance element-wise, otherwise false.
+    Returns True if abs(x1-x2) is smaller than tolerance element-wise, otherwise False.
 
     Inputs of `x1` and `x2` comply with the implicit type conversion rules to make the data types consistent.
     If they have different data types, lower priority data type will be converted to
@@ -2292,12 +2568,16 @@ class ApproximateEqual(_LogicBinaryOp):
     Outputs:
         Tensor, the shape is the same as the shape of 'x1', and the data type is bool.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> x1 = Tensor(np.array([1, 2, 3]), mindspore.float32)
         >>> x2 = Tensor(np.array([2, 4, 6]), mindspore.float32)
-        >>> approximate_equal = P.ApproximateEqual(2.)
-        >>> result = approximate_equal(x1, x2)
-        [True  True  False]
+        >>> approximate_equal = ops.ApproximateEqual(2.)
+        >>> output = approximate_equal(x1, x2)
+        >>> print(output)
+        [ True  True  False]
     """
 
     @prim_attr_register
@@ -2312,7 +2592,7 @@ class ApproximateEqual(_LogicBinaryOp):
     def infer_dtype(self, x_dtype, y_dtype):
         args_dtype = {"x": x_dtype, "y": y_dtype}
         valid_type = [mstype.float32, mstype.float16]
-        validator.check_tensor_type_same(args_dtype, valid_type, prim_name=self.name)
+        validator.check_tensors_dtypes_same_and_valid(args_dtype, valid_type, prim_name=self.name)
         return mstype.tensor_type(mstype.bool_)
 
 
@@ -2329,11 +2609,15 @@ class EqualCount(PrimitiveWithInfer):
     Outputs:
         Tensor, with the type same as input tensor and size as (1,).
 
+    Supported Platforms:
+        ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1, 2, 3]), mindspore.int32)
         >>> input_y = Tensor(np.array([1, 2, 4]), mindspore.int32)
-        >>> equal_count = P.EqualCount()
-        >>> equal_count(input_x, input_y)
+        >>> equal_count = ops.EqualCount()
+        >>> output = equal_count(input_x, input_y)
+        >>> print(output)
         [2]
     """
 
@@ -2349,7 +2633,7 @@ class EqualCount(PrimitiveWithInfer):
 
     def infer_dtype(self, x_dtype, y_dtype):
         args = {'x': x_dtype, 'y': y_dtype}
-        validator.check_tensor_type_same(args, mstype.number_type + (mstype.bool_,), self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, mstype.number_type + (mstype.bool_,), self.name)
         return x_dtype
 
 
@@ -2371,17 +2655,22 @@ class NotEqual(_LogicBinaryOp):
     Outputs:
         Tensor, the shape is the same as the one after broadcasting,and the data type is bool.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1, 2, 3]), mindspore.float32)
-        >>> not_equal = P.NotEqual()
-        >>> not_equal(input_x, 2.0)
-        [True, False, True]
+        >>> not_equal = ops.NotEqual()
+        >>> output = not_equal(input_x, 2.0)
+        >>> print(output)
+        [ True False  True]
         >>>
         >>> input_x = Tensor(np.array([1, 2, 3]), mindspore.int32)
         >>> input_y = Tensor(np.array([1, 2, 4]), mindspore.int32)
-        >>> not_equal = P.NotEqual()
-        >>> not_equal(input_x, input_y)
-        [False, False, True]
+        >>> not_equal = ops.NotEqual()
+        >>> output = not_equal(input_x, input_y)
+        >>> print(output)
+        [False False  True]
     """
 
     def infer_dtype(self, x_dtype, y_dtype):
@@ -2408,12 +2697,16 @@ class Greater(_LogicBinaryOp):
     Outputs:
         Tensor, the shape is the same as the one after broadcasting,and the data type is bool.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1, 2, 3]), mindspore.int32)
         >>> input_y = Tensor(np.array([1, 1, 4]), mindspore.int32)
-        >>> greater = P.Greater()
-        >>> greater(input_x, input_y)
-        [False, True, False]
+        >>> greater = ops.Greater()
+        >>> output = greater(input_x, input_y)
+        >>> print(output)
+        [False  True False]
     """
 
     def infer_value(self, x, y):
@@ -2445,12 +2738,16 @@ class GreaterEqual(_LogicBinaryOp):
     Outputs:
         Tensor, the shape is the same as the one after broadcasting,and the data type is bool.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1, 2, 3]), mindspore.int32)
         >>> input_y = Tensor(np.array([1, 1, 4]), mindspore.int32)
-        >>> greater_equal = P.GreaterEqual()
-        >>> greater_equal(input_x, input_y)
-        [True, True, False]
+        >>> greater_equal = ops.GreaterEqual()
+        >>> output = greater_equal(input_x, input_y)
+        >>> print(output)
+        [ True  True False]
     """
 
     def infer_value(self, x, y):
@@ -2482,12 +2779,16 @@ class Less(_LogicBinaryOp):
     Outputs:
         Tensor, the shape is the same as the one after broadcasting,and the data type is bool.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1, 2, 3]), mindspore.int32)
         >>> input_y = Tensor(np.array([1, 1, 4]), mindspore.int32)
-        >>> less = P.Less()
-        >>> less(input_x, input_y)
-        [False, False, True]
+        >>> less = ops.Less()
+        >>> output = less(input_x, input_y)
+        >>> print(output)
+        [False False  True]
     """
 
     def infer_value(self, x, y):
@@ -2519,12 +2820,16 @@ class LessEqual(_LogicBinaryOp):
     Outputs:
         Tensor, the shape is the same as the one after broadcasting,and the data type is bool.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1, 2, 3]), mindspore.int32)
         >>> input_y = Tensor(np.array([1, 1, 4]), mindspore.int32)
-        >>> less_equal = P.LessEqual()
-        >>> less_equal(input_x, input_y)
-        [True, False, True]
+        >>> less_equal = ops.LessEqual()
+        >>> output = less_equal(input_x, input_y)
+        >>> print(output)
+        [ True False  True]
     """
 
     def infer_value(self, x, y):
@@ -2546,11 +2851,15 @@ class LogicalNot(PrimitiveWithInfer):
     Outputs:
         Tensor, the shape is the same as the `input_x`, and the dtype is bool.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([True, False, True]), mindspore.bool_)
-        >>> logical_not = P.LogicalNot()
-        >>> logical_not(input_x)
-        [False, True, False]
+        >>> logical_not = ops.LogicalNot()
+        >>> output = logical_not(input_x)
+        >>> print(output)
+        [False  True False]
     """
 
     @prim_attr_register
@@ -2562,7 +2871,7 @@ class LogicalNot(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({"x": x_dtype}, [mstype.bool_], self.name)
+        validator.check_tensor_dtype_valid("x", x_dtype, [mstype.bool_], self.name)
         return mstype.tensor_type(mstype.bool_)
 
 
@@ -2585,12 +2894,16 @@ class LogicalAnd(_LogicBinaryOp):
     Outputs:
         Tensor, the shape is the same as the one after broadcasting, and the data type is bool.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([True, False, True]), mindspore.bool_)
         >>> input_y = Tensor(np.array([True, True, False]), mindspore.bool_)
-        >>> logical_and = P.LogicalAnd()
-        >>> logical_and(input_x, input_y)
-        [True, False, False]
+        >>> logical_and = ops.LogicalAnd()
+        >>> output = logical_and(input_x, input_y)
+        >>> print(output)
+        [ True False False]
     """
 
     def infer_dtype(self, x_dtype, y_dtype):
@@ -2616,12 +2929,16 @@ class LogicalOr(_LogicBinaryOp):
     Outputs:
         Tensor, the shape is the same as the one after broadcasting,and the data type is bool.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([True, False, True]), mindspore.bool_)
         >>> input_y = Tensor(np.array([True, True, False]), mindspore.bool_)
-        >>> logical_or = P.LogicalOr()
-        >>> logical_or(input_x, input_y)
-        [True, True, True]
+        >>> logical_or = ops.LogicalOr()
+        >>> output = logical_or(input_x, input_y)
+        >>> print(output)
+        [ True  True  True]
     """
 
     def infer_dtype(self, x_dtype, y_dtype):
@@ -2630,7 +2947,7 @@ class LogicalOr(_LogicBinaryOp):
 
 class IsNan(PrimitiveWithInfer):
     """
-    Judge which elements are nan for each position.
+    Determines which elements are NaN for each position.
 
     Inputs:
         - **input_x** (Tensor) - The input tensor.
@@ -2638,10 +2955,15 @@ class IsNan(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape of input, and the dtype is bool.
 
+    Supported Platforms:
+        ``GPU``
+
     Examples:
-        >>> is_nan = P.IsNan()
+        >>> is_nan = ops.IsNan()
         >>> input_x = Tensor(np.array([np.log(-1), 1, np.log(0)]), mindspore.float32)
-        >>> result = is_nan(input_x)
+        >>> output = is_nan(input_x)
+        >>> print(output)
+        [True False False]
     """
 
     @prim_attr_register
@@ -2653,12 +2975,12 @@ class IsNan(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        return mstype.bool_
+        return mstype.tensor_type(mstype.bool_)
 
 
 class IsInf(PrimitiveWithInfer):
     """
-    Judging which elements are inf or -inf for each position
+    Determines which elements are inf or -inf for each position
 
     Inputs:
         - **input_x** (Tensor) - The input tensor.
@@ -2666,10 +2988,15 @@ class IsInf(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape of input, and the dtype is bool.
 
+    Supported Platforms:
+        ``GPU``
+
     Examples:
-        >>> is_inf = P.IsInf()
+        >>> is_inf = ops.IsInf()
         >>> input_x = Tensor(np.array([np.log(-1), 1, np.log(0)]), mindspore.float32)
-        >>> result = is_inf(input_x)
+        >>> output = is_inf(input_x)
+        >>> print(output)
+        [False False True]
     """
 
     @prim_attr_register
@@ -2681,12 +3008,12 @@ class IsInf(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        return mstype.bool_
+        return mstype.tensor_type(mstype.bool_)
 
 
 class IsFinite(PrimitiveWithInfer):
     """
-    Judge which elements are finite for each position.
+    Deternubes which elements are finite for each position.
 
     Inputs:
         - **input_x** (Tensor) - The input tensor.
@@ -2694,11 +3021,15 @@ class IsFinite(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape of input, and the dtype is bool.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
-        >>> is_finite = P.IsFinite()
+        >>> is_finite = ops.IsFinite()
         >>> input_x = Tensor(np.array([np.log(-1), 1, np.log(0)]), mindspore.float32)
-        >>> result = is_finite(input_x)
-        [False   True   False]
+        >>> output = is_finite(input_x)
+        >>> print(output)
+        [False  True False]
     """
 
     @prim_attr_register
@@ -2710,14 +3041,13 @@ class IsFinite(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_subclass("x", x_dtype, mstype.tensor, self.name)
-        validator.check_tensor_type_same({'x': x_dtype}, mstype.number_type + (mstype.bool_,), self.name)
-        return mstype.bool_
+        validator.check_tensor_dtype_valid('x', x_dtype, mstype.number_type + (mstype.bool_,), self.name)
+        return mstype.tensor_type(mstype.bool_)
 
 
 class FloatStatus(PrimitiveWithInfer):
     """
-    Determine if the elements contain Not a Number(NaN), infinite or negative infinite. 0 for normal, 1 for overflow.
+    Determines if the elements contain Not a Number(NaN), infinite or negative infinite. 0 for normal, 1 for overflow.
 
     Inputs:
         - **input_x** (Tensor) - The input tensor. The data type must be float16 or float32.
@@ -2726,10 +3056,15 @@ class FloatStatus(PrimitiveWithInfer):
         Tensor, has the shape of `(1,)`, and has the same dtype of input `mindspore.dtype.float32` or
         `mindspore.dtype.float16`.
 
+    Supported Platforms:
+        ``GPU``
+
     Examples:
-        >>> float_status = P.FloatStatus()
+        >>> float_status = ops.FloatStatus()
         >>> input_x = Tensor(np.array([np.log(-1), 1, np.log(0)]), mindspore.float32)
         >>> result = float_status(input_x)
+        >>> print(result)
+        [1.]
     """
 
     @prim_attr_register
@@ -2741,7 +3076,7 @@ class FloatStatus(PrimitiveWithInfer):
         return [1]
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, [mstype.float32, mstype.float16], self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, [mstype.float32, mstype.float16], self.name)
         return x_dtype
 
 
@@ -2757,10 +3092,14 @@ class NPUAllocFloatStatus(PrimitiveWithInfer):
     Outputs:
         Tensor, has the shape of `(8,)`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> alloc_status = P.NPUAllocFloatStatus()
-        >>> init = alloc_status()
-        Tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], shape=(8,), dtype=mindspore.float32)
+        >>> alloc_status = ops.NPUAllocFloatStatus()
+        >>> output = alloc_status()
+        >>> print(output)
+        [0. 0. 0. 0. 0. 0. 0. 0.]
     """
 
     @prim_attr_register
@@ -2777,7 +3116,7 @@ class NPUAllocFloatStatus(PrimitiveWithInfer):
 
 class NPUGetFloatStatus(PrimitiveWithInfer):
     """
-    Updates the flag which is the output tensor of `NPUAllocFloatStatus` with latest overflow status.
+    Updates the flag which is the output tensor of `NPUAllocFloatStatus` with the latest overflow status.
 
     The flag is a tensor whose shape is `(8,)` and data type is `mindspore.dtype.float32`.
     If the sum of the flag equals to 0, there is no overflow happened. If the sum of the flag is bigger than 0, there
@@ -2790,12 +3129,16 @@ class NPUGetFloatStatus(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as `input_x`. All the elements in the tensor will be zero.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> alloc_status = P.NPUAllocFloatStatus()
-        >>> get_status = P.NPUGetFloatStatus()
+        >>> alloc_status = ops.NPUAllocFloatStatus()
+        >>> get_status = ops.NPUGetFloatStatus()
         >>> init = alloc_status()
-        >>> flag = get_status(init)
-        Tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], shape=(8,), dtype=mindspore.float32)
+        >>> get_status(init)
+        >>> print(init)
+        [1. 1. 1. 1. 1. 1. 1. 1.]
     """
 
     @prim_attr_register
@@ -2805,18 +3148,18 @@ class NPUGetFloatStatus(PrimitiveWithInfer):
 
     def infer_shape(self, x_shape):
         cls_name = self.name
-        validator.check_integer("len(x_shape)", len(x_shape), 1, Rel.EQ, cls_name)
-        validator.check_integer("x_shape[0]", x_shape[0], 8, Rel.EQ, cls_name)
+        validator.check_equal_int(len(x_shape), 1, "len(x_shape)", cls_name)
+        validator.check_equal_int(x_shape[0], 8, "x_shape[0]", cls_name)
         return [8]
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, [mstype.float16, mstype.float32], self.name)
         return mstype.float32
 
 
 class NPUClearFloatStatus(PrimitiveWithInfer):
     """
-    Clear the flag which stores the overflow status.
+    Clears the flag which stores the overflow status.
 
     Note:
         The flag is in the register on the `Ascend` device. It will be reset and can not be reused again after the
@@ -2831,14 +3174,18 @@ class NPUClearFloatStatus(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as `input_x`. All the elements in the tensor will be zero.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> alloc_status = P.NPUAllocFloatStatus()
-        >>> get_status = P.NPUGetFloatStatus()
-        >>> clear_status = P.NPUClearFloatStatus()
+        >>> alloc_status = ops.NPUAllocFloatStatus()
+        >>> get_status = ops.NPUGetFloatStatus()
+        >>> clear_status = ops.NPUClearFloatStatus()
         >>> init = alloc_status()
         >>> flag = get_status(init)
-        >>> clear = clear_status(init)
-        Tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], shape=(8,), dtype=mindspore.float32)
+        >>> clear_status(init)
+        >>> print(init)
+        [1. 1. 1. 1. 1. 1. 1. 1.]
     """
 
     @prim_attr_register
@@ -2848,12 +3195,12 @@ class NPUClearFloatStatus(PrimitiveWithInfer):
 
     def infer_shape(self, x_shape):
         cls_name = self.name
-        validator.check_integer("len(x_shape)", len(x_shape), 1, Rel.EQ, cls_name)
-        validator.check_integer("x_shape[0]", x_shape[0], 8, Rel.EQ, cls_name)
+        validator.check_equal_int(len(x_shape), 1, "len(x_shape)", cls_name)
+        validator.check_equal_int(x_shape[0], 8, "x_shape[0]", cls_name)
         return [8]
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, [mstype.float16, mstype.float32], self.name)
         return mstype.float32
 
 
@@ -2867,10 +3214,15 @@ class Cos(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> cos = P.Cos()
+        >>> cos = ops.Cos()
         >>> input_x = Tensor(np.array([0.24, 0.83, 0.31, 0.09]), mindspore.float32)
         >>> output = cos(input_x)
+        >>> print(output)
+        [0.971338 0.67487574 0.95233357 0.9959527 ]
     """
 
     @prim_attr_register
@@ -2881,13 +3233,13 @@ class Cos(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, mstype.number_type, self.name)
         return x_dtype
 
 
 class ACos(PrimitiveWithInfer):
     """
-    Computes arccosine of input element-wise.
+    Computes arccosine of input tensors element-wise.
 
     Inputs:
         - **input_x** (Tensor) - The shape of tensor is :math:`(x_1, x_2, ..., x_R)`.
@@ -2895,10 +3247,15 @@ class ACos(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> acos = P.ACos()
+        >>> acos = ops.ACos()
         >>> input_x = Tensor(np.array([0.74, 0.04, 0.30, 0.56]), mindspore.float32)
         >>> output = acos(input_x)
+        >>> print(output)
+        [0.7377037 1.5307858 1.2661037 0.97641146]
     """
 
     @prim_attr_register
@@ -2909,13 +3266,13 @@ class ACos(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, mstype.number_type, self.name)
         return x_dtype
 
 
 class Sin(PrimitiveWithInfer):
     """
-    Computes sine of input element-wise.
+    Computes sine of the input element-wise.
 
     Inputs:
         - **input_x** (Tensor) - The shape of tensor is :math:`(x_1, x_2, ..., x_R)`.
@@ -2923,10 +3280,15 @@ class Sin(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> sin = P.Sin()
+        >>> sin = ops.Sin()
         >>> input_x = Tensor(np.array([0.62, 0.28, 0.43, 0.62]), mindspore.float32)
         >>> output = sin(input_x)
+        >>> print(output)
+        [0.5810352  0.27635565 0.41687083 0.5810352 ]
     """
 
     @prim_attr_register
@@ -2937,13 +3299,13 @@ class Sin(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, mstype.number_type, self.name)
         return x_dtype
 
 
 class Asin(PrimitiveWithInfer):
     """
-    Computes arcsine of input element-wise.
+    Computes arcsine of input tensors element-wise.
 
     Inputs:
         - **input_x** (Tensor) - The shape of tensor is :math:`(x_1, x_2, ..., x_R)`.
@@ -2951,11 +3313,15 @@ class Asin(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> asin = P.Asin()
+        >>> asin = ops.Asin()
         >>> input_x = Tensor(np.array([0.74, 0.04, 0.30, 0.56]), mindspore.float32)
         >>> output = asin(input_x)
-        [0.8331, 0.0400, 0.3047, 0.5944]
+        >>> print(output)
+        [0.8330927  0.04001068  0.30469266  0.59438497]
     """
 
     @prim_attr_register
@@ -2966,13 +3332,13 @@ class Asin(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, mstype.number_type, self.name)
         return x_dtype
 
 
 class NMSWithMask(PrimitiveWithInfer):
     """
-    Select some bounding boxes in descending order of score.
+    Selects some bounding boxes in descending order of score.
 
     Args:
         iou_threshold (float): Specifies the threshold of overlap boxes with respect to
@@ -3000,13 +3366,19 @@ class NMSWithMask(PrimitiveWithInfer):
         - **selected_mask** (Tensor) - The shape of tensor is :math:`(N,)`. A mask list of
           valid output bounding boxes.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> bbox = np.random.rand(128, 5)
+        >>> bbox = np.array([[0.4, 0.2, 0.4, 0.3, 0.1], [0.4, 0.3, 0.6, 0.8, 0.7]])
         >>> bbox[:, 2] += bbox[:, 0]
         >>> bbox[:, 3] += bbox[:, 1]
         >>> inputs = Tensor(bbox, mindspore.float32)
-        >>> nms = P.NMSWithMask(0.5)
+        >>> nms = ops.NMSWithMask(0.5)
         >>> output_boxes, indices, mask = nms(inputs)
+        >>> indices_np = indices.asnumpy()
+        >>> print(indices_np[mask.asnumpy()])
+        [0 1]
     """
 
     @prim_attr_register
@@ -3018,14 +3390,14 @@ class NMSWithMask(PrimitiveWithInfer):
 
     def infer_shape(self, bboxes_shape):
         cls_name = self.name
-        validator.check_integer("bboxes rank", len(bboxes_shape), 2, Rel.EQ, cls_name)
+        validator.check_equal_int(len(bboxes_shape), 2, "bboxes rank", cls_name)
         validator.check_positive_int(bboxes_shape[0], "bboxes.shape[0]", cls_name)
-        validator.check_integer("bboxes.shape[1]", bboxes_shape[1], 5, Rel.EQ, cls_name)
+        validator.check_equal_int(bboxes_shape[1], 5, "bboxes.shape[1]", cls_name)
         num = bboxes_shape[0]
         return (bboxes_shape, (num,), (num,))
 
     def infer_dtype(self, bboxes_dtype):
-        validator.check_tensor_type_same({"bboxes": bboxes_dtype}, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid("bboxes", bboxes_dtype, [mstype.float16, mstype.float32], self.name)
         return (bboxes_dtype, mstype.int32, mstype.bool_)
 
 
@@ -3039,11 +3411,15 @@ class Abs(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
-         >>> input_x = Tensor(np.array([-1.0, 1.0, 0.0]), mindspore.float32)
-         >>> abs = P.Abs()
-         >>> abs(input_x)
-         [1.0, 1.0, 0.0]
+        >>> input_x = Tensor(np.array([-1.0, 1.0, 0.0]), mindspore.float32)
+        >>> abs = ops.Abs()
+        >>> output = abs(input_x)
+        >>> print(output)
+        [1. 1. 0.]
     """
 
     @prim_attr_register
@@ -3055,7 +3431,7 @@ class Abs(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_type):
-        validator.check_tensor_type_same({'x': x_type}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('x', x_type, mstype.number_type, self.name)
         return x_type
 
     def infer_value(self, x):
@@ -3068,7 +3444,7 @@ class Abs(PrimitiveWithInfer):
 
 class Sign(PrimitiveWithInfer):
     r"""
-    Perform :math:`sign` on tensor element-wise.
+    Performs sign on the tensor element-wise.
 
     Note:
         .. math::
@@ -3082,11 +3458,15 @@ class Sign(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape and type as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``CPU``
+
     Examples:
          >>> input_x = Tensor(np.array([[2.0, 0.0, -1.0]]), mindspore.float32)
-         >>> sign = P.Sign()
+         >>> sign = ops.Sign()
          >>> output = sign(input_x)
-         [[1.0, 0.0, -1.0]]
+         >>> print(output)
+         [[ 1.  0. -1.]]
     """
 
     @prim_attr_register
@@ -3097,7 +3477,7 @@ class Sign(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x': x_dtype}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, mstype.number_type, self.name)
         return x_dtype
 
 
@@ -3111,11 +3491,15 @@ class Round(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape and type as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
          >>> input_x = Tensor(np.array([0.8, 1.5, 2.3, 2.5, -4.5]), mindspore.float32)
-         >>> round = P.Round()
-         >>> round(input_x)
-         [1.0, 2.0, 2.0, 2.0, -4.0]
+         >>> round = ops.Round()
+         >>> output = round(input_x)
+         >>> print(output)
+         [ 1.  2.  2.  2. -4.]
     """
 
     @prim_attr_register
@@ -3126,9 +3510,9 @@ class Round(PrimitiveWithInfer):
     def infer_shape(self, x_shape):
         return x_shape
 
-    def infer_dtype(self, x_type):
-        validator.check_tensor_type_same({'x': x_type}, mstype.number_type, self.name)
-        return x_type
+    def infer_dtype(self, x_dtype):
+        validator.check_tensor_dtype_valid('x', x_dtype, mstype.number_type, self.name)
+        return x_dtype
 
 
 class Tan(PrimitiveWithInfer):
@@ -3142,10 +3526,15 @@ class Tan(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> tan = P.Tan()
+        >>> tan = ops.Tan()
         >>> input_x = Tensor(np.array([-1.0, 0.0, 1.0]), mindspore.float32)
         >>> output = tan(input_x)
+        >>> print(output)
+        [-1.5574081 0. 1.5574081]
     """
 
     @prim_attr_register
@@ -3156,8 +3545,8 @@ class Tan(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_type):
-        valid_types = [mstype.float16, mstype.float32, mstype.int32]
-        validator.check_tensor_type_same({'x': x_type}, valid_types, self.name)
+        valid_dtypes = [mstype.float16, mstype.float32, mstype.int32]
+        validator.check_tensor_dtype_valid('x', x_type, valid_dtypes, self.name)
         return x_type
 
 
@@ -3171,13 +3560,17 @@ class Atan(PrimitiveWithInfer):
     Outputs:
         A Tensor, has the same type as the input.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([1.047, 0.785]), mindspore.float32)
-        >>> tan = P.Tan()
+        >>> tan = ops.Tan()
         >>> output_y = tan(input_x)
-        >>> atan = P.Atan()
-        >>> atan(output_y)
-        [[1.047, 07850001]]
+        >>> atan = ops.Atan()
+        >>> output = atan(output_y)
+        >>> print(output)
+        [1.047     0.7850001]
     """
 
     @prim_attr_register
@@ -3188,7 +3581,7 @@ class Atan(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_type):
-        validator.check_tensor_type_same({'x': x_type}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('x', x_type, mstype.number_type, self.name)
         return x_type
 
 
@@ -3202,11 +3595,15 @@ class Atanh(PrimitiveWithInfer):
     Outputs:
         A Tensor, has the same type as the input.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([1.047, 0.785]), mindspore.float32)
-        >>> atanh = P.Atanh()
-        >>> atanh(input_x)
-        [[1.8869909 1.058268]]
+        >>> atanh = ops.Atanh()
+        >>> output = atanh(input_x)
+        >>> print(output)
+        [1.8869909 1.058268 ]
     """
 
     @prim_attr_register
@@ -3217,7 +3614,7 @@ class Atanh(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_type):
-        validator.check_tensor_type_same({'x': x_type}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('x', x_type, mstype.number_type, self.name)
         return x_type
 
 
@@ -3240,18 +3637,22 @@ class Atan2(_MathBinaryOp):
     Outputs:
         Tensor, the shape is the same as the one after broadcasting,and the data type is same as `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-         >>> input_x = Tensor(np.array([[0, 1]]), mindspore.float32)
-         >>> input_y = Tensor(np.array([[1, 1]]), mindspore.float32)
-         >>> atan2 = P.Atan2()
-         >>> atan2(input_x, input_y)
-         [[0. 0.7853982]]
+        >>> input_x = Tensor(np.array([0, 1]), mindspore.float32)
+        >>> input_y = Tensor(np.array([1, 1]), mindspore.float32)
+        >>> atan2 = ops.Atan2()
+        >>> output = atan2(input_x, input_y)
+        >>> print(output)
+        [0.        0.7853982]
     """
 
 
 class SquareSumAll(PrimitiveWithInfer):
     """
-    Returns square sum all of a tensor element-wise
+    Returns the square sum of a tensor element-wise
 
     Inputs:
         - **input_x1** (Tensor) - The input tensor. The data type must be float16 or float32.
@@ -3264,11 +3665,17 @@ class SquareSumAll(PrimitiveWithInfer):
         - **output_y1** (Tensor) - The same type as the `input_x1`.
         - **output_y2** (Tensor) - The same type as the `input_x1`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-         >>> input_x1 = Tensor(np.random.randint([3, 2, 5, 7]), mindspore.float32)
-         >>> input_x2 = Tensor(np.random.randint([3, 2, 5, 7]), mindspore.float32)
-         >>> square_sum_all = P.SquareSumAll()
-         >>> square_sum_all(input_x1, input_x2)
+        >>> input_x1 = Tensor(np.array([0, 0, 2, 0]), mindspore.float32)
+        >>> input_x2 = Tensor(np.array([0, 0, 2, 4]), mindspore.float32)
+        >>> square_sum_all = ops.SquareSumAll()
+        >>> output = square_sum_all(input_x1, input_x2)
+        >>> print(output)
+        (Tensor(shape=[], dtype=Float32, value= 4),
+         Tensor(shape=[], dtype=Float32, value= 20))
     """
 
     @prim_attr_register
@@ -3280,8 +3687,9 @@ class SquareSumAll(PrimitiveWithInfer):
         return [], []
 
     def infer_dtype(self, x_type, y_type):
-        validator.check_tensor_type_same({'x1_type': x_type}, [mstype.float16, mstype.float32], self.name)
-        validator.check_tensor_type_same({'x2_type': y_type}, [mstype.float16, mstype.float32], self.name)
+        valid_types = (mstype.float16, mstype.float32)
+        args = {"x1_type": x_type, "x2_type": y_type}
+        validator.check_tensors_dtypes_same_and_valid(args, valid_types, self.name)
         return x_type, y_type
 
 
@@ -3300,14 +3708,18 @@ class BitwiseAnd(_BitwiseBinaryOp):
         - **input_x2** (Tensor) - The input tensor with same type as the `input_x1`.
 
     Outputs:
-        - **y** (Tensor) - The same type as the `input_x1`.
+        Tensor, has the same type as the `input_x1`.
+
+    Supported Platforms:
+        ``Ascend``
 
     Examples:
-         >>> input_x1 = Tensor(np.array([0, 0, 1, -1, 1, 1, 1]), mstype.int16)
-         >>> input_x2 = Tensor(np.array([0, 1, 1, -1, -1, 2, 3]), mstype.int16)
-         >>> bitwise_and = P.BitwiseAnd()
-         >>> bitwise_and(input_x1, input_x2)
-         [0, 0, 1, -1, 1, 0, 1]
+        >>> input_x1 = Tensor(np.array([0, 0, 1, -1, 1, 1, 1]), mindspore.int16)
+        >>> input_x2 = Tensor(np.array([0, 1, 1, -1, -1, 2, 3]), mindspore.int16)
+        >>> bitwise_and = ops.BitwiseAnd()
+        >>> output = bitwise_and(input_x1, input_x2)
+        >>> print(output)
+        [ 0  0  1 -1  1  0  1]
     """
 
 
@@ -3326,14 +3738,18 @@ class BitwiseOr(_BitwiseBinaryOp):
         - **input_x2** (Tensor) - The input tensor with same type as the `input_x1`.
 
     Outputs:
-        - **y** (Tensor) - The same type as the `input_x1`.
+        Tensor, has the same type as the `input_x1`.
+
+    Supported Platforms:
+        ``Ascend``
 
     Examples:
-         >>> input_x1 = Tensor(np.array([0, 0, 1, -1, 1, 1, 1]), mstype.int16)
-         >>> input_x2 = Tensor(np.array([0, 1, 1, -1, -1, 2, 3]), mstype.int16)
-         >>> bitwise_or = P.BitwiseOr()
-         >>> bitwise_or(input_x1, input_x2)
-         [0, 1, 1, -1, -1, 3, 3]
+        >>> input_x1 = Tensor(np.array([0, 0, 1, -1, 1, 1, 1]), mindspore.int16)
+        >>> input_x2 = Tensor(np.array([0, 1, 1, -1, -1, 2, 3]), mindspore.int16)
+        >>> bitwise_or = ops.BitwiseOr()
+        >>> output = bitwise_or(input_x1, input_x2)
+        >>> print(output)
+        [ 0  1  1 -1 -1  3  3]
     """
 
 
@@ -3352,14 +3768,18 @@ class BitwiseXor(_BitwiseBinaryOp):
         - **input_x2** (Tensor) - The input tensor with same type as the `input_x1`.
 
     Outputs:
-        - **y** (Tensor) - The same type as the `input_x1`.
+        Tensor, has the same type as the `input_x1`.
+
+    Supported Platforms:
+        ``Ascend``
 
     Examples:
-         >>> input_x1 = Tensor(np.array([0, 0, 1, -1, 1, 1, 1]), mstype.int16)
-         >>> input_x2 = Tensor(np.array([0, 1, 1, -1, -1, 2, 3]), mstype.int16)
-         >>> bitwise_xor = P.BitwiseXor()
-         >>> bitwise_xor(input_x1, input_x2)
-         [0, 1, 0, 0, -2, 3, 2]
+        >>> input_x1 = Tensor(np.array([0, 0, 1, -1, 1, 1, 1]), mindspore.int16)
+        >>> input_x2 = Tensor(np.array([0, 1, 1, -1, -1, 2, 3]), mindspore.int16)
+        >>> bitwise_xor = ops.BitwiseXor()
+        >>> output = bitwise_xor(input_x1, input_x2)
+        >>> print(output)
+        [ 0  1  0  0 -2  3  2]
     """
 
 
@@ -3368,16 +3788,21 @@ class BesselI0e(PrimitiveWithInfer):
     Computes BesselI0e of input element-wise.
 
     Inputs:
-        - **input_x** (Tensor) - The shape of tensor is :math:`(x_1, x_2, ..., x_R)`.
+        - **input_x** (Tensor) - The shape of tensor is :math:`(x_1, x_2, ..., x_R)`. Data type must be float16 or
+          float32.
 
     Outputs:
-        Tensor, has the same shape as `input_x`. Data type must be float16 or float32.
+        Tensor, has the same shape as `input_x`.
+
+    Supported Platforms:
+        ``Ascend``
 
     Examples:
-        >>> bessel_i0e = P.BesselI0e()
+        >>> bessel_i0e = ops.BesselI0e()
         >>> input_x = Tensor(np.array([0.24, 0.83, 0.31, 0.09]), mindspore.float32)
         >>> output = bessel_i0e(input_x)
-        [0.7979961, 0.5144438, 0.75117415, 0.9157829]
+        >>> print(output)
+        [0.7979961  0.5144438  0.75117415  0.9157829 ]
     """
 
     @prim_attr_register
@@ -3388,7 +3813,7 @@ class BesselI0e(PrimitiveWithInfer):
         return x
 
     def infer_dtype(self, x):
-        validator.check_tensor_type_same({'x': x}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('x', x, mstype.number_type, self.name)
         return x
 
 
@@ -3397,16 +3822,21 @@ class BesselI1e(PrimitiveWithInfer):
     Computes BesselI1e of input element-wise.
 
     Inputs:
-        - **input_x** (Tensor) - The shape of tensor is :math:`(x_1, x_2, ..., x_R)`.
+        - **input_x** (Tensor) - The shape of tensor is :math:`(x_1, x_2, ..., x_R)`. Data type must be float16 or
+          float32.
 
     Outputs:
-        Tensor, has the same shape as `input_x`. Data type must be float16 or float32.
+        Tensor, has the same shape as `input_x`.
+
+    Supported Platforms:
+        ``Ascend``
 
     Examples:
-        >>> bessel_i1e = P.BesselI1e()
+        >>> bessel_i1e = ops.BesselI1e()
         >>> input_x = Tensor(np.array([0.24, 0.83, 0.31, 0.09]), mindspore.float32)
         >>> output = bessel_i1e(input_x)
-        [0.09507662, 0.19699717, 0.11505538, 0.04116856]
+        >>> print(output)
+        [0.09507662 0.19699717 0.11505538 0.04116856]
     """
 
     @prim_attr_register
@@ -3417,7 +3847,7 @@ class BesselI1e(PrimitiveWithInfer):
         return x
 
     def infer_dtype(self, x):
-        validator.check_tensor_type_same({'x': x}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('x', x, mstype.number_type, self.name)
         return x
 
 
@@ -3432,11 +3862,15 @@ class Inv(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape and data type as `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> inv = P.Inv()
+        >>> inv = ops.Inv()
         >>> input_x = Tensor(np.array([0.25, 0.4, 0.31, 0.52]), mindspore.float32)
         >>> output = inv(input_x)
-        [4., 2.5, 3.2258065, 1.923077]
+        >>> print(output)
+        [4.        2.5       3.2258065 1.923077 ]
     """
 
     @prim_attr_register
@@ -3447,7 +3881,7 @@ class Inv(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x_dtype': x_dtype}, [mstype.float16, mstype.float32,
+        validator.check_tensor_dtype_valid('x_dtype', x_dtype, [mstype.float16, mstype.float32,
                                                                 mstype.int32], self.name)
         return x_dtype
 
@@ -3462,11 +3896,15 @@ class Invert(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape as `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> invert = P.Invert()
+        >>> invert = ops.Invert()
         >>> input_x = Tensor(np.array([25, 4, 13, 9]), mindspore.int16)
         >>> output = invert(input_x)
-        [-26, -5, -14, -10]
+        >>> print(output)
+        [-26 -5 -14 -10]
     """
 
     @prim_attr_register
@@ -3477,13 +3915,13 @@ class Invert(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x_dtype': x_dtype}, [mstype.int16, mstype.uint16], self.name)
+        validator.check_tensor_dtype_valid('x_dtype', x_dtype, [mstype.int16, mstype.uint16], self.name)
         return x_dtype
 
 
 class Eps(PrimitiveWithInfer):
     """
-    Creates a tensor filled with `input_x` dtype minimum val.
+    Creates a tensor filled with `input_x` dtype minimum value.
 
     Inputs:
         - **input_x** (Tensor) - Input tensor. The data type must be float16 or float32.
@@ -3491,10 +3929,14 @@ class Eps(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same type and shape as `input_x`, but filled with `input_x` dtype minimum val.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor([4, 1, 2, 3], mindspore.float32)
-        >>> out = P.Eps()(input_x)
-        [1.52587891e-05, 1.52587891e-05, 1.52587891e-05, 1.52587891e-05]
+        >>> output = ops.Eps()(input_x)
+        >>> print(output)
+        [1.5258789e-05 1.5258789e-05 1.5258789e-05 1.5258789e-05]
     """
 
     @prim_attr_register
@@ -3503,8 +3945,8 @@ class Eps(PrimitiveWithInfer):
         self.init_prim_io_names(inputs=['input_x'], outputs=['y'])
 
     def __infer__(self, input_x):
-        valid_types = [mstype.float16, mstype.float32]
-        validator.check_tensor_type_same({'input_x': input_x['dtype']}, valid_types, self.name)
+        valid_dtypes = [mstype.float16, mstype.float32]
+        validator.check_tensor_dtype_valid('input_x', input_x['dtype'], valid_dtypes, self.name)
 
         x_nptype = mstype.dtype_to_nptype(input_x['dtype'].element_type())
         if x_nptype == np.float16:
@@ -3521,62 +3963,48 @@ class Eps(PrimitiveWithInfer):
         return out
 
 
-class IFMR(PrimitiveWithInfer):
-    """
-    The TFMR(Input Feature Map Reconstruction).
-
-    Args:
-        min_percentile (float): Min init percentile.
-        max_percentile (float): Max init percentile.
-        search_range Union[list(float), tuple(float)]: Range of searching.
-        search_step (float): Step size of searching.
-        with_offset (bool): Whether using offset.
+class LinSpace(PrimitiveWithInfer):
+    r"""
+    Generates values in an interval (inclusive of start and stop) and returns the corresponding
+    interpolated array with **num** number of ticks.
 
     Inputs:
-        - **data** (Tensor) - A Tensor of feature map. With float16 or float32 data type.
-        - **data_min** (Tensor) - A Tensor of min value of feature map, the shape is :math:`(1)`.
-          With float16 or float32 data type.
-        - **data_max** (Tensor) - A Tensor of max value of feature map, the shape is :math:`(1)`.
-          With float16 or float32 data type.
-        - **cumsum** (Tensor) - A `1-D` Tensor of cumsum bin of data. With int32 data type.
+        - **start** (Tensor[float32]) - Start value of interval, With shape of 0-D.
+        - **stop** (Tensor[float32]) - Last value of interval, With shape of 0-D.
+        - **num** (int) - Number of ticks in the interval, inclusive of start and stop.
 
     Outputs:
-        - **scale** (Tensor) - A tensor of optimal scale, the shape is :math:`(1)`. Data dtype is float32.
-        - **offset** (Tensor) - A tensor of optimal offset, the shape is :math:`(1)`. Data dtype is float32.
+        Tensor, has the same shape as `start`.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Examples:
-        >>> data = Tensor(np.random.rand(1, 3, 6, 4).astype(np.float32))
-        >>> data_min = Tensor([0.1], mstype.float32)
-        >>> data_max = Tensor([0.5], mstype.float32)
-        >>> cumsum = Tensor(np.random.rand(4).astype(np.int32))
-        >>> ifmr = P.IFMR(min_percentile=0.2, max_percentile=0.9, search_range=(1.0, 2.0),
-                          search_step=1.0, with_offset=False)
-        >>> output = ifmr(data, data_min, data_max, cumsum)
+        >>> linspace = P.LinSpace()
+        >>> start = Tensor(1, mindspore.float32)
+        >>> stop = Tensor(10, mindspore.float32)
+        >>> num = 5
+        >>> output = linspace(start, stop, num)
+        >>> print(output)
+        [ 1.    3.25  5.5   7.75 10.  ]
     """
 
     @prim_attr_register
-    def __init__(self, min_percentile, max_percentile, search_range, search_step, with_offset):
-        validator.check_value_type("min_percentile", min_percentile, [float], self.name)
-        validator.check_value_type("max_percentile", max_percentile, [float], self.name)
-        validator.check_value_type("search_range", search_range, [list, tuple], self.name)
-        for item in search_range:
-            validator.check_positive_float(item, "item of search_range", self.name)
-        validator.check('search_range[1]', search_range[1], 'search_range[0]', search_range[0], Rel.GE, self.name)
-        validator.check_value_type("search_step", search_step, [float], self.name)
-        validator.check_value_type("offset_flag", with_offset, [bool], self.name)
+    def __init__(self):
+        """Initialize LinSpace"""
 
-    def infer_shape(self, data_shape, data_min_shape, data_max_shape, cumsum_shape):
-        validator.check_integer("dims of data_min", len(data_min_shape), 1, Rel.EQ, self.name)
-        validator.check_integer("data_min[0]", data_min_shape[0], 1, Rel.EQ, self.name)
-        validator.check_integer("dims of data_max", len(data_max_shape), 1, Rel.EQ, self.name)
-        validator.check_integer("data_max[0]", data_max_shape[0], 1, Rel.EQ, self.name)
-        validator.check_integer("dims of cumsum", len(cumsum_shape), 1, Rel.EQ, self.name)
-        return (1,), (1,)
-
-    def infer_dtype(self, data_dtype, data_min_dtype, data_max_dtype, cumsum_dtype):
-        valid_types = [mstype.float32, mstype.float16]
-        validator.check_tensor_type_same({"input_value": data_dtype}, valid_types, self.name)
-        validator.check_tensor_type_same({"input_min": data_min_dtype}, valid_types, self.name)
-        validator.check_tensor_type_same({"input_max": data_max_dtype}, valid_types, self.name)
-        validator.check_tensor_type_same({"input_bins": cumsum_dtype}, [mstype.int32], self.name)
-        return mstype.tensor_type(mstype.float32), mstype.tensor_type(mstype.float32)
+    def __infer__(self, start, stop, num):
+        args = {"start": start['dtype'], "stop": start['dtype']}
+        validator.check_tensors_dtypes_same_and_valid(args, (mstype.float32,), self.name)
+        start_shape = start['shape']
+        stop_shape = stop['shape']
+        validator.check_equal_int(len(start_shape), 0, "rank of start_shape", self.name)
+        validator.check_equal_int(len(stop_shape), 0, "rank of stop_shape", self.name)
+        num_v = num['value']
+        validator.check_value_type('num', num_v, [int], self.name)
+        validator.check_positive_int(num_v, "num", self.name)
+        out_shape = [num_v]
+        out = {'shape': out_shape,
+               'dtype': start['dtype'],
+               'value': None}
+        return out

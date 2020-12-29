@@ -22,9 +22,11 @@
 #include <map>
 #include <set>
 #include <string>
+#include <queue>
 #include <vector>
 #include <memory>
 #include <unordered_set>
+#include <utility>
 #include "runtime/base.h"
 #include "runtime/rt_model.h"
 #include "runtime/stream.h"
@@ -35,6 +37,7 @@ namespace mindspore {
 namespace device {
 namespace ascend {
 using std::map;
+using std::queue;
 using std::shared_ptr;
 using std::unordered_map;
 using std::unordered_set;
@@ -147,10 +150,13 @@ class AscendStreamAssign {
   void InsertEventHcomDependCommon(const NotNull<KernelGraphPtr> &graph_ptr);
   void InsertEventHcomDependCommonBak(const NotNull<KernelGraphPtr> &graph_ptr);
   void InsertEventHcomDependHcom(const NotNull<KernelGraphPtr> &graph_ptr);
-  void InsertEventBetweenHcom(const NotNull<KernelGraphPtr> &graph_ptr, const map<uint32_t, vector<size_t>> &hcom_index,
-                              uint32_t first_hcom_stream, uint32_t last_hcom_stream);
-  CNodePtr GetLastInputCnode(const NotNull<KernelGraphPtr> &graph_ptr, const CNodePtr &cur_cnode_ptr);
-  bool IsSatisfiedHcom(const std::map<uint32_t, vector<size_t>> &hcom_index, const CNodePtr &node_ptr, size_t index);
+  void InsertEventBetweenHcom(const NotNull<KernelGraphPtr> &graph_ptr,
+                              const std::vector<std::pair<uint32_t, vector<size_t>>> &hcom_index);
+
+  void AdjustAtomicAddrCleanOrder(const NotNull<KernelGraphPtr> &graph_ptr);
+  vector<CNodePtr> GetLastInputCnode(const NotNull<KernelGraphPtr> &graph_ptr, const CNodePtr &cur_cnode_ptr);
+  bool IsSatisfiedHcom(const std::vector<std::pair<uint32_t, vector<size_t>>> &hcom_index, const CNodePtr &node_ptr,
+                       size_t index);
 
   void GetProcessedStream(const NotNull<KernelGraphPtr> &graph_ptr);
   void GetNeedActiveStreams(const NotNull<KernelGraphPtr> &graph_ptr);
@@ -165,7 +171,7 @@ class AscendStreamAssign {
   bool IsIndependentNode(const CNodePtr &node_ptr);
   bool IsProcessedStream(uint32_t stream_id);
   vector<CNodePtr>::iterator FindTargetOp(vector<CNodePtr>::iterator begin, vector<CNodePtr>::iterator end,
-                                          const CNodePtr &node);
+                                          const CNodePtr &node, bool exclude_hcom);
   void GetParallelStream(uint32_t cur_stream_id, uint32_t stream_acitve_id, std::vector<uint32_t> *parallel_streams);
   void SetLoopSink();
 
@@ -182,6 +188,7 @@ class AscendStreamAssign {
   void PrintStreamGroups();
   void FindEventRelations(const NotNull<KernelGraphPtr> &graph_ptr);
   bool IsSatisfiedEvent(uint32_t send_stream_id, uint32_t recv_stream_id) const;
+  vector<CNodePtr> GetInputKernels(const CNodePtr &node);
 
   bool independent_stream_activated_{false};
   bool hcom_stream_activated_{false};
@@ -193,8 +200,10 @@ class AscendStreamAssign {
   std::set<uint32_t> processed_streams_{};
   std::vector<uint32_t> need_first_active_streams_{};
   std::set<CNodeKey> independent_targets_;
+
+  // key:group name, value:key1:graph id, value1:stream id
+  std::map<std::string, std::map<uint32_t, std::set<uint32_t>>> group_hcom_graph_map_;
   // key:graph id, value:stream set
-  std::map<uint32_t, std::set<uint32_t>> hcom_graph_map_;
   std::map<uint32_t, std::set<uint32_t>> independent_graph_map_;
 
   // attr for memory copy reuse
@@ -203,6 +212,8 @@ class AscendStreamAssign {
   std::map<CNodePtr, CNodePtr> event_map_{};
   std::set<uint32_t> middle_active_streams_{};
   // new policy end
+  bool IsAllOutGraphOut(const KernelGraphPtr &graph, const CNodePtr &cnode);
+  vector<CNodePtr>::iterator FindGraphEnd(vector<CNodePtr>::iterator begin, vector<CNodePtr>::iterator end);
 };
 }  // namespace ascend
 }  // namespace device

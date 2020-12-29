@@ -14,19 +14,24 @@
  * limitations under the License.
  */
 #include "backend/optimizer/graph_kernel/graph_kernel_helper.h"
+
 #include <map>
+#include <set>
 #include <tuple>
 #include <unordered_set>
-#include "pipeline/jit/parse/python_adapter.h"
-#include "pipeline/jit/action.h"
+#include <utility>
+
 #include "backend/kernel_compiler/common_utils.h"
-#include "backend/session/anf_runtime_algorithm.h"
-#include "vm/segment_runner.h"
 #include "backend/kernel_compiler/akg/akg_kernel_json_generator.h"
 #include "backend/kernel_compiler/akg/akg_kernel_json_decoder.h"
+#include "backend/kernel_compiler/kernel.h"
+#include "backend/session/anf_runtime_algorithm.h"
+#include "backend/optimizer/pass/const_input_to_attr_registry.h"
 #include "ir/func_graph_cloner.h"
 #include "ir/func_graph.h"
-#include "backend/optimizer/pass/const_input_to_attr_registry.h"
+#include "pipeline/jit/parse/python_adapter.h"
+#include "pipeline/jit/action.h"
+#include "vm/segment_runner.h"
 #if ENABLE_GPU
 #include "runtime/device/gpu/kernel_info_setter.h"
 #endif
@@ -263,8 +268,9 @@ bool GenJson(const AnfNodePtrList &op_nodes, const AnfNodePtrList &inputs, const
   MS_LOG(INFO) << "Collect fusion json: " << fused_name;
   return true;
 }
+}  // namespace
 
-void ConvertComplexTensorToParameter(const FuncGraphPtr &fg, AnfNodePtrList *inputs_ptr) {
+bool ConvertNonscalarTensorToParameter(const FuncGraphPtr &fg, AnfNodePtrList *inputs_ptr) {
   MS_EXCEPTION_IF_NULL(inputs_ptr);
   auto nodes = TopoSort(fg->get_return());
 
@@ -284,7 +290,7 @@ void ConvertComplexTensorToParameter(const FuncGraphPtr &fg, AnfNodePtrList *inp
   }
 
   if (vmap.empty()) {
-    return;
+    return false;
   }
 
   auto mng = fg->manager();
@@ -310,11 +316,12 @@ void ConvertComplexTensorToParameter(const FuncGraphPtr &fg, AnfNodePtrList *inp
 
     inputs.push_back(vnode);
   }
+  return true;
 }
 
 // Transform nodes(including basic and composite node) to a new graph, and collect their inputs and outputs.
 std::tuple<FuncGraphPtr, AnfNodePtrList, AnfNodePtrList> MixedNodesTransToGraph(const AnfNodePtrList &fuse_nodes,
-                                                                                AnfNodePtrList *src_outputs = nullptr) {
+                                                                                AnfNodePtrList *src_outputs) {
   FuncGraphPtr fg;
   AnfNodePtrList inputs;
   AnfNodePtrList outputs;
@@ -341,13 +348,12 @@ std::tuple<FuncGraphPtr, AnfNodePtrList, AnfNodePtrList> MixedNodesTransToGraph(
   }
 
   EliminateMakeTuple(fg, mng);
-  ConvertComplexTensorToParameter(fg, &inputs);
+  ConvertNonscalarTensorToParameter(fg, &inputs);
 
   outputs.clear();
   kernel::GetFuncGraphOutputNodes(fg, &outputs);
   return std::make_tuple(fg, inputs, outputs);
 }
-}  // namespace
 
 void SetNewKernelInfo(const AnfNodePtr &new_node, const FuncGraphPtr &fg, const AnfNodePtrList &inputs,
                       const AnfNodePtrList &outputs, kernel::Processor processor) {
@@ -444,7 +450,7 @@ AnfNodePtrList GetExpandOuts(const AnfNodePtrList &outs) {
 }
 
 AnfNodePtr CreateNewFuseCNode(const FuncGraphPtr &func_graph, const FuncGraphPtr &fg, const AnfNodePtrList &inputs,
-                              const AnfNodePtrList &outputs, bool is_before_kernel_select) {
+                              const AnfNodePtrList &outputs) {
   auto func_node = NewValueNode(fg);
   std::vector<AnfNodePtr> fn_inputs;
   fn_inputs.push_back(func_node);
@@ -466,9 +472,6 @@ AnfNodePtr CreateNewFuseCNode(const FuncGraphPtr &func_graph, const FuncGraphPtr
     auto kernel_with_index = AnfAlgo::VisitKernel(inputs[i], 0);
     auto input_abs = GetOutputAbstract(kernel_with_index.first, kernel_with_index.second);
     fg->parameters()[i]->set_abstract(input_abs);
-    if (is_before_kernel_select) {
-      fg->parameters()[i]->set_kernel_info(std::make_shared<device::KernelInfo>());
-    }
   }
   return fuse_cnode;
 }
@@ -493,7 +496,7 @@ void ReplaceNewFuseCNode(const FuncGraphPtr &func_graph, const AnfNodePtr &new_f
       fn_inputs.clear();
       fn_inputs.push_back(NewValueNode(prim::kPrimTupleGetItem));
       fn_inputs.push_back(new_fuse_cnode);
-      fn_inputs.push_back(NewValueNode(MakeValue(SizeToInt(out_idx))));
+      fn_inputs.push_back(NewValueNode(MakeValue(SizeToLong(out_idx + offset))));
       auto new_out = func_graph->NewCNode(fn_inputs);
       new_out->set_abstract(outputs[out_idx]->abstract());
       mng->Replace(outputs[out_idx], new_out);
@@ -512,8 +515,8 @@ void ReplaceNewFuseCNode(const FuncGraphPtr &func_graph, const AnfNodePtr &new_f
       MS_EXCEPTION_IF_NULL(value_input);
       auto value_node = value_input->cast<ValueNodePtr>();
       MS_EXCEPTION_IF_NULL(value_node);
-      int item_idx = GetValue<int>(value_node->value());
-      int new_item_idx = SizeToInt(out_idx) + offset + item_idx;
+      auto item_idx = GetValue<int64_t>(value_node->value());
+      int64_t new_item_idx = SizeToLong(out_idx) + offset + item_idx;
       fn_inputs.clear();
       fn_inputs.push_back(NewValueNode(prim::kPrimTupleGetItem));
       fn_inputs.push_back(new_fuse_cnode);
@@ -527,13 +530,9 @@ void ReplaceNewFuseCNode(const FuncGraphPtr &func_graph, const AnfNodePtr &new_f
   }
 }
 
-void FuseNodesToSubGraph(const std::vector<AnfNodePtr> &fuse_nodes,
-                         const std::shared_ptr<session::KernelGraph> &kernel_graph, const std::string &postfix,
-                         bool is_before_kernel_select) {
-  if (fuse_nodes.empty()) {
-    return;
-  }
-
+std::tuple<AnfNodePtr, AnfNodePtrList> FuseNodesToSubGraph(const std::vector<AnfNodePtr> &fuse_nodes,
+                                                           const FuncGraphPtr &kernel_graph,
+                                                           const std::string &postfix) {
   auto mng = kernel_graph->manager();
   if (mng == nullptr) {
     mng = Manage(kernel_graph, true);
@@ -546,10 +545,8 @@ void FuseNodesToSubGraph(const std::vector<AnfNodePtr> &fuse_nodes,
   AnfNodePtrList outputs;
 
   std::tie(fg, inputs, outputs) = MixedNodesTransToGraph(fuse_nodes, &src_outputs);
-  auto fuse_new_node = CreateNewFuseCNode(kernel_graph, fg, inputs, outputs, is_before_kernel_select);
-  if (!is_before_kernel_select) {
-    SetNewKernelInfo(fuse_new_node, fg, inputs, outputs, AnfAlgo::GetProcessor(fuse_nodes[0]));
-  }
+  auto fuse_new_node = CreateNewFuseCNode(kernel_graph, fg, inputs, outputs);
+  SetNewKernelInfo(fuse_new_node, fg, inputs, outputs, AnfAlgo::GetProcessor(fuse_nodes[0]));
   // Handle get-item probleam.
   ReplaceNewFuseCNode(kernel_graph, fuse_new_node, src_outputs);
 
@@ -569,6 +566,8 @@ void FuseNodesToSubGraph(const std::vector<AnfNodePtr> &fuse_nodes,
   }
   fuse_op_name += postfix;
   fg->set_attr(FUNC_GRAPH_ATTR_GRAPH_KERNEL, MakeValue(fuse_op_name));
+
+  return std::make_tuple(fuse_new_node, src_outputs);
 }
 
 bool AnfToJsonDesc(const AnfNodePtrList &nodes, const DumpOption &dump_option, nlohmann::json *op_desc,
@@ -702,6 +701,23 @@ FuncGraphPtr JsonDescToAnf(const std::string &json_desc, const std::vector<AnfNo
 std::unordered_set<PrimitivePtr> GetExpandOps() {
   std::unordered_set<PrimitivePtr> expand_ops = {
     prim::kPrimSquare,
+    prim::kPrimGeluGrad,
+#if ENABLE_D
+    prim::kPrimTile,
+    prim::kPrimSqrtGrad,
+    prim::kPrimClipByNormNoDivSum,
+#elif ENABLE_GPU
+    prim::kPrimBiasAdd,
+    prim::kPrimBiasAddGrad,
+    prim::kPrimGelu,
+    prim::kPrimFusedAdam,
+    prim::kPrimFusedAdamWeightDecay,
+    prim::kPrimReduceMean,
+    prim::kPrimMaximumGrad,
+    prim::kPrimMinimumGrad,
+    prim::kPrimGkDropout,
+    prim::kPrimDropoutGrad,
+#endif
   };
   return expand_ops;
 }
@@ -723,13 +739,52 @@ std::string ExtractGraphKernelName(const AnfNodePtrList &cnodes, const string &p
 }
 
 std::vector<PrimitivePtr> GetFusibleOpList() {
+#if ENABLE_D
   std::vector<PrimitivePtr> fusible_basic_ops = {
-    prim::kPrimAbs,     prim::kPrimRound,  prim::kPrimNeg,        prim::kPrimExp,       prim::kPrimTensorAdd,
-    prim::kPrimRealDiv, prim::kPrimMul,    prim::kPrimMinimum,    prim::kPrimMaximum,   prim::kPrimLog,
-    prim::kPrimPow,     prim::kPrimSub,    prim::kPrimRsqrt,      prim::kPrimSqrt,      prim::kPrimCast,
-    prim::kPrimAddN,    prim::kPrimEqual,  prim::kPrimReciprocal, prim::KPrimTransData, prim::kPrimSelect,
-    prim::kPrimGreater, prim::kPrimAssign, prim::kPrimReduceSum};
+    prim::kPrimAbs,        prim::kPrimRound,      prim::kPrimNeg,     prim::kPrimExp,     prim::kPrimTensorAdd,
+    prim::kPrimExpandDims, prim::kPrimMul,        prim::kPrimMinimum, prim::kPrimMaximum, prim::kPrimLog,
+    prim::kPrimPow,        prim::kPrimSub,        prim::kPrimRsqrt,   prim::kPrimSqrt,    prim::kPrimAddN,
+    prim::kPrimEqual,      prim::kPrimReciprocal, prim::kPrimTanh,    prim::kPrimReshape, prim::kPrimTranspose,
+    prim::kPrimCast,       prim::kPrimRealDiv};
+#elif ENABLE_GPU
+  std::vector<PrimitivePtr> fusible_basic_ops = {
+    prim::kPrimAbs,     prim::kPrimRound,      prim::kPrimNeg,       prim::kPrimExp,     prim::kPrimTensorAdd,
+    prim::kPrimRealDiv, prim::kPrimMul,        prim::kPrimMinimum,   prim::kPrimMaximum, prim::kPrimLog,
+    prim::kPrimPow,     prim::kPrimSub,        prim::kPrimRsqrt,     prim::kPrimSqrt,    prim::kPrimAddN,
+    prim::kPrimEqual,   prim::kPrimReciprocal, prim::KPrimTransData, prim::kPrimSelect,  prim::kPrimGreater,
+    prim::kPrimAssign,  prim::kPrimReduceSum,  prim::kPrimTanh,      prim::kPrimReshape, prim::kPrimTranspose,
+    prim::kPrimCast};
+#else
+  std::vector<PrimitivePtr> fusible_basic_ops;
+#endif
   return fusible_basic_ops;
+}
+
+bool CheckProcessor(const AnfNodePtr &node, kernel::Processor processor = kernel::Processor::AICORE) {
+  MS_EXCEPTION_IF_NULL(node);
+
+  auto node_kernel_info = dynamic_cast<device::KernelInfo *>(node->kernel_info());
+  if (node_kernel_info == nullptr) {
+    return false;
+  }
+
+  auto node_build_info = node_kernel_info->GetMutableSelectKernelBuildInfo();
+  if (node_build_info == nullptr) {
+    return false;
+  }
+
+  return node_build_info->processor() == processor;
+}
+
+bool IsBasicFuseOp(const AnfNodePtr &node) {
+  std::vector<PrimitivePtr> basic_ops = GetFusibleOpList();
+#if ENABLE_D
+  if (!CheckProcessor(node)) {
+    return false;
+  }
+#endif
+  return std::any_of(basic_ops.begin(), basic_ops.end(),
+                     [&node](const PrimitivePtr &prim) { return IsPrimitiveCNode(node, prim); });
 }
 
 void ResetKernelInfo(const AnfNodePtr &node, KernelType kernel_type) {
@@ -738,6 +793,228 @@ void ResetKernelInfo(const AnfNodePtr &node, KernelType kernel_type) {
 #if ENABLE_GPU
   device::gpu::SetKernelInfo(cnode, kernel_type);
 #endif
+}
+
+void InitDependPrior(const std::vector<AnfNodePtr> &todos,
+                     std::multimap<AnfNodePtr, std::pair<AnfNodePtr, AnfNodePtr>> *depend_prior) {
+  for (auto iter = todos.cbegin(); iter != todos.cend(); ++iter) {
+    auto cnode = (*iter)->cast<CNodePtr>();
+    if (cnode == nullptr) {
+      continue;
+    }
+    if (!AnfAlgo::CheckPrimitiveType(cnode, prim::kPrimControlDepend)) {
+      continue;
+    }
+
+    auto prior_node = cnode->input(kControlDependPriorIndex);
+    auto depend_node = cnode->input(kControlDependBehindIndex);
+    MS_EXCEPTION_IF_NULL(prior_node);
+    MS_EXCEPTION_IF_NULL(depend_node);
+    std::vector<AnfNodePtr> prior_nodes = {prior_node};
+    std::vector<AnfNodePtr> depend_nodes = {depend_node};
+
+    int depend_mode = 0;
+    if (AnfAlgo::HasNodeAttr(kControlDependMode, cnode)) {
+      depend_mode = AnfAlgo::GetNodeAttr<int64_t>(cnode, kControlDependMode);
+    }
+
+    auto GetOutputNodes = [cnode](const AnfNodePtr &param) -> std::vector<AnfNodePtr> {
+      std::vector<AnfNodePtr> out_nodes;
+      auto user_set = param->func_graph()->manager()->node_users()[param];
+      for (auto iter = user_set.cbegin(); iter != user_set.cend(); ++iter) {
+        if (iter->first != cnode) {
+          out_nodes.push_back(iter->first);
+        }
+      }
+      return out_nodes;
+    };
+
+    if (prior_node->isa<Parameter>() && depend_mode == 1) {
+      prior_nodes = GetOutputNodes(prior_node);
+    }
+    if (depend_node->isa<Parameter>()) {
+      depend_nodes = depend_mode == 1 ? GetOutputNodes(depend_node) : std::vector<AnfNodePtr>{};
+    }
+
+    std::vector<AnfNodePtr> real_prior_nodes;
+    std::set<AnfNodePtr> prior_visited;
+    for (const auto &tmp : prior_nodes) {
+      AnfAlgo::GetAllFatherRealNode(tmp, &real_prior_nodes, &prior_visited);
+    }
+    prior_visited.clear();
+    std::vector<AnfNodePtr> real_depend_nodes;
+    std::set<AnfNodePtr> depend_visited;
+    for (const auto &tmp : depend_nodes) {
+      AnfAlgo::GetAllFatherRealNode(tmp, &real_depend_nodes, &depend_visited);
+    }
+    depend_visited.clear();
+
+    for (auto &prior : real_prior_nodes) {
+      if (AnfAlgo::CheckPrimitiveType(prior, prim::kPrimControlDepend)) {
+        continue;
+      }
+      for (auto &depend : real_depend_nodes) {
+        if (AnfAlgo::CheckPrimitiveType(depend, prim::kPrimControlDepend)) {
+          continue;
+        }
+        depend_prior->insert({depend, std::make_pair(prior, cnode)});
+      }
+    }
+    real_prior_nodes.clear();
+    real_depend_nodes.clear();
+  }
+}
+
+void ReplaceNewFuseCNodeForDependPrior(std::multimap<AnfNodePtr, std::pair<AnfNodePtr, AnfNodePtr>> *depend_prior,
+                                       const AnfNodePtr &new_fuse_cnode, const AnfNodePtrList &outputs) {
+  std::multimap<AnfNodePtr, std::pair<AnfNodePtr, AnfNodePtr>> new_fuse_cnode_dep_pri;
+
+  for (size_t out_idx = 0; out_idx < outputs.size(); ++out_idx) {
+    if (IsPrimitiveCNode(outputs[out_idx], prim::kPrimMakeTuple)) {
+      MS_LOG(ERROR) << "Need real outputs of makeTuple";
+    }
+    if (IsPrimitiveCNode(outputs[out_idx], prim::kPrimTupleGetItem)) {
+      continue;
+    }
+    for (auto iter = (*depend_prior).begin(); iter != (*depend_prior).end();) {
+      if (iter->first == outputs[out_idx]) {
+        new_fuse_cnode_dep_pri.insert({new_fuse_cnode, iter->second});
+        iter = depend_prior->erase(iter);
+        continue;
+      }
+      if (iter->second.first == outputs[out_idx]) {
+        new_fuse_cnode_dep_pri.insert({iter->first, std::make_pair(new_fuse_cnode, iter->second.second)});
+        iter = depend_prior->erase(iter);
+        continue;
+      }
+      ++iter;
+    }
+  }
+
+  for (auto item : new_fuse_cnode_dep_pri) {
+    depend_prior->insert(item);
+  }
+}
+
+std::string GetFormat(const AnfNodePtr &node) {
+  auto kernel_info = static_cast<device::KernelInfo *>(node->kernel_info());
+  MS_EXCEPTION_IF_NULL(kernel_info);
+  auto kernel_build_info = kernel_info->select_kernel_build_info();
+  MS_EXCEPTION_IF_NULL(kernel_build_info);
+  return kernel_build_info->GetOutputFormat(0);
+}
+
+TypePtr GetType(const AnfNodePtr &node) {
+  const auto &abstract = node->abstract();
+  auto type = abstract->BuildType();
+  MS_EXCEPTION_IF_NULL(type);
+  return type;
+}
+
+ShapeVector GetShape(const AnfNodePtr &node) {
+  auto abstract = node->abstract();
+  MS_EXCEPTION_IF_NULL(abstract);
+  auto shape = abstract->GetShapeTrack();
+  if (shape == nullptr || !shape->isa<abstract::Shape>()) {
+    MS_LOG(EXCEPTION) << "Cannot get shape from " << node->fullname_with_scope();
+  }
+  return shape->cast<abstract::ShapePtr>()->shape();
+}
+
+std::vector<int64_t> GetReduceAxis(const AnfNodePtr &node) {
+  auto prim = GetCNodePrimitive(node);
+  MS_EXCEPTION_IF_NULL(prim);
+  const auto &attrs = prim->attrs();
+  auto iter = attrs.find("axis");
+  if (iter == attrs.end()) {
+    MS_LOG(EXCEPTION) << "Origin node have no attributes!";
+  }
+
+  std::vector<int64_t> axis;
+
+  auto &v = iter->second;
+  if (v->isa<ValueList>() || v->isa<ValueTuple>()) {
+    auto vec = v->isa<ValueList>() ? v->cast<ValueListPtr>()->value() : v->cast<ValueTuplePtr>()->value();
+    for (auto value : vec) {
+      if (value->isa<Int64Imm>()) {
+        axis.push_back(GetValue<int64_t>(value));
+      } else {
+        MS_LOG(EXCEPTION) << "Reduce axis type should be int64!";
+      }
+    }
+  } else if (v->isa<Int64Imm>()) {
+    axis.push_back(GetValue<int64_t>(v));
+  } else {
+    MS_LOG(EXCEPTION) << "Reduce axis should be a list or tuple!";
+  }
+
+  return axis;
+}
+
+CNodePtr CreateCNode(const std::vector<AnfNodePtr> &inputs, const FuncGraphPtr &func_graph, const DataInfo &out_info) {
+  // Limitation: 1. Node's attributes should be set out of this function; 2. only one output.
+  MS_EXCEPTION_IF_NULL(out_info.type);
+  auto out_type = out_info.type;
+  if (auto otype = out_info.type->cast<TensorTypePtr>(); otype != nullptr) {
+    out_type = otype->element();
+  }
+
+  // Create CNode.
+  auto cnode = func_graph->NewCNode(inputs);
+  MS_EXCEPTION_IF_NULL(cnode);
+
+  // Setup abstract.
+  auto abs_tensor = std::make_shared<abstract::AbstractTensor>(out_type, out_info.shape);
+  cnode->set_abstract(abs_tensor);
+
+  // Setup kernel info.
+  auto kernel_info = std::make_shared<device::KernelInfo>();
+  cnode->set_kernel_info(kernel_info);
+  std::vector<size_t> feature_map_input_indexs;
+  kernel_info->set_feature_map_flag(false);
+  for (size_t i = 1; i < inputs.size(); ++i) {
+    if (AnfAlgo::IsFeatureMapOutput(inputs[i])) {
+      kernel_info->set_feature_map_flag(true);
+      feature_map_input_indexs.push_back(i);
+    }
+  }
+  if (inputs.size() == 1) {
+    kernel_info->set_feature_map_flag(true);
+  }
+  if (AnfAlgo::IsRealKernel(cnode)) {
+    // if the node only has the primitive(such as getNext) or the node's input has a feature map input
+    // then the node's output is a feature map output
+    AnfAlgo::SetNodeAttr(kIsFeatureMapOutput, MakeValue(kernel_info->is_feature_map()), cnode);
+    AnfAlgo::SetNodeAttr(kIsFeatureMapInputList, MakeValue(feature_map_input_indexs), cnode);
+  }
+
+  // Setup kernel build info.
+  std::vector<std::string> input_formats;
+  std::vector<TypeId> input_types;
+  for (size_t i = 1; i < inputs.size(); ++i) {
+    auto kernel_with_index = AnfAlgo::VisitKernel(inputs[i], 0);
+    auto input_format = AnfAlgo::GetOutputFormat(kernel_with_index.first, kernel_with_index.second);
+    input_formats.push_back(input_format);
+    auto input_type = AnfAlgo::GetOutputDeviceDataType(kernel_with_index.first, kernel_with_index.second);
+    input_types.push_back(input_type);
+  }
+
+  std::vector<std::string> output_formats = {out_info.format};
+  std::vector<TypeId> output_types = {out_type->type_id()};
+
+  kernel::KernelBuildInfo::KernelBuildInfoBuilder info_builder;
+  info_builder.SetInputsFormat(input_formats);
+  info_builder.SetInputsDeviceType(input_types);
+  info_builder.SetOutputsFormat(output_formats);
+  info_builder.SetOutputsDeviceType(output_types);
+  info_builder.SetProcessor(kernel::Processor::CUDA);
+  info_builder.SetKernelType(KernelType::AKG_KERNEL);
+  info_builder.SetFusionType(kernel::FusionType::OPAQUE);
+  auto selected_info = info_builder.Build();
+  AnfAlgo::SetSelectKernelBuildInfo(selected_info, cnode.get());
+
+  func_graph->AddNode(cnode);
+  return cnode;
 }
 }  // namespace opt
 }  // namespace mindspore

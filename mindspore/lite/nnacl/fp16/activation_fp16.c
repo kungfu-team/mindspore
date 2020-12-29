@@ -66,7 +66,7 @@ int SigmoidFp16(const float16_t *src, float16_t *dst, int ele_num) {
   return NNACL_OK;
 }
 
-float16_t TanhOpt(float16_t src) {
+float16_t TanhOptFp16(float16_t src) {
   if (src > 5.0) {
     return 1.0f;
   } else if (src < -5.0) {
@@ -81,7 +81,7 @@ float16_t TanhOpt(float16_t src) {
 
 int TanhFp16(const float16_t *src, float16_t *dst, int ele_num) {
   for (int i = 0; i < ele_num; ++i) {
-    dst[i] = TanhOpt(src[i]);
+    dst[i] = TanhOptFp16(src[i]);
   }
   return NNACL_OK;
 }
@@ -91,6 +91,18 @@ int HSwishFp16(const float16_t *src, float16_t *dst, int ele_num) {
     float16_t in = src[i];
     float16_t relu6 = MSMIN(MSMAX(in + 3, 0), 6);
     dst[i] = in * relu6 / (float16_t)6.0f;
+  }
+  return NNACL_OK;
+}
+
+int SwishFp16(const float16_t *src, float16_t *dst, int ele_num) {
+  int ret = SigmoidFp16(src, dst, ele_num);
+  if (ret != NNACL_OK) {
+    return NNACL_ERR;
+  }
+  int index = 0;
+  for (; index < ele_num; index++) {
+    dst[index] = src[index] * dst[index];
   }
   return NNACL_OK;
 }

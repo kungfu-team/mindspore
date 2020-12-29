@@ -18,8 +18,8 @@
 #include <memory>
 #include "schema/inner/model_generated.h"
 #include "common/common_test.h"
-#include "mindspore/lite/src/runtime/kernel/arm/fp32/activation.h"
-#include "mindspore/lite/nnacl/fp32/activation.h"
+#include "mindspore/lite/src/runtime/kernel/arm/fp32/activation_fp32.h"
+#include "mindspore/lite/nnacl/fp32/activation_fp32.h"
 #include "mindspore/lite/src/runtime/kernel/arm/int8/hswish_int8.h"
 #include "mindspore/lite/src/kernel_registry.h"
 #include "mindspore/lite/include/context.h"
@@ -36,8 +36,8 @@ TEST_F(TestHSwishInt8, HSwish) {
 
   int8_t input_data[] = {-116, -105, -93, -35, 23, 35, 46, 104};  // -3.5f, -3.0f, -2.5f, 0.f, 2.5f, 3.0f, 3.5f, 6.0f
   int8_t output_data[8] = {0};
-  in_tensor.SetData(input_data);
-  out_tensor.SetData(output_data);
+  in_tensor.set_data(input_data);
+  out_tensor.set_data(output_data);
 
   const lite::QuantArg quant_in = {0.0431373f, -35};   // -4.0 -- 7.0
   const lite::QuantArg quant_out = {0.0392157f, -52};  // -3.0 -- 7.0
@@ -69,7 +69,7 @@ TEST_F(TestHSwishInt8, HSwish) {
     EXPECT_EQ(output_data[i], expect[i]);
   }
 
-  in_tensor.SetData(nullptr);
-  out_tensor.SetData(nullptr);
+  in_tensor.set_data(nullptr);
+  out_tensor.set_data(nullptr);
 }
 }  // namespace mindspore

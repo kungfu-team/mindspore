@@ -14,31 +14,29 @@
  * limitations under the License.
  */
 
-#include <stdlib.h>
-#include <fcntl.h>
-#include <climits>
-#include <cmath>
 #include "src/common/file_utils.h"
+#include <fcntl.h>
+#include <cstdlib>
+#include <climits>
 #include "securec/include/securec.h"
 
 namespace mindspore {
 namespace lite {
-#define MAX_FILENAME_LEN 1024
 char *ReadFile(const char *file, size_t *size) {
   if (file == nullptr) {
     MS_LOG(ERROR) << "file is nullptr";
     return nullptr;
   }
   MS_ASSERT(size != nullptr);
-  std::string realPath = RealPath(file);
-  std::ifstream ifs(realPath);
+  std::string real_path = RealPath(file);
+  std::ifstream ifs(real_path);
   if (!ifs.good()) {
-    MS_LOG(ERROR) << "file: " << realPath << " is not exist";
+    MS_LOG(ERROR) << "file: " << real_path << " is not exist";
     return nullptr;
   }
 
   if (!ifs.is_open()) {
-    MS_LOG(ERROR) << "file: " << realPath << " open failed";
+    MS_LOG(ERROR) << "file: " << real_path << " open failed";
     return nullptr;
   }
 
@@ -46,7 +44,7 @@ char *ReadFile(const char *file, size_t *size) {
   *size = ifs.tellg();
   std::unique_ptr<char[]> buf(new (std::nothrow) char[*size]);
   if (buf == nullptr) {
-    MS_LOG(ERROR) << "malloc buf failed, file: " << realPath;
+    MS_LOG(ERROR) << "malloc buf failed, file: " << real_path;
     ifs.close();
     return nullptr;
   }
@@ -67,70 +65,21 @@ std::string RealPath(const char *path) {
     MS_LOG(ERROR) << "path is too long";
     return "";
   }
-  auto resolvedPath = std::make_unique<char[]>(PATH_MAX);
-  if (resolvedPath == nullptr) {
-    MS_LOG(ERROR) << "new resolvedPath failed";
+  auto resolved_path = std::make_unique<char[]>(PATH_MAX);
+  if (resolved_path == nullptr) {
+    MS_LOG(ERROR) << "new resolved_path failed";
     return "";
   }
 #ifdef _WIN32
-  char *real_path = _fullpath(resolvedPath.get(), path, 1024);
+  char *real_path = _fullpath(resolved_path.get(), path, 1024);
 #else
-  char *real_path = realpath(path, resolvedPath.get());
+  char *real_path = realpath(path, resolved_path.get());
 #endif
   if (real_path == nullptr || strlen(real_path) == 0) {
-    MS_LOG(ERROR) << "Proto file path is not valid";
+    MS_LOG(ERROR) << "file path is not valid : " << path;
     return "";
   }
-  std::string res = resolvedPath.get();
-  return res;
-}
-
-int WriteToBin(const std::string &file_path, void *data, size_t size) {
-  std::ofstream out_file;
-
-  out_file.open(file_path.c_str(), std::ios::binary);
-  if (!out_file.good()) {
-    MS_LOG(ERROR) << "file is bad";
-    return -1;
-  }
-
-  if (!out_file.is_open()) {
-    MS_LOG(ERROR) << "file open failed";
-    return -1;
-  }
-  out_file.write(reinterpret_cast<char *>(data), size);
-  return 0;
-}
-
-int CompareOutputData(float *output_data, size_t output_size, float *correct_data, size_t data_size) {
-  if (output_size != data_size) {
-    printf("compare failed, output_size %zu isn't equal to data_size %zu.\n", output_size, data_size);
-    return 0;
-  }
-  float error = 0;
-  for (size_t i = 0; i < data_size; i++) {
-    float abs = fabs(output_data[i] - correct_data[i]);
-    if (abs > 0.00001) {
-      error += abs;
-    }
-  }
-  error /= data_size;
-
-  if (error > 0.0001) {
-    printf("has accuracy error!\n");
-    printf("%f\n", error);
-    return 1;
-  }
-  return 0;
-}
-
-int CompareOutput(float *output_data, size_t output_num, std::string file_path) {
-  size_t ground_truth_size;
-  auto ground_truth = reinterpret_cast<float *>(mindspore::lite::ReadFile(file_path.c_str(), &ground_truth_size));
-  size_t ground_truth_num = ground_truth_size / sizeof(float);
-  printf("ground truth num : %zu\n", ground_truth_num);
-  int res = CompareOutputData(output_data, output_num, ground_truth, ground_truth_num);
-  delete[] ground_truth;
+  std::string res = resolved_path.get();
   return res;
 }
 }  // namespace lite

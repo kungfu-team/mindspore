@@ -80,7 +80,7 @@ int ScaleFp16CPUKernel::Scale(int task_id) {
       DoScaleRelu6Fp16(input_, output_, scale_, offset_, task_id, scale_param_);
       break;
     case schema::ActivationType_RELU:
-      DoScaleReluFp16(input_, output_, scale_, offset_, task_id, scale_param_);
+      Fp16DoScaleRelu(input_, output_, scale_, offset_, task_id, scale_param_);
       break;
     case schema::ActivationType_NO_ACTIVATION:
       DoScaleFp16(input_, output_, scale_, offset_, task_id, scale_param_);
@@ -103,12 +103,7 @@ int ScaleFp16Run(void *cdata, int task_id) {
 }
 
 int ScaleFp16CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << ret;
-    return ret;
-  }
-  ret = InitScaleOffset();
+  auto ret = InitScaleOffset();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Scale fp16 InitScaleOffset failed.";
     return RET_ERROR;
@@ -124,6 +119,7 @@ int ScaleFp16CPUKernel::Run() {
   ret = ParallelLaunch(this->context_->thread_pool_, ScaleFp16Run, this, op_parameter_->thread_num_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Scale error error_code[" << ret << "]";
+    FreeTmpBuffer();
     return RET_ERROR;
   }
 
@@ -185,30 +181,5 @@ void ScaleFp16CPUKernel::FreeTmpBuffer() {
   }
 }
 
-kernel::LiteKernel *CpuScaleFp16KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                              const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                              const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                              const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(desc.type == schema::PrimitiveType_Scale);
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "opParameter is nullptr";
-    return nullptr;
-  }
-
-  auto *kernel = new (std::nothrow) ScaleFp16CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "New kernel fails.";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Scale, CpuScaleFp16KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Scale, LiteKernelCreator<ScaleFp16CPUKernel>)
 }  // namespace mindspore::kernel

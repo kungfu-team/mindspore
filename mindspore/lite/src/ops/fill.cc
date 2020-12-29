@@ -16,6 +16,10 @@
 
 #include "src/ops/fill.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -48,6 +52,8 @@ std::vector<int> Fill::GetDims() const {
   return std::vector<int>(fb_vector->begin(), fb_vector->end());
 }
 
+PrimitiveC *FillCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Fill>(primitive); }
+Registry FillRegistry(schema::PrimitiveType_Fill, FillCreator);
 #endif
 
 int Fill::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
@@ -63,14 +69,14 @@ int Fill::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> output
     return RET_INPUT_TENSOR_ERROR;
   }
   output->set_data_type(input->data_type());
-  output->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output->set_format(input->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
 
   std::vector<int> output_shape;
   for (size_t i = 0; i < GetDims().size(); i++) {
-    output_shape.push_back(GetDims()[i]);
+    output_shape.push_back(GetDims().at(i));
   }
   output->set_shape(output_shape);
   return RET_OK;

@@ -28,9 +28,7 @@
 #include "base/base.h"
 #include "abstract/dshape.h"
 
-namespace mindspore {
-namespace lite {
-namespace quant {
+namespace mindspore::lite::quant {
 class WeightQuantizer : public Quantizer {
  public:
   WeightQuantizer(FuncGraphPtr graph, const std::string &weightSize, const std::string &covWeightChannelThreshold,
@@ -43,14 +41,13 @@ class WeightQuantizer : public Quantizer {
   STATUS DoMulQuantize(const std::list<CNodePtr> &nodes);
   static STATUS WeightQuantInputCheck(const converter::Flags *config);
   static bool IsPosNum(const std::string &str);
-  int quant_max{INT8_MAX};
-  int quant_min{INT8_MIN};
+  int quant_max;
+  int quant_min;
+  TypeId type_id{kTypeUnknown};
 
  private:
   std::unique_ptr<QuantStrategy> mStrategy;
   size_t bitNum;
 };
-}  // namespace quant
-}  // namespace lite
-}  // namespace mindspore
+}  // namespace mindspore::lite::quant
 #endif

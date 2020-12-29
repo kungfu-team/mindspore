@@ -21,7 +21,7 @@
 #define MAX_THREAD_NUM 8
 namespace mindspore::lite {
 ParallelExecutor::~ParallelExecutor() { DestroyThreadPool(thread_pool_); }
-int ParallelExecutor::Prepare(std::vector<mindspore::kernel::LiteKernel *> &kernels) {
+int ParallelExecutor::Prepare(const std::vector<mindspore::kernel::LiteKernel *> &kernels) {
   thread_pool_ = CreateLiteThreadPool(MAX_THREAD_NUM, NO_BIND);
   if (thread_pool_ == nullptr) {
     MS_LOG(ERROR) << "Memory error: fail to new ThreadPool";
@@ -31,7 +31,7 @@ int ParallelExecutor::Prepare(std::vector<mindspore::kernel::LiteKernel *> &kern
 }
 
 static int RunKernel(void *data, int index) {
-  ParallelExecutor *executor = reinterpret_cast<ParallelExecutor *>(data);
+  auto *executor = reinterpret_cast<ParallelExecutor *>(data);
   auto kernel = executor->GetReadyKernel(index);
   auto ret = kernel->Run();
   executor->SetResult(index, ret);
@@ -40,46 +40,44 @@ static int RunKernel(void *data, int index) {
     return 0;
   }
 
-  for (auto input_kernel : kernel->in_kernels()) {
-    MS_ASSERT(input_kernel != nullptr);
-    if (input_kernel->is_model_output()) {
-      continue;
-    }
-    ret = input_kernel->DecOutTensorRefCount();
-    if (0 != ret) {
-      MS_LOG(WARNING) << "DecOutTensorRefCount for kernel" << kernel->name() << " failed";
-    }
+  ret = kernel->FreeInWorkTensor();
+  if (RET_OK != ret) {
+    MS_LOG(ERROR) << "FreeInWorkTensor failed, name: " << kernel->name();
+    return ret;
   }
   return 0;
 }
 
 int ParallelExecutor::Run(std::vector<Tensor *> &in_tensors, std::vector<Tensor *> &out_tensors,
                           std::vector<kernel::LiteKernel *> &kernels, Allocator *allocator,
-                          const session::KernelCallBack &before, const session::KernelCallBack &after) {
+                          const KernelCallBack &before, const KernelCallBack &after) {
   MS_ASSERT(nullptr != allocator);
   for (auto &inTensor : in_tensors) {
     if (inTensor == nullptr) {
       MS_LOG(ERROR) << "Graph input tensor is nullptr";
       return RET_ERROR;
     }
-    if (inTensor->GetFormat() != schema::Format::Format_NHWC) {
+    if (inTensor->format() != schema::Format::Format_NHWC) {
       MS_LOG(ERROR) << "Model input tensor should be NHWC";
       return RET_ERROR;
     }
   }
-  kernel::LiteKernelUtil::InitTensorRefCount(kernels);
+  kernel::LiteKernelUtil::InitTensorInitRefCount(kernels);
 
   for (auto kernel : kernels) {
-    if (kernel->in_kernels().size() == 0) {
+    if (kernel->in_kernels().empty()) {
       readyKernels.emplace_back(kernel);
       continue;
     }
     refCount[kernel] = kernel->in_kernels().size();
   }
   std::vector<kernel::LiteKernel *> newReadyKernels;
-  while (readyKernels.size() > 0) {
+  while (!readyKernels.empty()) {
     results.resize(readyKernels.size(), RET_OK);
-    ParallelLaunch(thread_pool_, RunKernel, this, readyKernels.size());
+    if (0 != ParallelLaunch(thread_pool_, RunKernel, this, readyKernels.size())) {
+      MS_LOG(ERROR) << "ParallelLaunch failed ";
+      return RET_ERROR;
+    }
 
     if (std::find_if(results.begin(), results.end(), [](const int &ret) { return (ret != 0); }) != results.end()) {
       return RET_ERROR;
@@ -98,16 +96,10 @@ int ParallelExecutor::Run(std::vector<Tensor *> &in_tensors, std::vector<Tensor 
         }
       }
 
-      for (auto input_kernel : completed->in_kernels()) {
-        MS_ASSERT(input_kernel != nullptr);
-        if (input_kernel->is_model_output()) {
-          continue;
-        }
-        auto ret = input_kernel->DecOutTensorRefCount();
-        if (0 != ret) {
-          MS_LOG(WARNING) << "DecOutTensorRefCount for kernel" << completed->name() << " failed";
-          return -1;
-        }
+      auto ret = completed->FreeInWorkTensor();
+      if (RET_OK != ret) {
+        MS_LOG(ERROR) << "FreeInWorkTensor failed, name: " << completed->name();
+        return ret;
       }
     }
     readyKernels.clear();

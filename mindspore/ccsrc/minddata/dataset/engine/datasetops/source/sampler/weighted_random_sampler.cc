@@ -27,27 +27,29 @@
 namespace mindspore {
 namespace dataset {
 //  Constructor.
-WeightedRandomSampler::WeightedRandomSampler(int64_t num_samples, const std::vector<double> &weights, bool replacement,
-                                             int64_t samples_per_buffer)
-    : Sampler(num_samples, samples_per_buffer),
+WeightedRandomSamplerRT::WeightedRandomSamplerRT(int64_t num_samples, const std::vector<double> &weights,
+                                                 bool replacement, int64_t samples_per_buffer)
+    : SamplerRT(num_samples, samples_per_buffer),
       weights_(weights),
       replacement_(replacement),
       sample_id_(0),
       buffer_id_(0) {}
 
 // Initialized this Sampler.
-Status WeightedRandomSampler::InitSampler() {
+Status WeightedRandomSamplerRT::InitSampler() {
   // Special value of 0 for num_samples means that the user wants to sample the entire set of data.
   // If the user asked to sample more rows than exists in the dataset, adjust the num_samples accordingly.
   if (num_samples_ == 0 || num_samples_ > num_rows_) {
     num_samples_ = num_rows_;
   }
-  CHECK_FAIL_RETURN_UNEXPECTED(num_rows_ > 0 && num_samples_,
-                               "Invalid parameter, num_samples & num_rows must be greater than 0, but got num_rows: " +
-                                 std::to_string(num_rows_) + ", num_samples: " + std::to_string(num_samples_));
+  CHECK_FAIL_RETURN_UNEXPECTED(
+    num_rows_ > 0 && num_samples_,
+    "Invalid parameter, num_samples and num_rows must be greater than 0, but got num_rows: " +
+      std::to_string(num_rows_) + ", num_samples: " + std::to_string(num_samples_));
   CHECK_FAIL_RETURN_UNEXPECTED(samples_per_buffer_ > 0,
                                "Invalid parameter, samples_per_buffer must be greater than 0, but got " +
                                  std::to_string(samples_per_buffer_) + ".\n");
+
   if (weights_.size() > static_cast<size_t>(num_rows_)) {
     return Status(StatusCode::kUnexpectedError, __LINE__, __FILE__,
                   "Invalid parameter, size of sample weights must be less than or equal to num of data, "
@@ -56,7 +58,7 @@ Status WeightedRandomSampler::InitSampler() {
   }
   if (!replacement_ && (weights_.size() < static_cast<size_t>(num_samples_))) {
     RETURN_STATUS_UNEXPECTED(
-      "Invalid parameter, without replacement, weights size must be greater than or equal to num_samples, "
+      "Invalid parameter, without replacement, weight size must be greater than or equal to num_samples, "
       "but got weight size: " +
       std::to_string(weights_.size()) + ", num_samples: " + std::to_string(num_samples_));
   }
@@ -77,7 +79,7 @@ Status WeightedRandomSampler::InitSampler() {
 }
 
 // Initialized the computation for generating weighted random numbers without replacement using onepass method.
-void WeightedRandomSampler::InitOnePassSampling() {
+void WeightedRandomSamplerRT::InitOnePassSampling() {
   exp_dist_->reset();
   onepass_ids_.clear();
   std::vector<std::pair<double, int64_t>> val_idx;
@@ -93,7 +95,7 @@ void WeightedRandomSampler::InitOnePassSampling() {
 }
 
 // Reset the internal variable to the initial state and reshuffle the indices.
-Status WeightedRandomSampler::ResetSampler() {
+Status WeightedRandomSamplerRT::ResetSampler() {
   sample_id_ = 0;
   buffer_id_ = 0;
   rand_gen_.seed(GetSeed());
@@ -111,7 +113,7 @@ Status WeightedRandomSampler::ResetSampler() {
 }
 
 // Get the sample ids.
-Status WeightedRandomSampler::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) {
+Status WeightedRandomSamplerRT::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) {
   if (weights_.size() > static_cast<size_t>(num_rows_)) {
     return Status(StatusCode::kUnexpectedError, __LINE__, __FILE__,
                   "Invalid parameter, size of sample weights must be less than or equal to num of data, "
@@ -121,7 +123,7 @@ Status WeightedRandomSampler::GetNextSample(std::unique_ptr<DataBuffer> *out_buf
 
   if (!replacement_ && (weights_.size() < static_cast<size_t>(num_samples_))) {
     RETURN_STATUS_UNEXPECTED(
-      "Invalid parameter, without replacement, weights size must be greater than or equal to num_samples, "
+      "Invalid parameter, without replacement, weight size must be greater than or equal to num_samples, "
       "but got weight size: " +
       std::to_string(weights_.size()) + ", num_samples: " + std::to_string(num_samples_));
   }
@@ -179,11 +181,11 @@ Status WeightedRandomSampler::GetNextSample(std::unique_ptr<DataBuffer> *out_buf
   return Status::OK();
 }
 
-void WeightedRandomSampler::Print(std::ostream &out, bool show_all) const {
+void WeightedRandomSamplerRT::SamplerPrint(std::ostream &out, bool show_all) const {
   out << "\nSampler: WeightedRandomSampler";
   if (show_all) {
     // Call the super class for displaying any common detailed info
-    Sampler::Print(out, show_all);
+    SamplerRT::SamplerPrint(out, show_all);
     // Then add our own info if any
   }
 }

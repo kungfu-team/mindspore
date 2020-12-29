@@ -16,6 +16,10 @@
 
 #include "src/ops/skip_gram.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -40,7 +44,7 @@ int SkipGram::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffer
     return RET_ERROR;
   }
 
-  auto val_offset = schema::CreateSkipGram(*fbb, attr->ngramSize(), attr->maxSkipSize(), attr->includeAllGrams());
+  auto val_offset = schema::CreateSkipGram(*fbb, attr->includeAllGrams(), attr->maxSkipSize(), attr->ngramSize());
   auto prim_offset = schema::CreatePrimitive(*fbb, schema::PrimitiveType_SkipGram, val_offset.o);
   fbb->Finish(prim_offset);
   return RET_OK;
@@ -50,6 +54,10 @@ int SkipGram::GetNgramSize() const { return this->primitive_->value_as_SkipGram(
 int SkipGram::GetMaxSkipSize() const { return this->primitive_->value_as_SkipGram()->maxSkipSize(); }
 bool SkipGram::GetIncludeAllNgrams() const { return this->primitive_->value_as_SkipGram()->includeAllGrams(); }
 
+PrimitiveC *SkipGramCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<SkipGram>(primitive);
+}
+Registry SkipGramRegistry(schema::PrimitiveType_SkipGram, SkipGramCreator);
 #endif
 
 int SkipGram::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
@@ -65,10 +73,14 @@ int SkipGram::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> ou
   auto input = inputs_.front();
   auto output = outputs_.front();
   MS_ASSERT(input != nullptr);
-  output->SetFormat(input->GetFormat());
+  output->set_format(input->format());
   output->set_data_type(input->data_type());
 
-  return RET_INFER_INVALID;
+  if (input->data_c() == nullptr) {
+    MS_LOG(INFO) << "Do infer shape in runtime.";
+    return RET_INFER_INVALID;
+  }
+  return RET_OK;
 }
 }  // namespace lite
 }  // namespace mindspore

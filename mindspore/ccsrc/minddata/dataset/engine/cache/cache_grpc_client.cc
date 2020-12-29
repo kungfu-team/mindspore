@@ -20,11 +20,12 @@ namespace dataset {
 CacheClientGreeter::~CacheClientGreeter() { (void)ServiceStop(); }
 
 CacheClientGreeter::CacheClientGreeter(const std::string &hostname, int32_t port, int32_t num_connections)
-    : num_connections_(num_connections), request_cnt_(0) {
+    : num_connections_(num_connections), request_cnt_(0), hostname_(std::move(hostname)), port_(port) {
   grpc::ChannelArguments args;
   // We need to bump up the message size to unlimited. The default receiving
   // message limit is 4MB which is not big enough.
   args.SetMaxReceiveMessageSize(-1);
+  MS_LOG(INFO) << "Hostname: " << hostname_ << ", port: " << std::to_string(port_);
 #if CACHE_LOCAL_CLIENT
   // Try connect locally to the unix_socket first as the first preference
   // Need to resolve hostname to ip address rather than to do a string compare
@@ -41,11 +42,11 @@ CacheClientGreeter::CacheClientGreeter(const std::string &hostname, int32_t port
   stub_ = CacheServerGreeter::NewStub(channel_);
 }
 
-Status CacheClientGreeter::AttachToSharedMemory(int32_t port, bool *local_bypass) {
+Status CacheClientGreeter::AttachToSharedMemory(bool *local_bypass) {
   *local_bypass = false;
 #if CACHE_LOCAL_CLIENT
   SharedMemory::shm_key_t shm_key;
-  RETURN_IF_NOT_OK(PortToFtok(port, &shm_key));
+  RETURN_IF_NOT_OK(PortToFtok(port_, &shm_key));
   // Attach to the shared memory
   mem_.SetPublicKey(shm_key);
   RETURN_IF_NOT_OK(mem_.Attach());
@@ -118,8 +119,8 @@ Status CacheClientGreeter::WorkerEntry() {
           auto error_code = rq->rc_.error_code();
           std::string err_msg;
           if (error_code == grpc::StatusCode::UNAVAILABLE) {
-            err_msg =
-              "Cache server is unreachable. Make sure the server is running.  GRPC Code" + std::to_string(error_code);
+            err_msg = "Cache server with port " + std::to_string(port_) +
+                      " is unreachable. Make sure the server is running. GRPC Code " + std::to_string(error_code);
           } else {
             err_msg = rq->rc_.error_message() + ". GRPC Code " + std::to_string(error_code);
           }

@@ -17,29 +17,55 @@
 #ifndef MINDSPORE_CCSRC_MINDDATA_DATASET_INCLUDE_SAMPLERS_H_
 #define MINDSPORE_CCSRC_MINDDATA_DATASET_INCLUDE_SAMPLERS_H_
 
-#include <vector>
 #include <memory>
+#include <string>
+#include <vector>
+
+#ifndef ENABLE_ANDROID
+#include "minddata/dataset/engine/datasetops/source/mindrecord_op.h"
+#endif
 
 namespace mindspore {
 namespace dataset {
 
 // Internal Sampler class forward declaration
-class Sampler;
-
-namespace api {
+class SamplerRT;
 
 class SamplerObj : public std::enable_shared_from_this<SamplerObj> {
  public:
+  /// \brief Constructor
   SamplerObj();
 
+  /// \brief Destructor
   ~SamplerObj() = default;
 
-  virtual std::shared_ptr<Sampler> Build() = 0;
+  /// \brief Pure virtual function for derived class to implement parameters validation
+  /// \return bool true if all the parameters are valid
   virtual bool ValidateParams() = 0;
+
+  /// \brief Pure virtual function to convert a SamplerObj class into a runtime sampler object
+  /// \return Shared pointers to the newly created Sampler
+  virtual std::shared_ptr<SamplerRT> Build() = 0;
+
+  /// \brief Pure virtual function to copy a SamplerObj class
+  /// \return Shared pointers to the newly copied SamplerObj
+  virtual std::shared_ptr<SamplerObj> Copy() = 0;
+
+  /// \brief Function for derived class to get the shard id of sampler
+  /// \return The shard id of the derived sampler
+  virtual int64_t ShardId() { return 0; }
+
+#ifndef ENABLE_ANDROID
+  /// \brief Virtual function to convert a SamplerObj class into a runtime mindrecord sampler object,
+  ///     only override by SubsetRandomSampler, PkSampler, RandomSampler, SequentialSampler, DistributedSampler
+  /// \return Shared pointers to the newly created Sampler
+  virtual std::shared_ptr<mindrecord::ShardOperator> BuildForMindDataset() { return nullptr; }
+#endif
 };
 
 class DistributedSamplerObj;
 class PKSamplerObj;
+class PreBuiltSamplerObj;
 class RandomSamplerObj;
 class SequentialSamplerObj;
 class SubsetRandomSamplerObj;
@@ -108,9 +134,22 @@ class DistributedSamplerObj : public SamplerObj {
 
   ~DistributedSamplerObj() = default;
 
-  std::shared_ptr<Sampler> Build() override;
+  std::shared_ptr<SamplerRT> Build() override;
+
+  std::shared_ptr<SamplerObj> Copy() override {
+    return std::make_shared<DistributedSamplerObj>(num_shards_, shard_id_, shuffle_, num_samples_, seed_, offset_,
+                                                   even_dist_);
+  }
+
+#ifndef ENABLE_ANDROID
+  std::shared_ptr<mindrecord::ShardOperator> BuildForMindDataset() override;
+#endif
 
   bool ValidateParams() override;
+
+  /// \brief Function to get the shard id of sampler
+  /// \return The shard id of sampler
+  int64_t ShardId() override { return shard_id_; }
 
  private:
   int64_t num_shards_;
@@ -128,7 +167,15 @@ class PKSamplerObj : public SamplerObj {
 
   ~PKSamplerObj() = default;
 
-  std::shared_ptr<Sampler> Build() override;
+  std::shared_ptr<SamplerRT> Build() override;
+
+  std::shared_ptr<SamplerObj> Copy() override {
+    return std::make_shared<PKSamplerObj>(num_val_, shuffle_, num_samples_);
+  }
+
+#ifndef ENABLE_ANDROID
+  std::shared_ptr<mindrecord::ShardOperator> BuildForMindDataset() override;
+#endif
 
   bool ValidateParams() override;
 
@@ -138,13 +185,45 @@ class PKSamplerObj : public SamplerObj {
   int64_t num_samples_;
 };
 
+class PreBuiltSamplerObj : public SamplerObj {
+ public:
+  explicit PreBuiltSamplerObj(std::shared_ptr<SamplerRT> sampler);
+#ifndef ENABLE_ANDROID
+  explicit PreBuiltSamplerObj(std::shared_ptr<mindrecord::ShardOperator> sampler);
+#endif
+
+  ~PreBuiltSamplerObj() = default;
+
+  std::shared_ptr<SamplerRT> Build() override;
+
+#ifndef ENABLE_ANDROID
+  std::shared_ptr<mindrecord::ShardOperator> BuildForMindDataset() override;
+#endif
+
+  std::shared_ptr<SamplerObj> Copy() override;
+
+  bool ValidateParams() override;
+
+ private:
+  std::shared_ptr<SamplerRT> sp_;
+#ifndef ENABLE_ANDROID
+  std::shared_ptr<mindrecord::ShardOperator> sp_minddataset_;
+#endif
+};
+
 class RandomSamplerObj : public SamplerObj {
  public:
   RandomSamplerObj(bool replacement, int64_t num_samples);
 
   ~RandomSamplerObj() = default;
 
-  std::shared_ptr<Sampler> Build() override;
+  std::shared_ptr<SamplerRT> Build() override;
+
+  std::shared_ptr<SamplerObj> Copy() override { return std::make_shared<RandomSamplerObj>(replacement_, num_samples_); }
+
+#ifndef ENABLE_ANDROID
+  std::shared_ptr<mindrecord::ShardOperator> BuildForMindDataset() override;
+#endif
 
   bool ValidateParams() override;
 
@@ -159,7 +238,15 @@ class SequentialSamplerObj : public SamplerObj {
 
   ~SequentialSamplerObj() = default;
 
-  std::shared_ptr<Sampler> Build() override;
+  std::shared_ptr<SamplerRT> Build() override;
+
+  std::shared_ptr<SamplerObj> Copy() override {
+    return std::make_shared<SequentialSamplerObj>(start_index_, num_samples_);
+  }
+
+#ifndef ENABLE_ANDROID
+  std::shared_ptr<mindrecord::ShardOperator> BuildForMindDataset() override;
+#endif
 
   bool ValidateParams() override;
 
@@ -174,7 +261,15 @@ class SubsetRandomSamplerObj : public SamplerObj {
 
   ~SubsetRandomSamplerObj() = default;
 
-  std::shared_ptr<Sampler> Build() override;
+  std::shared_ptr<SamplerRT> Build() override;
+
+  std::shared_ptr<SamplerObj> Copy() override {
+    return std::make_shared<SubsetRandomSamplerObj>(indices_, num_samples_);
+  }
+
+#ifndef ENABLE_ANDROID
+  std::shared_ptr<mindrecord::ShardOperator> BuildForMindDataset() override;
+#endif
 
   bool ValidateParams() override;
 
@@ -189,7 +284,11 @@ class WeightedRandomSamplerObj : public SamplerObj {
 
   ~WeightedRandomSamplerObj() = default;
 
-  std::shared_ptr<Sampler> Build() override;
+  std::shared_ptr<SamplerRT> Build() override;
+
+  std::shared_ptr<SamplerObj> Copy() override {
+    return std::make_shared<WeightedRandomSamplerObj>(weights_, num_samples_, replacement_);
+  }
 
   bool ValidateParams() override;
 
@@ -198,7 +297,6 @@ class WeightedRandomSamplerObj : public SamplerObj {
   int64_t num_samples_;
   bool replacement_;
 };
-}  // namespace api
 }  // namespace dataset
 }  // namespace mindspore
 #endif  // MINDSPORE_CCSRC_MINDDATA_DATASET_INCLUDE_SAMPLERS_H_

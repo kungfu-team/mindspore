@@ -16,6 +16,11 @@
 
 #include "src/ops/clip.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+#include "nnacl/clip.h"
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -42,6 +47,9 @@ int Clip::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::F
 float Clip::GetMax() const { return this->primitive_->value_as_Clip()->max(); }
 float Clip::GetMin() const { return this->primitive_->value_as_Clip()->min(); }
 
+PrimitiveC *ClipCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Clip>(primitive); }
+Registry ClipRegistry(schema::PrimitiveType_Clip, ClipCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

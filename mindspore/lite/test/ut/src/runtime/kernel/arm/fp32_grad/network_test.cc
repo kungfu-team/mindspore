@@ -23,14 +23,12 @@
 #include <functional>
 
 #include "schema/inner/model_generated.h"
-#include "mindspore/lite/include/train_model.h"
 #include "common/common_test.h"
 #include "include/train_session.h"
 #include "include/context.h"
 #include "include/errorcode.h"
 #include "src/common/log_adapter.h"
 #include "src/common/file_utils.h"
-#include "src/common/file_utils_ext.h"
 #include "src/kernel_registry.h"
 #include "src/runtime/kernel/arm/fp32_grad/convolution.h"
 
@@ -91,6 +89,7 @@ TEST_F(NetworkTest, tuning_layer) {
     node->primitive = std::make_unique<schema::PrimitiveT>();
     node->primitive->value.type = schema::PrimitiveType_Activation;
     auto primitive = new schema::ActivationT;
+    ASSERT_NE(primitive, nullptr);
     primitive->type = schema::ActivationType_RELU;
     node->primitive->value.value = primitive;
     node->name = "ReLU";
@@ -103,6 +102,7 @@ TEST_F(NetworkTest, tuning_layer) {
     node->primitive = std::make_unique<schema::PrimitiveT>();
     node->primitive->value.type = schema::PrimitiveType_MatMul;
     auto primitive = new schema::MatMulT;
+    ASSERT_NE(primitive, nullptr);
     primitive->transposeA = false;
     primitive->transposeB = true;
     node->primitive->value.value = primitive;
@@ -116,6 +116,7 @@ TEST_F(NetworkTest, tuning_layer) {
     node->primitive = std::make_unique<schema::PrimitiveT>();
     node->primitive->value.type = schema::PrimitiveType_BiasAdd;
     auto primitive = new schema::BiasAddT;
+    ASSERT_NE(primitive, nullptr);
     primitive->axis.push_back(0);
     node->primitive->value.value = primitive;
     node->name = "BiasAdd";
@@ -128,7 +129,7 @@ TEST_F(NetworkTest, tuning_layer) {
     node->primitive = std::make_unique<schema::PrimitiveT>();
     node->primitive->value.type = schema::PrimitiveType_SoftmaxCrossEntropy;
     auto primitive = new schema::SoftmaxCrossEntropyT;
-    primitive->axis.push_back(0);
+    ASSERT_NE(primitive, nullptr);
     node->primitive->value.value = primitive;
     node->name = "SoftmaxCrossEntropy";
     meta_graph->nodes.emplace_back(std::move(node));
@@ -140,7 +141,7 @@ TEST_F(NetworkTest, tuning_layer) {
     node->primitive = std::make_unique<schema::PrimitiveT>();
     node->primitive->value.type = schema::PrimitiveType_BiasGrad;
     auto primitive = new schema::BiasGradT;
-    primitive->axis.push_back(0);
+    ASSERT_NE(primitive, nullptr);
     node->primitive->value.value = primitive;
     node->name = "BiasGrad";
     meta_graph->nodes.emplace_back(std::move(node));
@@ -152,6 +153,7 @@ TEST_F(NetworkTest, tuning_layer) {
     node->primitive = std::make_unique<schema::PrimitiveT>();
     node->primitive->value.type = schema::PrimitiveType_MatMul;
     auto primitive = new schema::MatMulT;
+    ASSERT_NE(primitive, nullptr);
     primitive->transposeA = true;
     primitive->transposeB = false;
     node->primitive->value.value = primitive;
@@ -165,6 +167,7 @@ TEST_F(NetworkTest, tuning_layer) {
     node->primitive = std::make_unique<schema::PrimitiveT>();
     node->primitive->value.type = schema::PrimitiveType_ApplyMomentum;
     auto primitive = new schema::ApplyMomentumT;
+    ASSERT_NE(primitive, nullptr);
     node->primitive->value.value = primitive;
     node->name = "Momentum";
     meta_graph->nodes.emplace_back(std::move(node));
@@ -176,6 +179,7 @@ TEST_F(NetworkTest, tuning_layer) {
     node->primitive = std::make_unique<schema::PrimitiveT>();
     node->primitive->value.type = schema::PrimitiveType_ApplyMomentum;
     auto primitive = new schema::ApplyMomentumT;
+    ASSERT_NE(primitive, nullptr);
     node->primitive->value.value = primitive;
     node->name = "Momentum";
     meta_graph->nodes.emplace_back(std::move(node));
@@ -250,7 +254,7 @@ TEST_F(NetworkTest, tuning_layer) {
     auto label = std::make_unique<schema::TensorT>();
     label->nodeType = schema::NodeType::NodeType_ValueNode;
     label->format = schema::Format_NHWC;
-    label->dataType = TypeId::kNumberTypeInt32;
+    label->dataType = TypeId::kNumberTypeFloat32;
     label->dims = {BATCH_SIZE * NUM_CLASSES};
     label->offset = -1;
     meta_graph->allTensors.emplace_back(std::move(label));
@@ -348,22 +352,18 @@ TEST_F(NetworkTest, tuning_layer) {
   flatbuffers::FlatBufferBuilder builder(1024);
   auto offset = schema::MetaGraph::Pack(builder, meta_graph.get());
   builder.Finish(offset);
+  schema::FinishMetaGraphBuffer(builder, offset);
   size_t size = builder.GetSize();
   const char *content = reinterpret_cast<char *>(builder.GetBufferPointer());
   std::cout << "build fb size= " << size << std::endl;
 
-  auto model = lite::TrainModel::Import(content, size);
-  ASSERT_NE(nullptr, model);
   meta_graph.reset();
   content = nullptr;
   lite::Context context;
-  context.device_type_ = lite::DT_CPU;
-  context.cpu_bind_mode_ = lite::NO_BIND;
+  context.device_list_[0].device_info_.cpu_device_info_.cpu_bind_mode_ = lite::NO_BIND;
   context.thread_num_ = 1;
-  auto session = session::TrainSession::CreateSession(&context);
+  auto session = session::TrainSession::CreateSession(content, size, &context);
   ASSERT_NE(nullptr, session);
-  auto ret = session->CompileTrainGraph(model);
-  ASSERT_EQ(lite::RET_OK, ret);
   session->Train();
   session->Train();  // Just double check that calling Train twice does not cause a problem
 
@@ -386,10 +386,12 @@ TEST_F(NetworkTest, tuning_layer) {
   auto labelTensor = inputs.at(1);
   ASSERT_NE(nullptr, labelTensor);
   ASSERT_EQ(BATCH_SIZE * NUM_CLASSES, labelTensor->ElementsNum());
-  auto labels = reinterpret_cast<int *>(labelTensor->MutableData());
-  for (int i = 0; i < BATCH_SIZE; i++) labels[i] = (i * 97) % NUM_CLASSES;
 
-  ret = session->RunGraph();
+  auto labels = reinterpret_cast<float *>(labelTensor->MutableData());
+  std::fill(labels, labels + labelTensor->ElementsNum(), 0.f);
+  for (int i = 0; i < BATCH_SIZE; i++) labels[i * NUM_CLASSES + (i * 97) % NUM_CLASSES] = 1.0;
+
+  auto ret = session->RunGraph();
   ASSERT_EQ(lite::RET_OK, ret);
   auto outputs = session->GetOutputsByNodeName("SoftmaxCrossEntropy");
   ASSERT_EQ(outputs.size(), 1);
@@ -417,7 +419,7 @@ TEST_F(NetworkTest, tuning_layer) {
   }
   std::cout << std::endl;
   std::string output_path = "./test_data/train/train_output_32_10.bin";
-  auto error = lite::RelativeOutputError(outData, output_path);
+  auto error = RelativeOutputError(outData, output_path);
   EXPECT_LT(error, 2e-3);
 
   ret = session->RunGraph();
@@ -432,7 +434,7 @@ TEST_F(NetworkTest, tuning_layer) {
     std::cout << outData[i] << ", ";
   }
   std::cout << std::endl;
-  error = lite::RelativeOutputError(outData, output_path);
+  error = RelativeOutputError(outData, output_path);
   EXPECT_LT(error, 2e-3);
 
   session->Train();
@@ -448,11 +450,8 @@ TEST_F(NetworkTest, tuning_layer) {
     std::cout << outData[i] << ", ";
   }
   std::cout << std::endl;
-  error = lite::RelativeOutputError(outData, output_path);
+  error = RelativeOutputError(outData, output_path);
   EXPECT_LT(error, 2e-3);
-
-  delete session;
-  MS_LOG(INFO) << "TuningLayer passed";
 }
 
 int32_t fileIterator(mindspore::session::TrainSession *session, const std::string &path,
@@ -501,30 +500,21 @@ int32_t runNet(mindspore::session::LiteSession *session, const std::string &in, 
       }
       std::cout << std::endl;
     }
-    return mindspore::lite::CompareRelativeOutput(output_data, out);
+    return CommonTest::CompareRelativeOutput(output_data, out);
   }
 
   return lite::RET_ERROR;
 }
 
 TEST_F(NetworkTest, efficient_net) {
-  char *buf = nullptr;
-  size_t net_size = 0;
-
-  std::string net = "./test_data/nets/effnetb0_fwd_nofuse.ms";
-  ReadFile(net.c_str(), &net_size, &buf);
-  auto model = lite::TrainModel::Import(buf, net_size);
-  delete[] buf;
   auto context = new lite::Context;
-  context->device_type_ = lite::DT_CPU;
-  context->cpu_bind_mode_ = lite::NO_BIND;
+  ASSERT_NE(context, nullptr);
+  context->device_list_[0].device_info_.cpu_device_info_.cpu_bind_mode_ = lite::NO_BIND;
   context->thread_num_ = 1;
 
-  auto session = session::TrainSession::CreateSession(context);
+  std::string net = "./test_data/nets/effnetb0_fwd_nofuse.ms";
+  auto session = session::TrainSession::CreateSession(net, context, false);
   ASSERT_NE(session, nullptr);
-  auto ret = session->CompileTrainGraph(model);
-  ASSERT_EQ(lite::RET_OK, ret);
-  session->Eval();
 
   std::string in = "./test_data/nets/effNet_input_x_1_3_224_224.bin";
   std::string out = "./test_data/nets/effNet_output_y_1_1000.bin";
@@ -534,90 +524,6 @@ TEST_F(NetworkTest, efficient_net) {
   ASSERT_EQ(res, 0);
 }
 
-TEST_F(NetworkTest, lenetnet) {
-  char *buf = nullptr;
-  size_t net_size = 0;
-  std::string net = "./test_data/nets/lenet_train.ms";
-  ReadFile(net.c_str(), &net_size, &buf);
-  auto model = lite::TrainModel::Import(buf, net_size);
-  delete[] buf;
-  auto context = new lite::Context;
-  context->device_type_ = lite::DT_CPU;
-  context->cpu_bind_mode_ = lite::NO_BIND;
-  context->thread_num_ = 1;
-
-  // check registration
-  mindspore::lite::KernelRegistry *reg = mindspore::lite::KernelRegistry::GetInstance();
-  mindspore::kernel::KernelKey desc1 = {mindspore::kernel::KERNEL_ARCH::kCPU, kNumberTypeFloat32,
-                                        mindspore::schema::PrimitiveType_Conv2D};
-  mindspore::kernel::KernelKey desc2 = {mindspore::kernel::KERNEL_ARCH::kCPU, kNumberTypeFloat32,
-                                        mindspore::schema::PrimitiveType_DepthwiseConv2D};
-  auto regb1 = reg->GetCreator(desc1);
-  auto regb2 = reg->GetCreator(desc2);
-  ASSERT_EQ(regb1 == mindspore::kernel::CpuConvTrainFp32KernelCreator, false);
-
-  auto session = session::TrainSession::CreateSession(context);
-  ASSERT_NE(session, nullptr);
-  auto ret = session->CompileTrainGraph(model);
-  ASSERT_EQ(lite::RET_OK, ret);
-
-  auto rega1 = reg->GetCreator(desc1);
-  auto rega2 = reg->GetCreator(desc2);
-  ASSERT_EQ(regb1, rega1);
-  ASSERT_EQ(regb2, rega2);
-  ASSERT_EQ(rega1 == mindspore::kernel::CpuConvTrainFp32KernelCreator, false);
-  // end of check registration
-
-  session->Eval();
-  std::string in = "./test_data/nets/x_lenet.bin";
-  std::string out = "./test_data/nets/y_lenet.bin";
-  auto res = runNet(session, in, out, "24");
-  delete session;
-  delete context;
-  ASSERT_EQ(res, 0);
-}
-#if 0
-TEST_F(NetworkTest, retina_net) {
-  char *buf = nullptr;
-  size_t net_size = 0;
-
-  std::string net = "./test_data/nets/retinaface1009.ms";
-  ReadFile(net.c_str(), &net_size, &buf);
-  // auto model = lite::TrainModel::Import(buf, net_size);
-  auto model = lite::Model::Import(buf, net_size);
-  delete[] buf;
-  auto context = new lite::Context;
-  context->device_type_ = lite::DT_CPU;
-  context->cpu_bind_mode_ = lite::NO_BIND;
-  context->thread_num_ = 1;
-
-  // auto session = session::TrainSession::CreateSession(context);
-  auto session = session::LiteSession::CreateSession(context);
-  ASSERT_NE(session, nullptr);
-  auto ret = session->CompileGraph(model);
-  ASSERT_EQ(lite::RET_OK, ret);
-  // session->Eval();
-
-  std::string in = "./test_data/nets/retinaface_input.f32";
-  std::cout << "----- Output 0 -----" << std::endl;
-  std::string out = "./test_data/nets/retinaface_out_0.f32";
-  auto res = runNet(session, in, out, "448", true);
-  ASSERT_EQ(res, 0);
-
-  std::cout << "----- Output 1 -----" << std::endl;
-  out = "./test_data/nets/retinaface_out_1.f32";
-  res = runNet(session, in, out, "435", true);
-  ASSERT_EQ(res, 0);
-
-  std::cout << "----- Output 2 -----" << std::endl;
-  out = "./test_data/nets/retinaface_out_2.f32";
-  res = runNet(session, in, out, "421", true);
-  ASSERT_EQ(res, 0);
-
-  delete session;
-  delete context;
-}
-#endif
 TEST_F(NetworkTest, mobileface_net) {
   char *buf = nullptr;
   size_t net_size = 0;
@@ -628,8 +534,8 @@ TEST_F(NetworkTest, mobileface_net) {
   auto model = lite::Model::Import(buf, net_size);
   delete[] buf;
   auto context = new lite::Context;
-  context->device_type_ = lite::DT_CPU;
-  context->cpu_bind_mode_ = lite::NO_BIND;
+  ASSERT_NE(context, nullptr);
+  context->device_list_[0].device_info_.cpu_device_info_.cpu_bind_mode_ = lite::NO_BIND;
   context->thread_num_ = 1;
 
   // auto session = session::TrainSession::CreateSession(context);

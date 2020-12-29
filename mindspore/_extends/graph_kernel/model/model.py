@@ -65,11 +65,12 @@ class PrimLib:
     """Prim lib"""
 
     UNKNOWN = 0
-    ELEMWISE = 1
-    BROADCAST = 2
-    REDUCE = 3
-    TRANSFORM = 4
-    CONTROL = 5
+    RESHAPE = 1
+    ELEMWISE = 2
+    BROADCAST = 3
+    REDUCE = 4
+    TRANSFORM = 5
+    CONTROL = 6
 
     class Prim:
         """Prim"""
@@ -80,6 +81,11 @@ class PrimLib:
             self.relation_func = relation_func
             if relation_func is None:
                 self.relation_func = lambda *x: self.default_relation_func[iter_type](self, *x)
+
+        def default_reshape_relation(self, op, input_idx):
+            axis_relation, elem_relation = self.unknown_relation(op, input_idx)
+            elem_relation = [PrimLib.RESHAPE] * len(elem_relation)
+            return axis_relation, elem_relation
 
         def default_elemwise_broadcast_relation(self, op, input_idx):
             """Process elemwise and broadcast relation"""
@@ -116,6 +122,7 @@ class PrimLib:
 
         default_relation_func = [
             unknown_relation,
+            default_reshape_relation,
             default_elemwise_broadcast_relation,
             default_elemwise_broadcast_relation,
             default_reduce_relation,
@@ -153,7 +160,17 @@ class PrimLib:
         'make_tuple': Prim(CONTROL),
         'ControlDepend': Prim(CONTROL),
         'Assign': Prim(ELEMWISE),
+        'Tanh': Prim(ELEMWISE),
+        'ExpandDims': Prim(RESHAPE),
+        'InplaceAssign': Prim(ELEMWISE),
         '@ReduceInit': Prim(ELEMWISE),
+        'Reshape': Prim(RESHAPE),
+        'Squeeze': Prim(RESHAPE),
+        'Flatten': Prim(RESHAPE),
+        'FlattenGrad': Prim(RESHAPE),
+        'Transpose': Prim(TRANSFORM),
+        'Tile': Prim(BROADCAST),
+        'BroadcastTo': Prim(BROADCAST),
     }
 
     default_primtive = Prim(UNKNOWN)
@@ -257,10 +274,10 @@ class Value:
         self.data_format = data_format
 
     def __str__(self):
-        return self.name + str(list(self.shape)) + str(self.value)
+        return self.name + str(list(self.shape))
 
     def __repr__(self):
-        return "%s.%s%s%s" % (self.name, self.dtype, str(list(self.shape)), str(self.value))
+        return "%s.%s%s" % (self.name, self.dtype, str(list(self.shape)))
 
     def get_size(self):
         return 1
@@ -296,6 +313,7 @@ class Graph:
     def __init__(self, name, ops):
         self.name = name
         self.ops = ops  # in topo order, can not use set
+        self.inputs = []
         self.outputs = []
 
     def set_processor(self, processor):
@@ -341,6 +359,9 @@ class Graph:
                         if d not in self.ops:
                             outputs.append(op.output)
                             break
+        if self.inputs:
+            inputs = self.inputs
+
         if self.outputs:
             outputs = self.outputs
         return inputs, outputs

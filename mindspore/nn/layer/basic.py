@@ -14,28 +14,79 @@
 # ============================================================================
 
 """basic"""
-
+import math
 import numpy as np
 import mindspore.common.dtype as mstype
-from mindspore.common.seed import get_seed
+from mindspore.ops.composite.multitype_ops import _constexpr_utils as const_utils
+from mindspore.common.seed import _get_graph_seed
 from mindspore.common.tensor import Tensor
 from mindspore.common.initializer import initializer
 from mindspore.ops import operations as P
 from mindspore.ops import functional as F
 from mindspore.ops.functional import identity
 from mindspore.ops.operations import _inner_ops as inner
-from mindspore.ops.primitive import constexpr
+from mindspore.ops.primitive import constexpr, Primitive
 from mindspore.common.parameter import Parameter
 from mindspore._extends import cell_attr_register
 from mindspore._checkparam import Rel, Validator
-from mindspore.common.api import ms_function
 from mindspore import context
 from ..cell import Cell
 from .activation import get_activation
 
-
 __all__ = ['Dropout', 'Flatten', 'Dense', 'ClipByNorm', 'Norm', 'OneHot', 'Pad', 'Unfold',
-           'MatrixDiag', 'MatrixDiagPart', 'MatrixSetDiag']
+           'Tril', 'Triu', 'ResizeBilinear', 'MatrixDiag', 'MatrixDiagPart', 'MatrixSetDiag', 'L1Regularizer']
+
+
+class L1Regularizer(Cell):
+    """
+    Apply l1 regularization to weights
+
+    l1 regularization makes weights sparsity
+
+    Note:
+        scale(regularization factor) should be a number which greater than 0
+
+    Args:
+        scale (int, float): l1 regularization factor which greater than 0.
+
+    Raises:
+        ValueError: If `scale(regularization factor)` is not greater than 0.
+                    If `scale(regularization factor)` is math.inf or math.nan.
+
+    Inputs:
+        - **weights** (Tensor) - The input tensor
+
+    Outputs:
+        Tensor, which dtype is higher precision data type between mindspore.float32 and weights dtype,
+        and Tensor shape is ()
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
+    Examples:
+        >>> scale = 0.5
+        >>> net = nn.L1Regularizer(scale)
+        >>> weights = Tensor(np.array([[1.0, -2.0], [-3.0, 4.0]]).astype(np.float32))
+        >>> output = net(weights)
+        >>> print(output.asnumpy())
+        5.0
+    """
+
+    def __init__(self, scale):
+        super(L1Regularizer, self).__init__()
+        Validator.check_value_type("scale", scale, [int, float], self.cls_name)
+        if scale <= 0:
+            raise ValueError("scale should be a number which greater than 0")
+        if math.isinf(scale) or math.isnan(scale):
+            raise ValueError("scale can not be INF or NAN")
+        self.abs = P.Abs()
+        self.reduce_sum = P.ReduceSum()
+        self.scale = Tensor(scale, dtype=mstype.float32)
+
+    def construct(self, weights):
+        const_utils.check_valid_type(F.dtype(weights), mstype.number_type, 'weights')
+        l1_regularization = self.scale * self.reduce_sum(self.abs(weights))
+        return l1_regularization
 
 
 class Dropout(Cell):
@@ -48,7 +99,7 @@ class Dropout(Cell):
     Note:
         Each channel will be zeroed out independently on every construct call.
 
-        The outputs are scaled by a factor of :math:`\frac{1}{keep\_prob}` during training so
+        The outputs are scaled by a factor of :math:`\frac{1}{keep\_prob}`    during training so
         that the output layer remains at a similar scale. During inference, this
         layer returns the same tensor as the input.
 
@@ -72,14 +123,17 @@ class Dropout(Cell):
     Outputs:
         Tensor, output tensor with the same shape as the input.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> x = Tensor(np.ones([2, 2, 3]), mindspore.float32)
         >>> net = nn.Dropout(keep_prob=0.8)
-        >>> net(x)
-        [[[1.0, 1.0, 1.0],
-          [1.0, 1.0, 1.0]],
-         [[1.0, 1.0, 1.0],
-          [1.0, 1.0, 1.0]]]
+        >>> net.set_train()
+        Dropout<keep_prob=0.8, dtype=Float32>
+        >>> output = net(x)
+        >>> print(output.shape)
+        (2, 2, 3)
     """
 
     def __init__(self, keep_prob=0.5, dtype=mstype.float32):
@@ -89,22 +143,22 @@ class Dropout(Cell):
         Validator.check_subclass("dtype", dtype, mstype.number_type, self.cls_name)
         Validator.check_value_type('keep_prob', keep_prob, [float], self.cls_name)
         self.keep_prob = keep_prob
-        seed0 = get_seed()
-        self.seed0 = seed0 if seed0 is not None else 0
-        self.seed1 = 0
+        seed0, seed1 = _get_graph_seed(0, "dropout")
+        self.seed0 = seed0
+        self.seed1 = seed1
         self.dtype = dtype
         self.get_shape = P.Shape()
         self.dropout_gen_mask = P.DropoutGenMask(Seed0=self.seed0, Seed1=self.seed1)
         self.dropout_do_mask = P.DropoutDoMask()
         self.cast = P.Cast()
-        self.is_gpu = context.get_context('device_target') in ["GPU"]
+        self.is_ascend = context.get_context('device_target') in ["Ascend"]
         self.dropout = P.Dropout(keep_prob)
 
     def construct(self, x):
         if not self.training:
             return x
 
-        if self.is_gpu:
+        if not self.is_ascend:
             out, _ = self.dropout(x)
             return out
 
@@ -121,8 +175,7 @@ class Dropout(Cell):
         return self.dropout_do_mask(x, output, keep_prob)
 
     def extend_repr(self):
-        str_info = 'keep_prob={}, dtype={}'.format(self.keep_prob, self.dtype)
-        return str_info
+        return 'keep_prob={}, dtype={}'.format(self.keep_prob, self.dtype)
 
 
 class Flatten(Cell):
@@ -138,10 +191,14 @@ class Flatten(Cell):
         Tensor, the shape of the output tensor is :math:`(N, X)`, where :math:`X` is
         the product of the remaining dimensions.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input = Tensor(np.array([[[1.2, 1.2], [2.1, 2.1]], [[2.2, 2.2], [3.2, 3.2]]]), mindspore.float32)
         >>> net = nn.Flatten()
-        >>> net(input)
+        >>> output = net(input)
+        >>> print(output)
         [[1.2 1.2 2.1 2.1]
          [2.2 2.2 3.2 3.2]]
     """
@@ -151,6 +208,14 @@ class Flatten(Cell):
 
     def construct(self, x):
         return F.reshape(x, (F.shape(x)[0], -1))
+
+
+@constexpr
+def get_broadcast_weight_bias_shape(x_shape, out_channel, in_channel):
+    """get broadcast_weight_bias shape"""
+    broad_weight_shape = x_shape[:-2] + (out_channel, in_channel)
+    broad_bias_shape = x_shape[:-1] + (out_channel,)
+    return broad_weight_shape, broad_bias_shape
 
 
 class Dense(Cell):
@@ -175,26 +240,30 @@ class Dense(Cell):
         bias_init (Union[Tensor, str, Initializer, numbers.Number]): The trainable bias_init parameter. The dtype is
             same as input x. The values of str refer to the function `initializer`. Default: 'zeros'.
         has_bias (bool): Specifies whether the layer uses a bias vector. Default: True.
-        activation (str): activate function applied to the output of the fully connected layer, eg. 'ReLU'.
-            Default: None.
+        activation (Union[str, Cell, Primitive]): activate function applied to the output of the fully connected layer,
+            eg. 'ReLU'.Default: None.
 
     Raises:
         ValueError: If weight_init or bias_init shape is incorrect.
 
     Inputs:
-        - **input** (Tensor) - Tensor of shape :math:`(N, in\_channels)`.
+        - **input** (Tensor) - Tensor of shape :math:`(*, in\_channels)`.
 
     Outputs:
-        Tensor of shape :math:`(N, out\_channels)`.
+        Tensor of shape :math:`(*, out\_channels)`.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
 
     Examples:
-        >>> input = Tensor(np.random.randint(0, 255, [2, 3]), mindspore.float32)
+        >>> input = Tensor(np.array([[180, 234, 154], [244, 48, 247]]), mindspore.float32)
         >>> net = nn.Dense(3, 4)
-        >>> net(input)
-        [[ 2.5246444   2.2738023   0.5711005  -3.9399147 ]
-         [ 1.0739875   4.0155234   0.94188046 -5.459526  ]]
+        >>> output = net(input)
+        >>> print(output.shape)
+        (2, 4)
     """
-    @cell_attr_register(attrs=['has_bias', 'activation'])
+
+    @cell_attr_register(attrs=['has_bias', 'activation', 'in_channels', 'out_channels'])
     def __init__(self,
                  in_channels,
                  out_channels,
@@ -206,29 +275,51 @@ class Dense(Cell):
         self.in_channels = Validator.check_positive_int(in_channels)
         self.out_channels = Validator.check_positive_int(out_channels)
         self.has_bias = Validator.check_bool(has_bias)
+        self.shape_op = P.Shape()
 
         if isinstance(weight_init, Tensor):
-            if weight_init.dim() != 2 or weight_init.shape[0] != out_channels or \
-               weight_init.shape[1] != in_channels:
+            if weight_init.ndim != 2 or weight_init.shape[0] != out_channels or \
+                    weight_init.shape[1] != in_channels:
                 raise ValueError("Weight init shape error.")
         self.weight = Parameter(initializer(weight_init, [out_channels, in_channels]), name="weight")
 
         self.bias = None
         if self.has_bias:
             if isinstance(bias_init, Tensor):
-                if bias_init.dim() != 1 or bias_init.shape[0] != out_channels:
+                if bias_init.ndim != 1 or bias_init.shape[0] != out_channels:
                     raise ValueError("Bias init shape error.")
             self.bias = Parameter(initializer(bias_init, [out_channels]), name="bias")
             self.bias_add = P.BiasAdd()
+            self.tensor_add = P.TensorAdd()
 
         self.matmul = P.MatMul(transpose_b=True)
-        self.activation = get_activation(activation)
+        self.batch_matmul = P.BatchMatMul(transpose_b=True)
+        self.activation = get_activation(activation) if isinstance(activation, str) else activation
+        if activation is not None and not isinstance(self.activation, (Cell, Primitive)):
+            raise TypeError("The activation must be str or Cell or Primitive,"" but got {}.".format(activation))
         self.activation_flag = self.activation is not None
 
     def construct(self, x):
-        x = self.matmul(x, self.weight)
+        x_shape = self.shape_op(x)
+        x_dim = len(x_shape)
+        if x_dim == 2:
+            matmul = self.matmul
+            bias_add = self.bias_add if self.has_bias else None
+            weight = self.weight
+            bias = self.bias
+        else:
+            broad_weight_shape, broad_bias_shape = get_broadcast_weight_bias_shape(x_shape, self.out_channels,
+                                                                                   self.in_channels)
+            weight_broadcast_to = P.BroadcastTo(broad_weight_shape)
+            bias_broadcast_to = P.BroadcastTo(broad_bias_shape)
+            matmul = self.batch_matmul
+            bias_add = self.tensor_add if self.has_bias else None
+            weight = weight_broadcast_to(self.weight)
+            bias = bias_broadcast_to(self.bias) if self.has_bias else self.bias
+
+        x = matmul(x, weight)
         if self.has_bias:
-            x = self.bias_add(x, self.bias)
+            x = bias_add(x, bias)
         if self.activation_flag:
             x = self.activation(x)
         return x
@@ -238,7 +329,7 @@ class Dense(Cell):
         if self.has_bias:
             s += ', has_bias={}'.format(self.has_bias)
         if self.activation_flag:
-            s += ', activation={}'.fomat(self.activation)
+            s += ', activation={}'.format(self.activation)
         return s
 
 
@@ -248,16 +339,26 @@ def _is_equal_one(x):
         return False
     return bool(x.asnumpy().mean() == 1.0)
 
+
 @constexpr
 def _dtype_check(x_dtype):
     if x_dtype not in [mstype.float32, mstype.float16]:
-        raise  TypeError("The input type must be float32 or float16.")
+        raise TypeError("The input type must be float32 or float16.")
+
 
 @constexpr
 def _is_float_dtype(dtype):
     if dtype in [mstype.float32, mstype.float16]:
         return True
     return False
+
+
+@constexpr
+def _need_reduce_all(axis):
+    if axis == ():
+        return True
+    return False
+
 
 class ClipByNorm(Cell):
     r"""
@@ -271,23 +372,39 @@ class ClipByNorm(Cell):
 
     where :math:`L_2(X)` is the :math:`L_2`-norm of :math:`X`.
 
+    Args:
+        axis (Union[None, int, tuple(int)]): Compute the L2-norm along the Specific dimension.
+                                            Default: None, all dimensions to calculate.
+
     Inputs:
         - **input** (Tensor) - Tensor of shape N-D. The type must be float32 or float16.
         - **clip_norm** (Tensor) - A scalar Tensor of shape :math:`()` or :math:`(1)`.
+          Or a tensor shape can be broadcast to input shape.
 
     Outputs:
         Tensor, clipped tensor with the same shape as the input, whose type is float32.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Examples:
         >>> net = nn.ClipByNorm()
         >>> input = Tensor(np.random.randint(0, 10, [4, 16]), mindspore.float32)
         >>> clip_norm = Tensor(np.array([100]).astype(np.float32))
-        >>> net(input, clip_norm)
+        >>> output = net(input, clip_norm)
+        >>> print(output.shape)
+        (4, 16)
 
     """
 
-    def __init__(self):
+    def __init__(self, axis=None):
         super(ClipByNorm, self).__init__()
+        if axis is None:
+            axis = ()
+        if isinstance(axis, tuple):
+            for idx, item in enumerate(axis):
+                Validator.check_value_type("axis[%d]" % idx, item, [int], self.cls_name)
+        self.axis = Validator.check_value_type('axis', axis, [int, tuple], self.cls_name)
         self.reduce_sum = P.ReduceSum(keep_dims=True)
         self.select_ = P.Select()
         self.greater_ = P.Greater()
@@ -300,11 +417,9 @@ class ClipByNorm(Cell):
         self.expand_dims = P.ExpandDims()
         self.dtype = P.DType()
 
-    @ms_function
     def construct(self, x, clip_norm):
-        """add ms_function decorator for pynative mode"""
         mul_x = F.square(x)
-        l2sum = self.cast(self.reduce_sum(mul_x), mstype.float32)
+        l2sum = self.cast(self.reduce_sum(mul_x, self.axis), mstype.float32)
         cond = self.greater_(l2sum, 0)
         ones_ = self.fill(self.dtype(cond), self.shape(cond), 1.0)
         l2sum_safe = self.select_(cond, l2sum, self.cast(ones_, self.dtype(l2sum)))
@@ -317,7 +432,9 @@ class ClipByNorm(Cell):
             intermediate = x * clip_norm
 
         max_norm = self.max_op(l2norm, clip_norm)
-        values_clip = self.cast(intermediate, mstype.float32) / self.expand_dims(max_norm, -1)
+        if _need_reduce_all(self.axis):
+            max_norm = self.expand_dims(max_norm, -1)
+        values_clip = self.cast(intermediate, mstype.float32) / max_norm
         values_clip = self.reshape(values_clip, self.shape(x))
         values_clip = identity(values_clip)
         return values_clip
@@ -339,11 +456,15 @@ class Norm(Cell):
         Tensor, output tensor with dimensions in 'axis' reduced to 1 will be returned if 'keep_dims' is True;
         otherwise a Tensor with dimensions in 'axis' removed is returned.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> net = nn.Norm(axis=0)
-        >>> input = Tensor(np.random.randint(0, 10, [2, 4]), mindspore.float32)
-        >>> net(input)
-        [2.236068 9.848858 4. 5.656854]
+        >>> input = Tensor(np.array([[4, 4, 9, 1], [2, 1, 3, 6]]), mindspore.float32)
+        >>> output = net(input)
+        >>> print(output)
+        [4.472136 4.1231055 9.486833 6.0827627]
     """
 
     def __init__(self, axis=(), keep_dims=False):
@@ -363,8 +484,7 @@ class Norm(Cell):
         return x
 
     def extend_repr(self):
-        str_info = 'axis={}, keep_dims={}'.format(self.axis, self.keep_dims)
-        return str_info
+        return 'axis={}, keep_dims={}'.format(self.axis, self.keep_dims)
 
 
 class OneHot(Cell):
@@ -396,10 +516,14 @@ class OneHot(Cell):
         Tensor, the one-hot tensor of data type 'dtype' with dimension at 'axis' expanded to 'depth' and filled with
         on_value and off_value.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> net = nn.OneHot(depth=4, axis=1)
         >>> indices = Tensor([[1, 3], [0, 2]], dtype=mindspore.int32)
-        >>> net(indices)
+        >>> output = net(indices)
+        >>> print(output)
         [[[0. 0.]
           [1. 0.]
           [0. 0.]
@@ -422,7 +546,6 @@ class OneHot(Cell):
         return self.onehot(indices, self.depth, F.cast(self.on_value, self.dtype), F.cast(self.off_value, self.dtype))
 
 
-
 class Pad(Cell):
     """
     Pads the input tensor according to the paddings and mode.
@@ -442,15 +565,18 @@ class Pad(Cell):
         Tensor, the tensor after padding.
 
         - If `mode` is "CONSTANT", it fills the edge with 0, regardless of the values of the `input_x`.
-          If the `input_x` is [[1,2,3],[4,5,6],[7,8,9]] and `paddings` is [[1,1],[2,2]], then the
-          Outputs is [[0,0,0,0,0,0,0],[0,0,1,2,3,0,0],[0,0,4,5,6,0,0],[0,0,7,8,9,0,0],[0,0,0,0,0,0,0]].
+          If the `input_x` is [[1,2,3], [4,5,6], [7,8,9]] and `paddings` is [[1,1], [2,2]], then the
+          Outputs is [[0,0,0,0,0,0,0], [0,0,1,2,3,0,0], [0,0,4,5,6,0,0], [0,0,7,8,9,0,0], [0,0,0,0,0,0,0]].
         - If `mode` is "REFLECT", it uses a way of symmetrical copying throught the axis of symmetry to fill in.
-          If the `input_x` is [[1,2,3],[4,5,6],[7,8,9]] and `paddings` is [[1,1],[2,2]], then the
-          Outputs is [[6,5,4,5,6,5,4],[3,2,1,2,3,2,1],[6,5,4,5,6,5,4],[9,8,7,8,9,8,7],[6,5,4,5,6,5,4]].
+          If the `input_x` is [[1,2,3], [4,5,6], [7,8,9]] and `paddings` is [[1,1], [2,2]], then the
+          Outputs is [[6,5,4,5,6,5,4], [3,2,1,2,3,2,1], [6,5,4,5,6,5,4], [9,8,7,8,9,8,7], [6,5,4,5,6,5,4]].
         - If `mode` is "SYMMETRIC", the filling method is similar to the "REFLECT". It is also copied
           according to the symmetry axis, except that it includes the symmetry axis. If the `input_x`
-          is [[1,2,3],[4,5,6],[7,8,9]] and `paddings` is [[1,1],[2,2]], then the Outputs is
-          [[2,1,1,2,3,3,2],[2,1,1,2,3,3,2],[5,4,4,5,6,6,5],[8,7,7,8,9,9,8],[8,7,7,8,9,9,8]].
+          is [[1,2,3], [4,5,6], [7,8,9]] and `paddings` is [[1,1], [2,2]], then the Outputs is
+          [[2,1,1,2,3,3,2], [2,1,1,2,3,3,2], [5,4,4,5,6,6,5], [8,7,7,8,9,9,8], [8,7,7,8,9,9,8]].
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Examples:
         >>> from mindspore import Tensor
@@ -458,14 +584,19 @@ class Pad(Cell):
         >>> import mindspore.nn as nn
         >>> import numpy as np
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.pad = nn.Pad(paddings=((1,1),(2,2)), mode="CONSTANT")
-        >>>     def construct(self, x):
-        >>>         return self.pad(x)
-        >>> x = np.random.random(size=(2, 3)).astype(np.float32)
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.pad = nn.Pad(paddings=((1, 1), (2, 2)), mode="CONSTANT")
+        ...     def construct(self, x):
+        ...         return self.pad(x)
+        >>> x = np.array([[0.3, 0.5, 0.2], [0.5, 0.7, 0.3]], dtype=np.float32)
         >>> pad = Net()
-        >>> ms_output = pad(Tensor(x))
+        >>> output = pad(Tensor(x))
+        >>> print(output)
+        [[0.         0.         0.         0.         0.         0.        0.         ]
+         [0.         0.         0.3        0.5        0.2        0.        0.         ]
+         [0.         0.         0.5        0.7        0.3        0.        0.         ]
+         [0.         0.         0.         0.         0.         0.        0.         ]]
     """
 
     def __init__(self, paddings, mode="CONSTANT"):
@@ -494,6 +625,68 @@ class Pad(Cell):
         return x
 
 
+@constexpr
+def bilinear(shape, size, scale, align_corners):
+    """Check input and calculate shape"""
+    if not isinstance(align_corners, bool):
+        raise TypeError("align_corners should be type boolean")
+    if size is None and scale is None:
+        raise ValueError("size and scale both none")
+    if size is not None and scale is not None:
+        raise ValueError("size and scale both not none")
+    if size is not None:
+        if not isinstance(size, (tuple, list)):
+            raise ValueError("size must be tuple or list")
+        Validator.check_int(len(size), 2, Rel.EQ, "size", "bilinear")
+        Validator.check_int(size[0], 1, Rel.GE, "size[0]", "bilinear")
+        Validator.check_int(size[1], 1, Rel.GE, "size[1]", "bilinear")
+        return size
+    Validator.check_int(scale, 1, Rel.GE, "scale factor", "bilinear")
+    ret = (scale * shape[2], scale * shape[3])
+    return ret
+
+
+class ResizeBilinear(Cell):
+    r"""
+    Samples the input tensor to the given size or scale_factor by using bilinear interpolate.
+
+    Inputs:
+        - **x** (Tensor) - Tensor to be resized. Input tensor must be a 4-D tensor with shape:
+          math:`(batch, channels, height, width)`, with data type of float16 or float32.
+        - **size** (Union[tuple[int], list[int]]): A tuple or list of 2 int elements '(new_height, new_width)',
+          the new size of the tensor. One and only one of size and scale_factor can be set to None. Default: None.
+        - **scale_factor** (int): The scale factor of new size of the tensor. The value should be positive integer.
+          One and only one of size and scale_factor can be set to None. Default: None.
+        - **align_corners** (bool): If true, rescale input by '(new_height - 1) / (height - 1)', which exactly aligns
+          the 4 corners of images and resized images. If false, rescale by 'new_height / height'. Default: False.
+
+    Outputs:
+        Resized tensor.
+        If size is set, the result is 4-D tensor with shape:math:`(batch, channels, new_height, new_width)`
+        in float32.
+        If scale is set, the result is 4-D tensor with shape:math:`(batch, channels, scale_factor * height,
+        scale_factor * width)` in float32
+
+    Supported Platforms:
+        ``Ascend``
+
+    Examples:
+        >>> tensor = Tensor([[[[1, 2, 3, 4], [5, 6, 7, 8]]]], mindspore.float32)
+        >>> resize_bilinear = nn.ResizeBilinear()
+        >>> result = resize_bilinear(tensor, size=(5,5))
+        >>> print(result.shape)
+        (1, 1, 5, 5)
+    """
+
+    def __init__(self):
+        super(ResizeBilinear, self).__init__()
+
+    def construct(self, x, size=None, scale_factor=None, align_corners=False):
+        shape = bilinear(x.shape, size, scale_factor, align_corners)
+        resize_bilinear = P.ResizeBilinear(shape, align_corners)
+        return resize_bilinear(x)
+
+
 class Unfold(Cell):
     """
     Extract patches from images.
@@ -506,8 +699,8 @@ class Unfold(Cell):
             must be a tuple or list of int, and the format is [1, stride_row, stride_col, 1].
         rates (Union[tuple[int], list[int]]): In each extracted patch, the gap between the corresponding dimension
             pixel positions, must be a tuple or a list of integers, and the format is [1, rate_row, rate_col, 1].
-        padding (str): The type of padding algorithm, is a string whose value is "same" or "valid",
-            not case sensitive. Default: "valid".
+        padding (str): The type of padding algorithm, is a string whose value is "same" or "valid", not case sensitive.
+            Default: "valid".
 
             - same: Means that the patch can take the part beyond the original image, and this part is filled with 0.
 
@@ -521,35 +714,132 @@ class Unfold(Cell):
         Tensor, a 4-D tensor whose data type is same as 'input_x',
         and the shape is [out_batch, out_depth, out_row, out_col], the out_batch is the same as the in_batch.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> net = Unfold(ksizes=[1, 2, 2, 1], strides=[1, 1, 1, 1], rates=[1, 1, 1, 1])
-        >>> image = Tensor(np.ones([1, 1, 3, 3]), dtype=mstype.float16)
-        >>> net(image)
-        Tensor ([[[[1, 1] [1, 1]] [[1, 1], [1, 1]] [[1, 1] [1, 1]], [[1, 1], [1, 1]]]],
-                shape=(1, 4, 2, 2), dtype=mstype.float16)
+        >>> net = Unfold(ksizes=[1, 2, 2, 1], strides=[1, 2, 2, 1], rates=[1, 2, 2, 1])
+        >>> image = Tensor(np.ones([2, 3, 6, 6]), dtype=mstype.float16)
+        >>> output = net(image)
+        >>> print(output.shape)
+        (2, 12, 2, 2)
     """
 
     def __init__(self, ksizes, strides, rates, padding="valid"):
         super(Unfold, self).__init__()
+
+        def _check_tuple_or_list(arg_name, arg_val, prim_name):
+            Validator.check_value_type(f"{arg_name}s", ksizes, [tuple, list], self.cls_name)
+            if len(arg_val) != 4 or arg_val[0] != 1 or arg_val[3] != 1:
+                raise ValueError(f"For \'{prim_name}\' the format of {arg_name}s should be [1, {arg_name}_row, "
+                                 f"{arg_name}_col, 1], but got {arg_val}.")
+            if not isinstance(arg_val[1], int) or not isinstance(arg_val[2], int) or arg_val[1] < 1 or arg_val[2] < 1:
+                raise ValueError(f"For '{prim_name}' the {arg_name}_row and {arg_name}_col in {arg_name}s should be an "
+                                 f"positive integer number, but got {arg_name}_row is {arg_val[1]}, {arg_name}_col "
+                                 f"is {arg_val[2]}")
+
+        _check_tuple_or_list("ksize", ksizes, self.cls_name)
+        _check_tuple_or_list("stride", strides, self.cls_name)
+        _check_tuple_or_list("rate", rates, self.cls_name)
+        ksizes = ksizes[0], ksizes[3], ksizes[1], ksizes[2]
+        strides = strides[0], strides[3], strides[1], strides[2]
+        rates = rates[0], rates[3], rates[1], rates[2]
         self.extract_image_patches = inner.ExtractImagePatches(ksizes, strides, rates, padding)
-        self.transpose = P.Transpose()
-        self.format_NHWC = (0, 2, 3, 1)
-        self.format_NCHW = (0, 3, 1, 2)
-        self.is_ge = context.get_context("enable_ge")
 
     def construct(self, input_x):
-        if self.is_ge:
-            x_transpose = self.transpose(input_x, self.format_NHWC)
-            ret = self.extract_image_patches(x_transpose)
-            result = self.transpose(ret, self.format_NCHW)
-        else:
-            result = self.extract_image_patches(input_x)
+        result = self.extract_image_patches(input_x)
         return result
 
 
 @constexpr
+def tril(x_shape, x_dtype, k):
+    Validator.check_int(len(x_shape), 1, Rel.GE, "x rank", "tril")
+    Validator.check_is_int(k, "k value", "tril")
+    mask = np.tril(np.ones(x_shape), k)
+    return Tensor(mask, x_dtype)
+
+
+class Tril(Cell):
+    """
+    Returns a tensor with elements above the kth diagonal zeroed.
+
+    Inputs:
+        - **x** (Tensor) - The input tensor.
+        - **k** (Int) - The index of diagonal. Default: 0
+
+    Outputs:
+        Tensor, has the same type as input `x`.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
+    Examples:
+        >>> x = Tensor(np.array([[1, 2], [3, 4]]))
+        >>> tril = nn.Tril()
+        >>> result = tril(x)
+        >>> print(result)
+        [[1   0]
+         [3   4]]
+    """
+
+    def __init__(self):
+        super(Tril, self).__init__()
+        self.dtype = P.DType()
+        self.mul = P.Mul()
+        self.cast = P.Cast()
+
+    def construct(self, x, k=0):
+        assist = tril(x.shape, self.dtype(x), k)
+        result = self.mul(self.cast(x, mstype.float32), self.cast(assist, mstype.float32))
+        return self.cast(result, self.dtype(x))
+
+
+@constexpr
+def triu(x_shape, x_dtype, k):
+    Validator.check_int(len(x_shape), 1, Rel.GE, "x rank", "triu")
+    Validator.check_is_int(k, "k value", "triu")
+    mask = np.triu(np.ones(x_shape), k)
+    return Tensor(mask, x_dtype)
+
+
+class Triu(Cell):
+    """
+    Returns a tensor with elements below the kth diagonal zeroed.
+
+    Inputs:
+        - **x** (Tensor) - The input tensor.
+        - **k** (Int) - The index of diagonal. Default: 0
+
+    Outputs:
+        Tensor, has the same type as input `x`.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
+    Examples:
+        >>> x = Tensor(np.array([[1, 2], [3, 4]]))
+        >>> triu = nn.Triu()
+        >>> result = triu(x)
+        >>> print(result)
+        [[1 2]
+         [0 4]]
+    """
+
+    def __init__(self):
+        super(Triu, self).__init__()
+        self.dtype = P.DType()
+        self.mul = P.Mul()
+        self.cast = P.Cast()
+
+    def construct(self, x, k=0):
+        assist = triu(x.shape, self.dtype(x), k)
+        result = self.mul(self.cast(x, mstype.float32), self.cast(assist, mstype.float32))
+        return self.cast(result, self.dtype(x))
+
+
+@constexpr
 def _get_matrix_diag_assist(x_shape, x_dtype):
-    Validator.check_integer("x rank", len(x_shape), 1, Rel.GE, "_get_matrix_diag_assist")
+    Validator.check_int(len(x_shape), 1, Rel.GE, "x rank", "_get_matrix_diag_assist")
     base_eye = np.eye(x_shape[-1], x_shape[-1]).reshape(-1)
     assist = np.tile(base_eye, x_shape[:-1]).reshape(x_shape + (x_shape[-1],))
     return Tensor(assist, x_dtype)
@@ -557,7 +847,7 @@ def _get_matrix_diag_assist(x_shape, x_dtype):
 
 @constexpr
 def _get_matrix_diag_part_assist(x_shape, x_dtype):
-    Validator.check_integer("x rank", len(x_shape), 2, Rel.GE, "_get_matrix_diag_part_assist")
+    Validator.check_int(len(x_shape), 2, Rel.GE, "x rank", "_get_matrix_diag_part_assist")
     base_eye = np.eye(x_shape[-2], x_shape[-1]).reshape(-1)
     assist = np.tile(base_eye, x_shape[:-2]).reshape(x_shape)
     return Tensor(assist, x_dtype)
@@ -574,13 +864,18 @@ class MatrixDiag(Cell):
     Outputs:
         Tensor, has the same type as input `x`. The shape must be x.shape + (x.shape[-1], ).
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> x = Tensor(np.array([1, -1]), mstype.float32)
         >>> matrix_diag = nn.MatrixDiag()
-        >>> result = matrix_diag(x)
-        [[1.   0.]
-         [0.  -1.]]
+        >>> output = matrix_diag(x)
+        >>> print(output)
+        [[ 1.  0.]
+         [ 0. -1.]]
     """
+
     def __init__(self):
         super(MatrixDiag, self).__init__()
         self.matrix_diag = inner.MatrixDiag()
@@ -605,12 +900,19 @@ class MatrixDiagPart(Cell):
     Outputs:
         Tensor, has the same type as input `x`. The shape must be x.shape[:-2] + [min(x.shape[-2:])].
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> x = Tensor([[[-1, 0], [0, 1]], [[-1, 0], [0, 1]], [[-1, 0], [0, 1]]], mindspore.float32)
         >>> matrix_diag_part = nn.MatrixDiagPart()
-        >>> result = matrix_diag_part(x)
-        [[-1., 1.], [-1., 1.], [-1., 1.]]
+        >>> output = matrix_diag_part(x)
+        >>> print(output)
+        [[-1.  1.]
+         [-1.  1.]
+         [-1.  1.]]
     """
+
     def __init__(self):
         super(MatrixDiagPart, self).__init__()
         self.matrix_diag_part = inner.MatrixDiagPart()
@@ -626,23 +928,33 @@ class MatrixDiagPart(Cell):
 
 class MatrixSetDiag(Cell):
     r"""
-    Modify the batched diagonal part of a batched tensor.
+    Modifies the batched diagonal part of a batched tensor.
 
     Inputs:
-        - **x** (Tensor) - The batched tensor. It can be one of the following data types:
+        - **x** (Tensor) - The batched tensor. Rank k+1, where k >= 1. It can be one of the following data types:
           float32, float16, int32, int8, and uint8.
-        - **diagonal** (Tensor) - The diagonal values.
+        - **diagonal** (Tensor) - The diagonal values. Must have the same type as input `x`. Rank k, where k >= 1.
 
     Outputs:
         Tensor, has the same type and shape as input `x`.
+
+    Supported Platforms:
+        ``Ascend``
 
     Examples:
         >>> x = Tensor([[[-1, 0], [0, 1]], [[-1, 0], [0, 1]], [[-1, 0], [0, 1]]], mindspore.float32)
         >>> diagonal = Tensor([[-1., 2.], [-1., 1.], [-1., 1.]], mindspore.float32)
         >>> matrix_set_diag = nn.MatrixSetDiag()
-        >>> result = matrix_set_diag(x, diagonal)
-        [[[-1, 0], [0, 2]], [[-1, 0], [0, 1]], [[-1, 0], [0, 1]]]
+        >>> output = matrix_set_diag(x, diagonal)
+        >>> print(output)
+        [[[-1.  0.]
+          [ 0.  2.]]
+         [[-1.  0.]
+          [ 0.  1.]]
+         [[-1.  0.]
+          [ 0.  1.]]]
     """
+
     def __init__(self):
         super(MatrixSetDiag, self).__init__()
         self.matrix_set_diag = inner.MatrixSetDiag()

@@ -17,34 +17,22 @@
 #include "tools/converter/parser/tflite/tflite_depthwise_conv_parser.h"
 #include <vector>
 #include <memory>
-#include <map>
 
-namespace mindspore {
-namespace lite {
-STATUS TfliteDepthwiseConv2DParser::Parse(TfliteTensorsInfo *tensors_info,
-                                          const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                          const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
+namespace mindspore::lite {
+lite::PrimitiveC *TfliteDepthwiseConv2DParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                                  const std::unique_ptr<tflite::ModelT> &tflite_model) {
   MS_LOG(DEBUG) << "parse TfliteDepthwiseConv2DParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
   std::unique_ptr<schema::DepthwiseConv2DT> attr = std::make_unique<schema::DepthwiseConv2DT>();
+  const auto &tflite_subgraph = tflite_model->subgraphs.front();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   const auto &tflite_attr = tflite_op->builtin_options.AsDepthwiseConv2DOptions();
   if (tflite_attr == nullptr) {
-    MS_LOG(ERROR) << "get op: " << op->name.c_str() << " attr failed";
-    return RET_NULL_PTR;
+    MS_LOG(ERROR) << "get op de attr failed";
+    return nullptr;
   }
   attr->strideW = tflite_attr->stride_w;
   attr->strideH = tflite_attr->stride_h;
@@ -53,57 +41,49 @@ STATUS TfliteDepthwiseConv2DParser::Parse(TfliteTensorsInfo *tensors_info,
   attr->padMode = GetPadMode(tflite_attr->padding);
   attr->format = schema::Format::Format_NHWC;
   attr->activationType = GetActivationFunctionType(tflite_attr->fused_activation_function);
-  attr->hasBias = true;
   attr->channelMultiplier = tflite_attr->depth_multiplier;
 
   // get the data tensor
   auto data_index = tflite_op->inputs[1];
-  const auto &data_tensor = tflite_model->subgraphs[0]->tensors[data_index];
+  const auto &data_tensor = tflite_subgraph->tensors[data_index];
   if (data_tensor == nullptr) {
     MS_LOG(ERROR) << "the data tensor is null";
-    return RET_NULL_PTR;
+    return nullptr;
   }
   auto data_shape = data_tensor->shape;
   attr->channelIn = data_shape[3];
 
   // get the weight tensor
   auto weight_index = tflite_op->inputs[1];
-  const auto &weight_tensor = tflite_model->subgraphs[0]->tensors[weight_index];
+  const auto &weight_tensor = tflite_subgraph->tensors[weight_index];
   if (weight_tensor == nullptr) {
     MS_LOG(ERROR) << "the weight tensor is null";
-    return RET_NULL_PTR;
+    return nullptr;
   }
   auto weight_shape = weight_tensor->shape;
   attr->kernelH = weight_shape[1];
   attr->kernelW = weight_shape[2];
 
   // calculate pad params
-  std::vector<int> params;
-  if (getPaddingParam(data_tensor, attr->padMode, attr->strideH, attr->strideW, attr->kernelH, attr->kernelW,
-                      &params) != RET_OK) {
+  std::vector<int64_t> params;
+  int status =
+    getPaddingParam(data_tensor, attr->padMode, attr->strideH, attr->strideW, attr->kernelH, attr->kernelW, &params);
+  if (status != RET_OK && status != RET_NO_CHANGE) {
     MS_LOG(ERROR) << "get padding params failed";
-    return RET_ERROR;
-  } else {
+    return nullptr;
+  } else if (status == RET_OK) {
     attr->padUp = params.at(0);
     attr->padDown = params.at(1);
     attr->padLeft = params.at(2);
     attr->padRight = params.at(3);
   }
 
-  op->primitive->value.type = schema::PrimitiveType_DepthwiseConv2D;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpInput(op, tensors_info, tflite_op->inputs[1], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_KHWC);
-  AddOpInput(op, tensors_info, tflite_op->inputs[2], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  primitive->value.type = schema::PrimitiveType_DepthwiseConv2D;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteDepthwiseConv2DParser("DepthwiseConv2D", new TfliteDepthwiseConv2DParser());
-}  // namespace lite
-}  // namespace mindspore
+TfliteNodeRegister g_tfliteDepthwiseConv2DParser(tflite::BuiltinOperator_DEPTHWISE_CONV_2D,
+                                                 new TfliteDepthwiseConv2DParser());
+}  // namespace mindspore::lite

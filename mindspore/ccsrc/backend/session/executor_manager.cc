@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 #include "backend/session/executor_manager.h"
-
+#include "common/thread_pool.h"
 namespace mindspore {
 namespace session {
 std::shared_ptr<Executor> ExecutorManager::GetExecutor(const std::string &device_name, int device_id) {
@@ -28,27 +28,19 @@ std::shared_ptr<Executor> ExecutorManager::GetExecutor(const std::string &device
   return executor;
 }
 
-void ExecutorManager::OnRunGraphFinished() {
+void ExecutorManager::OnEvent(const ExecutorEvent &event) {
   for (auto &item : executors_) {
     auto &executor = item.second;
     if (executor != nullptr) {
-      executor->OnRunGraphFinished();
-    }
-  }
-}
-
-void ExecutorManager::JoinExecutorWorkers() {
-  for (auto &item : executors_) {
-    auto &executor = item.second;
-    if (executor != nullptr) {
-      executor->WorkerJoin();
+      executor->OnEvent(event);
     }
   }
 }
 
 void ExecutorManager::Clear() {
-  JoinExecutorWorkers();
+  OnEvent(ExecutorEvent::kClear);
   executors_.clear();
+  common::ThreadPool::GetInstance().ClearThreadPool();
 }
 }  // namespace session
 }  // namespace mindspore

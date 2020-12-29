@@ -15,16 +15,13 @@
 """Initializer for cell parameters."""
 import numbers
 import math
-import copy
 
 from functools import reduce
 import numpy as np
 from scipy.stats import truncnorm
-from mindspore import log as logger
-
+from .seed import get_seed, _get_graph_seed
 from . import dtype as mstype
-from .tensor import Tensor
-from .seed import get_seed
+from .tensor import Tensor, MetaTensor
 from .._c_expression import random_normal
 
 _INITIALIZER_ALIAS = dict()
@@ -43,62 +40,25 @@ class Initializer:
     """
     def __init__(self, **kwargs):
         self._kwargs = kwargs
-        self.shape = None
-        self.dtype = None
+        self._seed = None
+
+    @property
+    def seed(self):
+        if self._seed is None:
+            seed, seed2 = _get_graph_seed(get_seed(), "init")
+        else:
+            seed, seed2 = self._seed + 1, 0
+        return seed, seed2
+
+    @seed.setter
+    def seed(self, value):
+        self._seed = value
 
     def _initialize(self, *kwargs):
         raise NotImplementedError('Must be overridden!')
 
     def __call__(self, arr):
         return self._initialize(arr)
-
-    @property
-    def shape(self):
-        return self._shape
-
-    @shape.setter
-    def shape(self, shape):
-        self._shape = shape
-
-    @property
-    def dtype(self):
-        return self._dtype
-
-    @dtype.setter
-    def dtype(self, dtype):
-        self._dtype = dtype
-
-    def to_tensor(self, slice_index=None, shape=None):
-        """
-        Get the tensor format data of this Initializer.
-
-        Args:
-            slice_index (int): Slice index of a parameter's slices.
-                It is used when initialize a slice of a parameter, it guarantees that devices
-                using the same slice can generate the same tensor.
-            shape (list[int]): Shape of the slice, it is used when initialize a slice of the parameter.
-        """
-        arr = None
-        if shape is None:
-            shape = self.shape
-
-        try:
-            arr = np.ndarray(shape, dtype=mstype.dtype_to_nptype(self.dtype))
-        except ValueError:
-            msg = "Error shape={}".format(shape)
-            logger.error(msg)
-            raise ValueError(msg)
-
-        global_seed = get_seed()
-        need_set_seed = ((slice_index is not None) and (global_seed is None))
-        seed_saved = np.random.get_state()[1][0]
-        if need_set_seed:
-            np.random.seed(slice_index)
-        self.__call__(arr)
-        if need_set_seed:
-            np.random.seed(seed_saved)
-        return Tensor(arr, dtype=self.dtype)
-
 
 def _register(*aliases):
     """Return the alias register."""
@@ -285,7 +245,7 @@ class XavierUniform(Initializer):
         self.gain = gain
 
     def _initialize(self, arr):
-        n_in, n_out = _calculate_in_and_out(arr)
+        n_in, n_out = _calculate_fan_in_and_fan_out(arr.shape)
 
         boundary = self.gain * math.sqrt(6.0 / (n_in + n_out))
         data = np.random.uniform(-boundary, boundary, arr.shape)
@@ -299,21 +259,27 @@ class HeUniform(Initializer):
     Initialize the array with He kaiming uniform algorithm, and from a uniform distribution collect samples within
     U[-boundary, boundary] The boundary is defined as :
 
-                    where :math:`boundary = \sqrt{\frac{6}{n_{in}}}`.
-
-    where :math:`n_{in}` is the number of input units in the weight tensor.
+                    where :math:`boundary = \sqrt{\frac{6}{(1 + a^2) \times \text{fan\_in}}}`.
 
     Args:
-        arr (Array): The array to be assigned.
+        negative_slope (int, float, bool): Default: 0, used when nonlinearity is 'leaky_relu'.
+        mode (str): Default: fan_in.
+        nonlinearity (str): Default: leaky_relu.
 
     Returns:
         Array, assigned array.
     """
+    def __init__(self, negative_slope=0, mode='fan_in', nonlinearity='leaky_relu'):
+        super(HeUniform, self).__init__(negative_slope=negative_slope, mode=mode, nonlinearity=nonlinearity)
+        self.negative_slope = negative_slope
+        self.mode = mode
+        self.nonlinearity = nonlinearity
 
     def _initialize(self, arr):
-        n_in, _ = _calculate_in_and_out(arr)
-
-        boundary = math.sqrt(6.0 / n_in)
+        fan = _calculate_correct_fan(arr.shape, self.mode)
+        gain = _calculate_gain(self.nonlinearity, self.negative_slope)
+        std = gain / math.sqrt(fan)
+        boundary = math.sqrt(3.0) * std
         data = np.random.uniform(-boundary, boundary, arr.shape)
 
         _assignment(arr, data)
@@ -404,9 +370,9 @@ class Normal(Initializer):
         self.sigma = sigma
 
     def _initialize(self, arr):
-        seed = np.random.get_state()[1][0]
+        seed, seed2 = self.seed
         output_tensor = Tensor(np.zeros(arr.shape, dtype=np.float32))
-        random_normal(0, self.sigma, arr.shape, seed, output_tensor)
+        random_normal(0, self.sigma, arr.shape, seed, seed2, output_tensor)
         output_data = output_tensor.asnumpy()
         output_data *= self.sigma
         _assignment(arr, output_data)
@@ -450,7 +416,7 @@ def initializer(init, shape=None, dtype=mstype.float32):
         dtype (:class:`mindspore.dtype`): The type of data in initialized tensor. Default: mindspore.float32.
 
     Returns:
-        Union[Tensor, Initializer], When `init` is Tensor, the return is Tensor object,
+        Union[Tensor, MetaTensor], When `init` is Tensor, the return is Tensor object,
         otherwise the return is Initialize object.
 
     Examples:
@@ -478,27 +444,15 @@ def initializer(init, shape=None, dtype=mstype.float32):
         if not isinstance(value, int) or value <= 0:
             raise ValueError(f"shape is invalid, shape value must be positive integer, shape:{shape}")
 
-    if isinstance(init, Initializer):
-        init_copy = copy.deepcopy(init)
-        init_copy.shape = shape if shape is not None else init.shape
-        init_copy.dtype = init.dtype if init.dtype is not None else dtype
-        return init_copy
-
     if isinstance(init, str):
-        init_obj = _INITIALIZER_ALIAS[init.lower()]()
-        if init_obj is None:
+        init = _INITIALIZER_ALIAS[init.lower()]()
+        if init is None:
             raise ValueError("The class corresponding to '{}' was not found.".format(init))
-        init = init_obj
-        init.shape = shape
-        init.dtype = dtype
-        return init
-
-    if isinstance(init, numbers.Number):
-        init_obj = Constant(init)
-        init_obj.shape = shape
-        init_obj.dtype = dtype
-        return init_obj
-    raise TypeError("Unsupported init type '{}'.".format(type(init)))
+    elif isinstance(init, numbers.Number):
+        init = Constant(init)
+    shape = shape if shape is not None else init.shape
+    init_obj = MetaTensor(dtype, shape, init)
+    return init_obj
 
 __all__ = [
     'Initializer',

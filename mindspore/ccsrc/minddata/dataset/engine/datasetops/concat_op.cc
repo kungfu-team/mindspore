@@ -13,16 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "minddata/dataset/engine/datasetops/concat_op.h"
+
 #include <iomanip>
 #include <utility>
 
-#include "utils/ms_utils.h"
 #include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/engine/data_buffer.h"
-#include "minddata/dataset/engine/datasetops/concat_op.h"
-#include "minddata/dataset/engine/opt/pass.h"
 #include "minddata/dataset/engine/db_connector.h"
-#include "minddata/dataset/engine/execution_tree.h"
+#include "minddata/dataset/engine/opt/pass.h"
+#include "utils/ms_utils.h"
 
 namespace mindspore {
 namespace dataset {
@@ -36,7 +36,7 @@ ConcatOp::Builder::Builder() {
 // The builder "build" method creates the final object.
 Status ConcatOp::Builder::Build(std::shared_ptr<ConcatOp> *ptr) {
   if (builder_sampler_ == nullptr) {
-    builder_sampler_ = std::make_shared<DistributedSampler>(0, 1, 0, false);
+    builder_sampler_ = std::make_shared<DistributedSamplerRT>(0, 1, 0, false);
   }
   *ptr = std::make_shared<ConcatOp>(builder_op_connector_size_, builder_sampler_, children_flag_and_nums_,
                                     children_start_end_index_);
@@ -44,9 +44,9 @@ Status ConcatOp::Builder::Build(std::shared_ptr<ConcatOp> *ptr) {
 }
 
 // Constructor of the ConcatOp.
-ConcatOp::ConcatOp(int32_t op_connector_size, std::shared_ptr<Sampler> sampler,
-                   std::vector<std::pair<int, int>> children_flag_and_nums,
-                   std::vector<std::pair<int, int>> children_start_end_index)
+ConcatOp::ConcatOp(int32_t op_connector_size, const std::shared_ptr<SamplerRT> &sampler,
+                   const std::vector<std::pair<int, int>> &children_flag_and_nums,
+                   const std::vector<std::pair<int, int>> &children_start_end_index)
     : PipelineOp(op_connector_size),
       children_num_(0),
       sampler_(sampler),
@@ -80,7 +80,7 @@ Status ConcatOp::operator()() {
   bool is_not_mappable = true;
   int num_shard = 1;
   int shard_index = 0;
-  std::shared_ptr<DistributedSampler> distribute_sampler = std::dynamic_pointer_cast<DistributedSampler>(sampler_);
+  std::shared_ptr<DistributedSamplerRT> distribute_sampler = std::dynamic_pointer_cast<DistributedSamplerRT>(sampler_);
   if (distribute_sampler != nullptr) {
     num_shard = distribute_sampler->GetDeviceNum();
     shard_index = distribute_sampler->GetDeviceID();
@@ -101,7 +101,7 @@ Status ConcatOp::operator()() {
       // 3. Put the data into output_connector
       if (!children_flag_and_nums_.empty()) is_not_mappable = children_flag_and_nums_[i].first;
       while (!buf->eoe() && !buf->eof()) {
-        // if dataset is no mappable or generator dataset which source is yeild（cannot get the number of samples in
+        // if dataset is not mappable or generator dataset which source is yield, cannot get the number of samples in
         // python layer), we use filtering to get data
         if (sample_number % num_shard == shard_index && (is_not_mappable || !children_flag_and_nums_[i].second)) {
           RETURN_IF_NOT_OK(out_connector_->Add(0, std::move(buf)));
@@ -125,7 +125,7 @@ Status ConcatOp::operator()() {
         RETURN_IF_NOT_OK(child_[i]->GetNextBuffer(&buf));
       }
 
-      // if dataset is mappable,We do't use filtering to pick data.
+      // if dataset is mappable,We don't use filtering to pick data.
       // so sample_number plus the length of the entire dataset
       if (!is_not_mappable && children_flag_and_nums_[i].second) {
         sample_number += children_flag_and_nums_[i].second;
@@ -142,7 +142,7 @@ Status ConcatOp::operator()() {
   CHECK_FAIL_RETURN_UNEXPECTED(eof_count == children_num_,
                                "Something went wrong, eof count does not match the number of children.");
   // 5. Add eof buffer in the end manually
-  MS_LOG(DEBUG) << "Add the eof buffer manualy in the end.";
+  MS_LOG(DEBUG) << "Add the eof buffer manually in the end.";
   auto eof_buffer = std::make_unique<DataBuffer>(0, DataBuffer::kDeBFlagEOF);
   RETURN_IF_NOT_OK(out_connector_->Add(0, std::move(eof_buffer)));
   return Status::OK();
@@ -150,7 +150,7 @@ Status ConcatOp::operator()() {
 
 Status ConcatOp::Verify(int32_t id, const std::unique_ptr<DataBuffer> &buf) {
   TensorRow new_row;
-  buf->GetRow(0, &new_row);
+  RETURN_IF_NOT_OK(buf->GetRow(0, &new_row));
 
   if (id == 0) {
     // Obtain the data type and data rank in child[0]
@@ -195,5 +195,21 @@ Status ConcatOp::PreAccept(NodePass *p, bool *modified) {
   // Downcast shared pointer then call visitor
   return p->PreRunOnNode(shared_from_base<ConcatOp>(), modified);
 }
+
+// Gets the number of classes
+Status ConcatOp::GetNumClasses(int64_t *num_classes) {
+  int64_t max_num_classes = -1;
+  for (const auto &child : child_) {
+    // Choose a dataset which can get valid num_classes
+    int64_t tmp_num_classes = -1;
+    child->GetNumClasses(&tmp_num_classes);
+    if (tmp_num_classes > max_num_classes) {
+      max_num_classes = tmp_num_classes;
+    }
+  }
+  *num_classes = max_num_classes;
+  return Status::OK();
+}
+
 }  // namespace dataset
 }  // namespace mindspore

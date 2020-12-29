@@ -15,18 +15,19 @@
  */
 #ifndef MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_CPU_CPU_KERNEL_H_
 #define MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_CPU_CPU_KERNEL_H_
-
-#include <string>
-#include <vector>
+#include <functional>
 #include <memory>
 #include <numeric>
-#include <functional>
+#include <string>
+#include <thread>
+#include <vector>
 #include "backend/kernel_compiler/kernel.h"
-#include "ir/anf.h"
 #include "backend/session/anf_runtime_algorithm.h"
+#include "ir/anf.h"
 
 using mindspore::kernel::Address;
 using mindspore::kernel::AddressPtr;
+using CTask = std::function<void(size_t, size_t)>;
 namespace mindspore {
 namespace kernel {
 const char KSIZE[] = "ksize";
@@ -34,6 +35,7 @@ const char STRIDE[] = "stride";
 const char STRIDES[] = "strides";
 const char DILATION[] = "dilation";
 const char PAD[] = "pad";
+const char PAD_LIST[] = "pad_list";
 const char PAD_MODE[] = "pad_mode";
 const char PADDING[] = "padding";
 const char PAD_MODE_LOWER_SAME[] = "same";
@@ -51,7 +53,34 @@ const char END[] = "end";
 const char SIZE[] = "size";
 const char USE_NESTEROV[] = "use_nesterov";
 const char GROUP[] = "group";
-enum OperateType { ADD = 0, SUB, MUL, DIV, SQUARE, SQRT };
+
+enum OperateType {
+  ADD = 0,
+  SUB,
+  MUL,
+  DIV,
+  SQUARE,
+  SQRT,
+  POW,
+  REALDIV,
+  MOD,
+  NEG,
+  LESS,
+  ASSIGNADD,
+  RELUGRAD,
+  RELU6GRAD,
+  ABSGRAD,
+  TANHGRAD,
+  SQRTGRAD,
+  SIGMOIDGRAD,
+  ONESLIKE,
+  ZEROSLIKE,
+  SIGN,
+  EQUAL,
+  NOTEQUAL,
+  FLOOR,
+  SQUAREDDIFFERENCE
+};
 
 class CPUKernel : public kernel::KernelMod {
  public:
@@ -82,6 +111,7 @@ class CPUKernelUtils {
   static size_t CalcOffset(const std::vector<size_t> &shape, size_t dim0, size_t dim1, size_t dim2, size_t dim3);
   static size_t GetElementNumOnAxis(const std::vector<size_t> &shape, int axis);
   static void GetElementNumEveryDim(const std::vector<size_t> &shape, std::vector<size_t> *element_num);
+  static void ParallelFor(const CTask &task, size_t count);
 };
 }  // namespace kernel
 }  // namespace mindspore

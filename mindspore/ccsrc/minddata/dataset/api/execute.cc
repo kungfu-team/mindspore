@@ -15,16 +15,23 @@
  */
 
 #include "minddata/dataset/include/execute.h"
+#ifdef ENABLE_ANDROID
 #include "minddata/dataset/include/de_tensor.h"
+#endif
 #include "minddata/dataset/include/tensor.h"
 #include "minddata/dataset/kernels/tensor_op.h"
+#ifndef ENABLE_ANDROID
+#include "utils/log_adapter.h"
+#else
+#include "mindspore/lite/src/common/log_adapter.h"
+#endif
 
 namespace mindspore {
 namespace dataset {
-namespace api {
 
 Execute::Execute(std::shared_ptr<TensorOperation> op) : op_(std::move(op)) {}
 
+#ifdef ENABLE_ANDROID
 std::shared_ptr<tensor::MSTensor> Execute::operator()(std::shared_ptr<tensor::MSTensor> input) {
   // Build the op
   if (op_ == nullptr) {
@@ -48,7 +55,31 @@ std::shared_ptr<tensor::MSTensor> Execute::operator()(std::shared_ptr<tensor::MS
   }
   return std::make_shared<tensor::DETensor>(std::move(de_output));
 }
+#endif
 
-}  // namespace api
+std::shared_ptr<dataset::Tensor> Execute::operator()(std::shared_ptr<dataset::Tensor> input) {
+  // Build the op
+  if (op_ == nullptr) {
+    MS_LOG(ERROR) << "Input TensorOperation is not valid";
+    return nullptr;
+  }
+
+  if (input == nullptr) {
+    MS_LOG(ERROR) << "Input Tensor is not valid";
+    return nullptr;
+  }
+  // will add validate params once API is set
+  std::shared_ptr<TensorOp> transform = op_->Build();
+  std::shared_ptr<Tensor> de_output;
+  Status rc = transform->Compute(input, &de_output);
+
+  if (rc.IsError()) {
+    // execution failed
+    MS_LOG(ERROR) << "Operation execution failed : " << rc.ToString();
+    return nullptr;
+  }
+  return de_output;
+}
+
 }  // namespace dataset
 }  // namespace mindspore

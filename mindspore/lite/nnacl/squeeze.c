@@ -18,9 +18,9 @@
 #include <string.h>
 #include "nnacl/errorcode.h"
 
-int DoSqueeze(float *in_data, float *out_data, size_t data_size) {
+int DoSqueeze(const float *in_data, float *out_data, size_t data_size) {
   if (in_data == NULL || out_data == NULL) {
-    return -1;
+    return NNACL_ERR;
   }
   (void)memcpy(out_data, in_data, data_size);
   return NNACL_OK;
@@ -28,7 +28,7 @@ int DoSqueeze(float *in_data, float *out_data, size_t data_size) {
 
 int DoSqueezeInt32(int32_t *in_data, int32_t *out_data, size_t data_size) {
   if (in_data == NULL || out_data == NULL) {
-    return -1;
+    return NNACL_ERR;
   }
   (void)memcpy(out_data, in_data, data_size);
   return NNACL_OK;

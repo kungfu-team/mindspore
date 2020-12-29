@@ -55,6 +55,11 @@ struct Chn4 {
   T c4;
 };
 
+using BOOL_C1 = Chn1<bool>;
+using BOOL_C2 = Chn2<bool>;
+using BOOL_C3 = Chn3<bool>;
+using BOOL_C4 = Chn4<bool>;
+
 using UINT8_C1 = Chn1<uint8_t>;
 using UINT8_C2 = Chn2<uint8_t>;
 using UINT8_C3 = Chn3<uint8_t>;
@@ -65,6 +70,16 @@ using INT8_C2 = Chn2<int8_t>;
 using INT8_C3 = Chn3<int8_t>;
 using INT8_C4 = Chn4<int8_t>;
 
+using UINT16_C1 = Chn1<uint16_t>;
+using UINT16_C2 = Chn2<uint16_t>;
+using UINT16_C3 = Chn3<uint16_t>;
+using UINT16_C4 = Chn4<uint16_t>;
+
+using INT16_C1 = Chn1<int16_t>;
+using INT16_C2 = Chn2<int16_t>;
+using INT16_C3 = Chn3<int16_t>;
+using INT16_C4 = Chn4<int16_t>;
+
 using UINT32_C1 = Chn1<uint32_t>;
 using UINT32_C2 = Chn2<uint32_t>;
 using UINT32_C3 = Chn3<uint32_t>;
@@ -74,6 +89,16 @@ using INT32_C1 = Chn1<int32_t>;
 using INT32_C2 = Chn2<int32_t>;
 using INT32_C3 = Chn3<int32_t>;
 using INT32_C4 = Chn4<int32_t>;
+
+using UINT64_C1 = Chn1<uint64_t>;
+using UINT64_C2 = Chn2<uint64_t>;
+using UINT64_C3 = Chn3<uint64_t>;
+using UINT64_C4 = Chn4<uint64_t>;
+
+using INT64_C1 = Chn1<int64_t>;
+using INT64_C2 = Chn2<int64_t>;
+using INT64_C3 = Chn3<int64_t>;
+using INT64_C4 = Chn4<int64_t>;
 
 using FLOAT32_C1 = Chn1<float>;
 using FLOAT32_C2 = Chn2<float>;
@@ -92,6 +117,8 @@ enum LPixelType {
   RGBA2GRAY = 3,
   RGBA2BGR = 4,
   RGBA2RGB = 5,
+  NV212BGR = 6,
+  NV122BGR = 7,
 };
 
 class LDataType {
@@ -159,7 +186,6 @@ class LDataType {
 
 class LiteMat {
   // Class that represents a lite Mat of a Image.
-  // -# The pixel type of Lite Mat is RGBRGB...RGB.
  public:
   LiteMat();
 
@@ -167,7 +193,11 @@ class LiteMat {
 
   LiteMat(int width, int height, LDataType data_type = LDataType::UINT8);
 
+  LiteMat(int width, int height, void *p_data, LDataType data_type = LDataType::UINT8);
+
   LiteMat(int width, int height, int channel, LDataType data_type = LDataType::UINT8);
+
+  LiteMat(int width, int height, int channel, void *p_data, LDataType data_type = LDataType::UINT8);
 
   ~LiteMat();
 
@@ -177,7 +207,11 @@ class LiteMat {
 
   void Init(int width, int height, LDataType data_type = LDataType::UINT8);
 
+  void Init(int width, int height, void *p_data, LDataType data_type = LDataType::UINT8);
+
   void Init(int width, int height, int channel, LDataType data_type = LDataType::UINT8);
+
+  void Init(int width, int height, int channel, void *p_data, LDataType data_type = LDataType::UINT8);
 
   bool IsEmpty() const;
 
@@ -219,6 +253,16 @@ class LiteMat {
   LDataType data_type_;
   int *ref_count_;
 };
+
+/// \brief Calculates the difference between the two images for each element
+bool Subtract(const LiteMat &src_a, const LiteMat &src_b, LiteMat *dst);
+
+/// \brief Calculates the division between the two images for each element
+bool Divide(const LiteMat &src_a, const LiteMat &src_b, LiteMat *dst);
+
+/// \brief Calculates the multiply between the two images for each element
+bool Multiply(const LiteMat &src_a, const LiteMat &src_b, LiteMat *dst);
+
 }  // namespace dataset
 }  // namespace mindspore
 #endif  // MINI_MAT_H_

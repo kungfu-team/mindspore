@@ -15,7 +15,7 @@
  */
 #include "src/common/log_adapter.h"
 #include "common/common_test.h"
-#include "mindspore/lite/src/runtime/kernel/arm/fp32/power.h"
+#include "mindspore/lite/src/runtime/kernel/arm/fp32/power_fp32.h"
 #include "src/kernel_registry.h"
 #include "src/lite_kernel.h"
 
@@ -26,18 +26,20 @@ class TestPowerFp32 : public mindspore::CommonTest {
 };
 
 int PowerTestInit(std::vector<lite::Tensor *> *inputs_, std::vector<lite::Tensor *> *outputs_, float *a_ptr,
-                  float *b_ptr, std::vector<int> a_shape, std::vector<int> b_shape, std::vector<int> c_shape) {
-  auto in_t = new lite::Tensor(kNumberTypeFloat, a_shape, schema::Format_NHWC, lite::Tensor::Category::CONST);
+                  float *b_ptr, const std::vector<int> &a_shape, const std::vector<int> &b_shape,
+                  const std::vector<int> &c_shape) {
+  auto in_t = new lite::Tensor(kNumberTypeFloat, a_shape, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   in_t->MallocData();
   memcpy(in_t->MutableData(), a_ptr, sizeof(float) * in_t->ElementsNum());
   inputs_->push_back(in_t);
 
-  auto weight_t = new lite::Tensor(kNumberTypeFloat, b_shape, schema::Format_NHWC, lite::Tensor::Category::CONST);
+  auto weight_t =
+    new lite::Tensor(kNumberTypeFloat, b_shape, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   weight_t->MallocData();
   memcpy(weight_t->MutableData(), b_ptr, sizeof(float) * weight_t->ElementsNum());
   inputs_->push_back(weight_t);
 
-  auto out_t = new lite::Tensor(kNumberTypeFloat, c_shape, schema::Format_NHWC, lite::Tensor::Category::CONST);
+  auto out_t = new lite::Tensor(kNumberTypeFloat, c_shape, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   out_t->MallocData();
   outputs_->push_back(out_t);
 
@@ -45,13 +47,13 @@ int PowerTestInit(std::vector<lite::Tensor *> *inputs_, std::vector<lite::Tensor
 }
 
 int PowerTestInit2(std::vector<lite::Tensor *> *inputs_, std::vector<lite::Tensor *> *outputs_, float *a_ptr,
-                   std::vector<int> a_shape, std::vector<int> c_shape) {
-  auto in_t = new lite::Tensor(kNumberTypeFloat, a_shape, schema::Format_NHWC, lite::Tensor::Category::CONST);
+                   const std::vector<int> &a_shape, const std::vector<int> &c_shape) {
+  auto in_t = new lite::Tensor(kNumberTypeFloat, a_shape, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   in_t->MallocData();
   memcpy(in_t->MutableData(), a_ptr, sizeof(float) * in_t->ElementsNum());
   inputs_->push_back(in_t);
 
-  auto out_t = new lite::Tensor(kNumberTypeFloat, c_shape, schema::Format_NHWC, lite::Tensor::Category::CONST);
+  auto out_t = new lite::Tensor(kNumberTypeFloat, c_shape, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   out_t->MallocData();
   outputs_->push_back(out_t);
 
@@ -73,13 +75,11 @@ TEST_F(TestPowerFp32, Simple) {
   auto ctx = new lite::InnerContext;
   ctx->thread_num_ = 1;
   ASSERT_EQ(lite::RET_OK, ctx->Init());
-  kernel::PowerCPUKernel *op =
-    new kernel::PowerCPUKernel(reinterpret_cast<OpParameter *>(param), inputs_, outputs_, ctx, nullptr);
+  auto *op = new kernel::PowerCPUKernel(reinterpret_cast<OpParameter *>(param), inputs_, outputs_, ctx, nullptr);
   op->Init();
   op->Run();
   float correct[] = {1, 64, 2187, 65536};
-  float *output = reinterpret_cast<float *>(outputs_[0]->MutableData());
-  CompareOutputData(reinterpret_cast<float *>(outputs_[0]->MutableData()), correct, total_size, 0.0001);
+  ASSERT_EQ(0, CompareOutputData(reinterpret_cast<float *>(outputs_[0]->MutableData()), correct, total_size, 0.0001));
   delete op;
   for (auto t : inputs_) delete t;
   for (auto t : outputs_) delete t;
@@ -99,12 +99,11 @@ TEST_F(TestPowerFp32, Broadcast) {
   auto ctx = new lite::InnerContext;
   ctx->thread_num_ = 2;
   ASSERT_EQ(lite::RET_OK, ctx->Init());
-  kernel::PowerCPUKernel *op =
-    new kernel::PowerCPUKernel(reinterpret_cast<OpParameter *>(param), inputs_, outputs_, ctx, nullptr);
+  auto *op = new kernel::PowerCPUKernel(reinterpret_cast<OpParameter *>(param), inputs_, outputs_, ctx, nullptr);
   op->Init();
   op->Run();
   float correct[] = {1, 4, 9, 16};
-  CompareOutputData(reinterpret_cast<float *>(outputs_[0]->MutableData()), correct, total_size, 0.0001);
+  ASSERT_EQ(0, CompareOutputData(reinterpret_cast<float *>(outputs_[0]->MutableData()), correct, total_size, 0.0001));
   delete op;
   for (auto t : inputs_) delete t;
   for (auto t : outputs_) delete t;

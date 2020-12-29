@@ -35,22 +35,28 @@ class MulInt8CPUKernel : public LiteKernel {
 
   int Init() override;
   int ReSize() override;
+  void CheckSameShapeSize(std::vector<int> in_tensor0_shape, std::vector<int> in_tensor1_shape);
+  void CheckIfFastImpl();
   int Run() override;
   int DoExecute(int task_id);
+  int FastDoExecute(int task_id);
 
  private:
-  const lite::InnerContext *ctx_;
-  ArithmeticParameter *tile_para;
+  const lite::InnerContext *ctx_ = nullptr;
+  ArithmeticParameter *tile_para = nullptr;
   MulParameter para_;
-  int thread_count_;
-  int64_t elements_num_;
-  int64_t count_unit_;
+  bool fast_hw_broadcast_ = false;
+  bool input1_hw_broadcast_ = false;
+  int thread_count_ = 1;
+  int64_t elements_num_ = 0;
+  int64_t count_unit_ = 0;
   int8_t *input0_data_ = nullptr;
   int8_t *input1_data_ = nullptr;
   int8_t *output_data_ = nullptr;
 };
 
 int MulInt8Run(void *cdata, int task_id);
+int FastHWBroadcatMulInt8Run(void *cdata, int task_id);
 }  // namespace mindspore::kernel
 
 #endif  // MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_INT8_MUL_INT8_H_

@@ -75,7 +75,7 @@ class TakeOp : public PipelineOp {
 
   // All dataset ops operate by launching a thread (see ExecutionTree). This class functor will
   // provide the master loop that drives the logic for performing the work
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status operator()() override;
 
   // Base-class override for NodePass visitor acceptor.
@@ -83,6 +83,12 @@ class TakeOp : public PipelineOp {
   // @param modified - Whether this node visit modified the pipeline.
   // @return - Status of the node visit.
   Status Accept(NodePass *p, bool *modified) override;
+
+  /// \brief Base-class override for NodePass pre-visit acceptor
+  /// \param[in] p The node to visit
+  /// \param[out] modified Indicator if the node was modified
+  /// \return Status of the node visit
+  Status PreAccept(NodePass *p, bool *modified) override;
 
   // Op name getter
   // @return Name of the current Op

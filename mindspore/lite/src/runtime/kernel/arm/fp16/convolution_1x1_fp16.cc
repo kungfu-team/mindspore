@@ -218,15 +218,10 @@ static int Convolution1x1Fp16RunHw(void *cdata, int task_id) {
 }
 
 int Convolution1x1FP16CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare failed.";
-    return RET_ERROR;
-  }
-
-  ret = ConvolutionBaseFP16CPUKernel::GetExecuteTensor();
+  auto ret = ConvolutionBaseFP16CPUKernel::GetExecuteTensor();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Get executor tensor failed.";
+    ConvolutionBaseFP16CPUKernel::FreeTmpBuffer();
     return ret;
   }
 
@@ -234,6 +229,7 @@ int Convolution1x1FP16CPUKernel::Run() {
     ctx_->allocator->Malloc(matmul_param_->row_16_ * matmul_param_->deep_ * sizeof(float16_t)));
   if (pack_input_ == nullptr) {
     MS_LOG(ERROR) << "Conv1x1 Malloc pack_input_ error!";
+    ConvolutionBaseFP16CPUKernel::FreeTmpBuffer();
     return RET_MEMORY_FAILED;
   }
 
@@ -248,20 +244,25 @@ int Convolution1x1FP16CPUKernel::Run() {
     }
 
     if (multi_thread_by_hw_) {
-      ParallelLaunch(this->context_->thread_pool_, Convolution1x1Fp16RunHw, this, thread_count_);
+      ret = ParallelLaunch(this->context_->thread_pool_, Convolution1x1Fp16RunHw, this, thread_count_);
     } else {
       RowMajor2Col16MajorFp16Opt(input_ptr_, pack_input_, matmul_param_->row_, matmul_param_->deep_);
-      ParallelLaunch(this->context_->thread_pool_, Convolution1x1Fp16RunOc, this, thread_count_);
+      ret = ParallelLaunch(this->context_->thread_pool_, Convolution1x1Fp16RunOc, this, thread_count_);
+    }
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "ParallelLaunch failed.";
+      ConvolutionBaseFP16CPUKernel::FreeTmpBuffer();
+      ctx_->allocator->Free(pack_input_);
+      pack_input_ = nullptr;
+      return ret;
     }
   }
 
   ConvolutionBaseFP16CPUKernel::IfCastOutput();
   ConvolutionBaseFP16CPUKernel::FreeTmpBuffer();
 
-  if (pack_input_ != nullptr) {
-    ctx_->allocator->Free(pack_input_);
-    pack_input_ = nullptr;
-  }
+  ctx_->allocator->Free(pack_input_);
+  pack_input_ = nullptr;
   return RET_OK;
 }
 }  // namespace mindspore::kernel

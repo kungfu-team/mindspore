@@ -16,6 +16,10 @@
 
 #include "src/ops/logical_not.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -28,6 +32,11 @@ int LogicalNot::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuff
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+PrimitiveC *LogicalNotCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<LogicalNot>(primitive);
+}
+Registry LogicalNotRegistry(schema::PrimitiveType_LogicalNot, LogicalNotCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

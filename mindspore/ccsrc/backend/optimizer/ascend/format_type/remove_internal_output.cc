@@ -54,6 +54,9 @@ const AnfNodePtr RemoveInternalOutput::Process(const FuncGraphPtr &func_graph, c
                                                const EquivPtr &) const {
   MS_EXCEPTION_IF_NULL(func_graph);
   MS_EXCEPTION_IF_NULL(node);
+  if (AnfAlgo::CheckPrimitiveType(node, prim::kPrimCast) && !AnfAlgo::GetBooleanAttr(node, kIsBackendCast)) {
+    return nullptr;
+  }
   auto kernel_graph = func_graph->cast<KernelGraphPtr>();
   if (kernel_graph == nullptr) {
     return nullptr;
@@ -73,7 +76,7 @@ const AnfNodePtr RemoveInternalOutput::Process(const FuncGraphPtr &func_graph, c
   } else {
     auto tuple_getitem = input_node->cast<CNodePtr>();
     MS_EXCEPTION_IF_NULL(tuple_getitem);
-    int idx = AnfAlgo::GetTupleGetItemOutIndex(tuple_getitem);
+    int64_t idx = SizeToLong(AnfAlgo::GetTupleGetItemOutIndex(tuple_getitem));
     AnfNodePtr real_input_node = AnfAlgo::GetTupleGetItemRealInput(tuple_getitem);
     kernel_graph->ReplaceInternalOutput(node, real_input_node, 0, idx);
   }

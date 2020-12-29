@@ -23,6 +23,7 @@
 
 #include "pybind_api/api_register.h"
 #include "abstract/abstract_value.h"
+#include "utils/shape_utils.h"
 
 namespace mindspore {
 namespace tensor {
@@ -258,6 +259,10 @@ py::tuple TensorPy::GetPyTupleShape(const Tensor &tensor) {
 }
 
 py::array TensorPy::SyncAsNumpy(const Tensor &tensor) {
+  if (tensor.NeedWait()) {
+    py::gil_scoped_release gil_release;
+    tensor.Wait();
+  }
   tensor.data_sync();
   return AsNumpy(tensor);
 }
@@ -365,6 +370,17 @@ REGISTER_PYBIND_DEFINE(Tensor, ([](const py::module *m) {
                                  >>> data.shape()
                                  (3, 3)
                              )mydelimiter")
+                           .def_property_readonly("_size", &Tensor::DataSize, R"mydelimiter(
+                             Get tensor's data size.
+
+                             Returns:
+                                 int, the size of tensor.
+
+                             Examples:
+                                 >>> data = mindspore.Tensor(np.ones((2, 3)))
+                                 >>> data.size
+                                 6
+                             )mydelimiter")
                            .def("from_numpy", TensorPy::MakeTensorNoCopy, R"mydelimiter(
                              Creates a Tensor from a numpy.ndarray without copy.
 
@@ -390,17 +406,6 @@ REGISTER_PYBIND_DEFINE(Tensor, ([](const py::module *m) {
                                  >>> array
                                  array([[1., 1., 1.],
                                         [1., 1., 1.]])
-                             )mydelimiter")
-                           .def("size", &Tensor::DataSize, R"mydelimiter(
-                             Get tensor's data size.
-
-                             Returns:
-                                 int, the size of tensor.
-
-                             Examples:
-                                 >>> data = mindspore.Tensor(np.ones((2, 3)))
-                                 >>> data.size()
-                                 6
                              )mydelimiter")
                            .def("is_init", &Tensor::is_init, R"mydelimiter(
                              Get tensor init_flag.
@@ -456,6 +461,7 @@ REGISTER_PYBIND_DEFINE(Tensor, ([](const py::module *m) {
                                   mindspore.int32
                               )mydelimiter")
                            .def("set_cast_dtype", &Tensor::set_cast_dtype, py::arg("dtype") = nullptr)
+                           .def("data_sync", &Tensor::data_sync)
                            .def("__str__", &Tensor::ToString)
                            .def("__repr__", &Tensor::ToStringRepr)
                            .def(py::pickle(

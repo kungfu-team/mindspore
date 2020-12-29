@@ -16,9 +16,9 @@
 
 #include "frontend/optimizer/ad/dfunctor.h"
 
+#include <map>
 #include <memory>
 #include <string>
-#include <utility>
 
 #include "ir/anf.h"
 #include "utils/info.h"
@@ -41,24 +41,28 @@ FuncGraphSet DFunctor::scope_;
 
 DFunctor::DFunctor(const FuncGraphPtr &primal_graph, const pipeline::ResourceBasePtr &resources)
     : primal_graph_(primal_graph), resources_(resources), need_cut_(false), is_top_(false) {
-  TraceManager::DebugTrace(std::make_shared<TraceGradFprop>(primal_graph->debug_info()));
-  k_graph_ = std::make_shared<FuncGraph>();
+  {
+    TraceGuard guard(std::make_shared<TraceGradFprop>(primal_graph->debug_info()));
+    k_graph_ = std::make_shared<FuncGraph>();
+  }
   if (primal_graph->has_attr(FUNC_GRAPH_ATTR_GRAPH_KERNEL)) {
     std::string grad_op_name = GetValue<std::string>(primal_graph->get_attr(FUNC_GRAPH_ATTR_GRAPH_KERNEL));
     k_graph_->set_attr(FUNC_GRAPH_ATTR_GRAPH_KERNEL, MakeValue(grad_op_name));
   }
   // To keep switch_layer's inputs from being inlined
   k_graph_->set_switch_layer_input(primal_graph->switch_layer_input());
-  TraceManager::EndTrace();
+  k_graph_->set_stage(primal_graph->stage());
 
-  TraceManager::DebugTrace(std::make_shared<TraceGradBprop>(primal_graph->debug_info()));
-  tape_ = std::make_shared<FuncGraph>();
+  {
+    TraceGuard guard(std::make_shared<TraceGradBprop>(primal_graph->debug_info()));
+    tape_ = std::make_shared<FuncGraph>();
+  }
+  tape_->set_stage(primal_graph->stage());
   // Add "_Grad" postfix
   if (primal_graph->has_attr(FUNC_GRAPH_ATTR_GRAPH_KERNEL)) {
     std::string grad_op_name = GetValue<std::string>(primal_graph->get_attr(FUNC_GRAPH_ATTR_GRAPH_KERNEL)) + "_Grad";
     tape_->set_attr(FUNC_GRAPH_ATTR_GRAPH_KERNEL, MakeValue(grad_op_name));
   }
-  TraceManager::EndTrace();
 
   dout_ = tape_->add_parameter();
 }
@@ -69,6 +73,11 @@ void DFunctor::Init(bool is_top) {
   if (is_top) {
     scope_ = primal_graph_->scope();
   }
+}
+
+void DFunctor::Finish() {
+  CallDoutHoleOnTape();
+  EliminatePrimalGraph();
 }
 
 void DFunctor::Clear() {
@@ -99,14 +108,23 @@ void DFunctor::BackPropagateFv(const AnfNodePtr &fv, const AnfNodePtr &din) {
       fv_adjoint = anfnode_to_adjoin_indirect_fv_.find(fv);
     }
   }
-  auto node = tape_->NewCNode({NewValueNode(prim::kPrimEmbed), fv_adjoint->second->k()});
-  fv_adjoint->second->RegisterKUser(node, 1);
-  auto default_val = tape_->NewCNode({NewValueNode(prim::GetPythonOps("zeros_like")), fv_adjoint->second->k()});
-  fv_adjoint->second->RegisterKUser(default_val, 1);
-  auto dfv = tape_->NewCNode({NewValueNode(prim::kPrimEnvGetItem), din, node, default_val});
+  auto fv_node = fv_adjoint->second->k();
+  auto cached_envitem_iter = anfnode_to_envitem_.find(fv_node);
+  CNodePtr embed_node, default_val_node;
+  if (cached_envitem_iter != anfnode_to_envitem_.end()) {
+    embed_node = cached_envitem_iter->second.first;
+    default_val_node = cached_envitem_iter->second.second;
+  } else {
+    embed_node = tape_->NewCNode({NewValueNode(prim::kPrimEmbed), fv_node});
+    default_val_node = tape_->NewCNode({NewValueNode(prim::GetPythonOps("zeros_like")), fv_node});
+    fv_adjoint->second->RegisterKUser(embed_node, 1);
+    fv_adjoint->second->RegisterKUser(default_val_node, 1);
+    anfnode_to_envitem_[fv_node] = std::make_pair(embed_node, default_val_node);
+  }
+  auto dfv = tape_->NewCNode({NewValueNode(prim::kPrimEnvGetItem), din, embed_node, default_val_node});
   MS_LOG(DEBUG) << "BackPropagateFv find adjoint in anfnode_to_adjoin_ or anfnode_to_adjoin_indirect_fv_ fv "
                 << fv->func_graph()->ToString() << " " << fv->ToString() << ".";
-  MS_LOG(DEBUG) << "BackPropagateFv get item from " << din->ToString() << " key " << node->ToString() << ".";
+  MS_LOG(DEBUG) << "BackPropagateFv get item from " << din->ToString() << " key " << embed_node->ToString() << ".";
   fv_adjoint->second->AccumulateDout(dfv);
 }
 
@@ -116,6 +134,7 @@ void DFunctor::BackPropagateSwitchLayer(const CNodePtr &cnode_morph, const CNode
   if (!IsPrimitiveCNode(input, prim::kPrimMakeTuple)) {
     MS_LOG(EXCEPTION) << "The 2th input of switch_layer expect a tuple of graphs, but got " << input->ToString() << ".";
   }
+  std::unordered_map<AnfNodePtr, FuncGraphPtr> node_to_fg;
   auto tuple_graphs = input->cast<CNodePtr>();
   for (size_t i = 1; i < tuple_graphs->size(); ++i) {
     auto graph = tuple_graphs->input(i);
@@ -131,29 +150,39 @@ void DFunctor::BackPropagateSwitchLayer(const CNodePtr &cnode_morph, const CNode
     }
     // Consider direct and indirect fvs.
     for (auto fv : func_graph->free_variables_nodes()) {
+      if (node_to_fg.find(fv) != node_to_fg.end()) {
+        continue;
+      }
+      node_to_fg[fv] = func_graph;
       BackPropagateFv(fv, env);
     }
     for (auto indirect_fv : functor->second->anfnode_to_adjoin_indirect_fv_) {
       MS_LOG(DEBUG) << "BackPropagateSwitchLayer backprop indirect fv " << func_graph->ToString() << " "
                     << indirect_fv.first->ToString() << ".";
+      if (node_to_fg.find(indirect_fv.first) != node_to_fg.end()) {
+        continue;
+      }
+      node_to_fg[indirect_fv.first] = func_graph;
       BackPropagateFv(indirect_fv.first, env);
     }
   }
 }
 
 void DFunctor::BackPropagate(const CNodePtr &cnode_morph, const CNodePtr &k_app, const AdjointPtr &node_adjoint) {
-  auto bprop = k_graph_->NewCNode({NewValueNode(prim::kPrimTupleGetItem), k_app, NewValueNode(1)});
+  auto bprop =
+    k_graph_->NewCNode({NewValueNode(prim::kPrimTupleGetItem), k_app, NewValueNode(static_cast<int64_t>(1))});
   // Call with delimited continuation dout.
   auto bprop_app = tape_->NewCNode({bprop, node_adjoint->dout()});
   node_adjoint->RegisterDoutUser(bprop_app, 1);
   // Special case for switch_layer
   if (IsPrimitiveCNode(cnode_morph, prim::kPrimSwitchLayer)) {
-    auto din = tape_->NewCNode({NewValueNode(prim::kPrimTupleGetItem), bprop_app, NewValueNode(0)});
+    auto din =
+      tape_->NewCNode({NewValueNode(prim::kPrimTupleGetItem), bprop_app, NewValueNode(static_cast<int64_t>(0))});
     BackPropagateSwitchLayer(cnode_morph, din);
     return;
   }
   for (size_t i = 0; i < cnode_morph->size(); i++) {
-    auto din = tape_->NewCNode({NewValueNode(prim::kPrimTupleGetItem), bprop_app, NewValueNode(SizeToInt(i))});
+    auto din = tape_->NewCNode({NewValueNode(prim::kPrimTupleGetItem), bprop_app, NewValueNode(SizeToLong(i))});
     auto input = cnode_morph->input(i);
     // Backprop sens wrt fvs.
     if (IsValueNode<FuncGraph>(input)) {
@@ -202,34 +231,37 @@ AdjointPtr DFunctor::MapMorphism(const AnfNodePtr &morph) {
   std::vector<AdjointPtr> param_adjoints;
   for (size_t i = 0; i < cnode_morph->size(); i++) {
     auto node = cnode_morph->input(i);
-    auto node_adjoint_iter = anfnode_to_adjoin_.find(node);
     AdjointPtr node_adjoint = nullptr;
-    AnfNodePtr k = nullptr;
+    auto node_adjoint_iter = anfnode_to_adjoin_.find(node);
     if (node_adjoint_iter != anfnode_to_adjoin_.end()) {
       node_adjoint = node_adjoint_iter->second;
     } else {
-      // Input might be a CNode that needs to be handled before hand.
+      // Input might be a CNode that needs to be handled previously.
       node_adjoint = MapMorphism(node);
     }
     MS_EXCEPTION_IF_NULL(node_adjoint);
-    k = node_adjoint->k();
+    AnfNodePtr k = node_adjoint->k();
     if (k == nullptr) {
       MS_LOG(EXCEPTION) << "MapMorphism adjoint node does not exist, input[" << i << "] " << node->ToString() << ".";
     }
     inputs.push_back(k);
     param_adjoints.push_back(node_adjoint);
   }
-  TraceManager::DebugTrace(std::make_shared<TraceGradFpropApp>(cnode_morph->debug_info()));
-  auto k_app = k_graph_->NewCNode(inputs);
-  TraceManager::EndTrace();
+  CNodePtr k_app = nullptr;
+  {
+    TraceGuard guard(std::make_shared<TraceGradFpropApp>(cnode_morph->debug_info()));
+    k_app = k_graph_->NewCNode(inputs);
+  }
   ReplaceEquivdout(k_app, cnode_morph);
+  cnode_morph->clear_inputs_value();
   cnode_morph->set_forward(nullptr, "");
   for (size_t i = 0; i < param_adjoints.size(); ++i) {
     param_adjoints[i]->RegisterKUser(k_app, i);
   }
 
   // Do forward computation
-  auto foward_app = k_graph_->NewCNode({NewValueNode(prim::kPrimTupleGetItem), k_app, NewValueNode(0)});
+  auto foward_app =
+    k_graph_->NewCNode({NewValueNode(prim::kPrimTupleGetItem), k_app, NewValueNode(static_cast<int64_t>(0))});
   // K:: cnode -> forward_app
   auto node_adjoint = std::make_shared<Adjoint>(morph, foward_app, tape_);
   UpdateAdjoint(node_adjoint);
@@ -244,25 +276,8 @@ AdjointPtr DFunctor::MapMorphism(const AnfNodePtr &morph) {
   MS_LOG(DEBUG) << "MapMorphism node " << morph->DebugString(4) << ".";
   return node_adjoint;
 }
-void TensorSetAddress(const ValuePtr &value, std::map<std::string, tensor::TensorPtr> *tuple_tensors) {
-  MS_LOG(DEBUG) << "Start set tensor address" << value->ToString() << value->isa<tensor::Tensor>();
-  if (value->isa<tensor::Tensor>()) {
-    auto tnode = value->cast<tensor::TensorPtr>();
-    if (tuple_tensors->find(tnode->id()) != tuple_tensors->end()) {
-      MS_LOG(DEBUG) << "Set tensor" << tnode->device_address();
-      (*tuple_tensors)[tnode->id()]->set_device_address(tnode->device_address());
-    }
-  }
-  if (value->isa<ValueTuple>()) {
-    auto tuple = value->cast<ValueTuplePtr>();
-    for (size_t i = 0; i < tuple->size(); i++) {
-      MS_LOG(DEBUG) << "Set tuple tensor" << (*tuple)[i]->ToString();
-      TensorSetAddress((*tuple)[i], tuple_tensors);
-    }
-  }
-}
 
-ValuePtr GenNewTensorInner(const ValuePtr &value) {
+ValuePtr DFunctor::GenNewTensorInner(const ValuePtr &value) {
   std::vector<ValuePtr> value_list;
   if (value->isa<tensor::Tensor>()) {
     auto tensor = value->cast<tensor::TensorPtr>();
@@ -280,18 +295,24 @@ ValuePtr GenNewTensorInner(const ValuePtr &value) {
   return value;
 }
 
-ValuePtr GenNewTensor(const FuncGraphManagerPtr &mng, const AnfNodePtr &node, const ValuePtr &value) {
+ValuePtr DFunctor::GenNewTensor(const FuncGraphManagerPtr &mng, const AnfNodePtr &node, const ValuePtr &value,
+                                bool need_replace_forward) {
   ValuePtr out = value;
   auto ref_size = mng->node_users()[node].size();
   if (ref_size < 2) {
-    out = GenNewTensorInner(value);
+    if (need_replace_forward) {
+      out = GenNewTensorInner(value);
+    } else {
+      auto tensor = value->cast<tensor::TensorPtr>();
+      tensor->set_device_address(nullptr);
+      return tensor;
+    }
   }
   return out;
 }
 
 void DFunctor::ReplaceEquivdout(const CNodePtr &cnode, const CNodePtr &cnode_morph) {
   auto forward = cnode_morph->forward().first;
-  auto forward_id = cnode_morph->forward().second;
   if (forward == nullptr) {
     return;
   }
@@ -300,6 +321,7 @@ void DFunctor::ReplaceEquivdout(const CNodePtr &cnode, const CNodePtr &cnode_mor
     return;
   }
   auto fg = GetValueNode<FuncGraphPtr>(input);
+  // {prim::maketuple, forward_output, bprop_graph}
   auto output = fg->output();
   if (!output->isa<CNode>()) {
     return;
@@ -313,25 +335,27 @@ void DFunctor::ReplaceEquivdout(const CNodePtr &cnode, const CNodePtr &cnode_mor
   if (!IsValueNode<FuncGraph>(input_fg)) {
     return;
   }
-  std::map<std::string, tensor::TensorPtr> tuple_tensors;
+  // replace forward output with value node
   auto equivdout = cnode_input->cast<CNodePtr>();
+  MS_EXCEPTION_IF_NULL(equivdout);
   auto func_graph = GetValueNode<FuncGraphPtr>(input_fg);
+  MS_EXCEPTION_IF_NULL(func_graph);
   auto manager = Manage({fg, func_graph}, false);
-  auto ref_size = manager->node_users()[equivdout].size();
-  auto forward_value = forward;
-  if (!forward_id.empty() && ref_size > 1) {
-    auto inst = pynative::PynativeExecutor::GetInstance();
-    inst->SaveOpForwardValue(forward_id, forward_value, &tuple_tensors);
+  auto need_replace_forward = pynative::PynativeExecutor::GetInstance()->need_replace_forward();
+  auto forward_value = GenNewTensor(manager, equivdout, forward, need_replace_forward);
+  if (!need_replace_forward) {
+    cnode_morph->clear_inputs_value();
+    MS_LOG(DEBUG) << "No need replace forward result";
+    return;
   }
-
-  forward_value = GenNewTensor(manager, equivdout, forward);
   MS_LOG(DEBUG) << "Replace: " << equivdout->ToString() << " with " << forward;
   auto value_node = NewValueNode(forward_value);
   value_node->set_has_new_value(true);
   manager->Replace(equivdout, value_node);
+  // replace input object with value node
   auto paras = fg->parameters();
   auto inputs_value = cnode_morph->inputs_value();
-  if (inputs_value.size() == 0) {
+  if (inputs_value.empty()) {
     return;
   }
   if (inputs_value.size() != paras.size()) {
@@ -342,12 +366,9 @@ void DFunctor::ReplaceEquivdout(const CNodePtr &cnode, const CNodePtr &cnode_mor
     auto input_value = inputs_value[i];
     if (para_ref_size > 0 && input_value.first != nullptr) {
       MS_LOG(DEBUG) << "Replace: " << paras[i]->ToString() << " with " << input_value.first;
-      auto inst = pynative::PynativeExecutor::GetInstance();
-      if (!input_value.second.empty()) {
-        inst->SaveOpForwardValue(input_value.second, input_value.first, &tuple_tensors);
-      }
       auto input_value_node = NewValueNode(input_value.first);
       input_value_node->set_has_new_value(true);
+      input_value_node->set_used_graph_count(para_ref_size);
       manager->Replace(paras[i], input_value_node);
     }
   }
@@ -357,30 +378,18 @@ void DFunctor::ReplaceEquivdout(const CNodePtr &cnode, const CNodePtr &cnode_mor
   res->set_func_graph(fg);
   PynativeElimOpt(res);
   auto out = fg->output()->cast<CNodePtr>();
+  MS_EXCEPTION_IF_NULL(out);
   auto c_input = out->input(1);
+  MS_EXCEPTION_IF_NULL(c_input);
   if (!c_input->isa<ValueNode>()) {
     return;
   }
-
   auto out_node = c_input->cast<ValueNodePtr>();
-  out_node->set_value(GenNewTensor(manager, out_node, out_node->value()));
-
-  cnode_morph->clear_inputs_value();
-
-  if (tuple_tensors.size() != 0) {
-    MS_LOG(DEBUG) << "Start tuple out" << fg->output()->DebugString(4);
-    for (auto &g : manager->func_graphs()) {
-      for (auto &node : g->value_nodes()) {
-        MS_LOG(DEBUG) << "Set Tensor addr" << node.first->ToString();
-        auto vnode = node.first->cast<ValueNodePtr>()->value();
-        TensorSetAddress(vnode, &tuple_tensors);
-      }
-    }
-  }
-
+  MS_EXCEPTION_IF_NULL(out_node);
+  out_node->set_value(GenNewTensor(manager, out_node, out_node->value(), need_replace_forward));
+  // clear resource
   fg->ClearAllManagerInfo();
   func_graph->ClearAllManagerInfo();
-  return;
 }
 
 bool DFunctor::IsFreeMorphism(const AnfNodePtr &node) {
@@ -534,69 +543,69 @@ FuncGraphPtr DFunctor::KUserDefined(const FuncGraphPtr &primal) {
   return nullptr;
 }
 
-// MapToK(func)
-AnfNodePtr DFunctor::MapToK(const FuncGraphPtr &primal) {
-  auto f = func_graph_to_functor_.find(primal);
+// Construct representation graph for {CNode, Index} of Primitive.
+AnfNodePtr DFunctor::MapPrimitiveToK(const CNodePtr &primitive_user, size_t index) {
+  auto primal = primitive_user->input(index);
+  if (!IsValueNode<Primitive>(primal)) {
+    MS_LOG(EXCEPTION) << "Primal graph \"" << primal->ToString() << "\" is not a ValueNode of Primitive.";
+  }
+  ScopeGuard scope_guard(primal->scope());
+  // Map Primitive to K
+  auto value_node = primal->cast<ValueNodePtr>();
+  auto prim = GetValueNode<PrimitivePtr>(value_node);
+  if (prim->Hash() == prim::kPrimStopGradient->Hash() && prim->name() == prim::kPrimStopGradient->name()) {
+    MS_LOG(DEBUG) << "Meet a kPrimStopGradient " << prim->ToString() << ".";
+    need_cut_ = true;
+  }
+  auto k_prim = g_k_prims.KPrimitive(primitive_user, value_node, resources_);
+  if (k_prim != nullptr) {
+    return NewValueNode(k_prim);
+  }
+  // When failed to find k_prim, try k_meta.
+  auto k_meta = g_k_prims.KMetaFuncGraph(prim);
+  if (k_meta != nullptr) {
+    return NewValueNode(k_meta);
+  }
+  MS_LOG(EXCEPTION) << "Fail to map Primitive of \"" << primal->ToString() << "\" to K.";
+}
+
+// Construct representation graph for ValueNode of FuncGraph.
+AnfNodePtr DFunctor::MapFuncGraphToK(const AnfNodePtr &primal) {
+  if (!IsValueNode<FuncGraph>(primal)) {
+    MS_LOG(EXCEPTION) << "Primal graph \"" << primal->ToString() << "\" is not a ValueNode of FuncGraph.";
+  }
+  ScopeGuard scope_guard(primal->scope());
+  // Map func graph to K
+  auto func_graph = GetValueNode<FuncGraphPtr>(primal);
+  auto f = func_graph_to_functor_.find(func_graph);
   if (f != func_graph_to_functor_.end()) {
-    MS_LOG(DEBUG) << "K graph functor already exist " << primal->ToString() << ".";
+    MS_LOG(DEBUG) << "K graph functor already exist " << func_graph->ToString() << ".";
     return NewValueNode(f->second->k_graph_);
   }
-
-  auto k_user_defined = KUserDefined(primal);
+  auto k_user_defined = KUserDefined(func_graph);
   if (k_user_defined != nullptr) {
-    MS_LOG(DEBUG) << "K graph functor user defined bprop " << primal->ToString() << ".";
+    MS_LOG(DEBUG) << "K graph functor user defined bprop " << func_graph->ToString() << ".";
     return NewValueNode(k_user_defined);
   }
-
-  auto functor = std::make_shared<DFunctor>(primal, resources_);
+  auto functor = std::make_shared<DFunctor>(func_graph, resources_);
   functor->Init();
   functor->MapObject();
   functor->MapMorphism();
 
-  MS_LOG(DEBUG) << "K graph K function graph " << primal->ToString() << " " << functor->k_graph_->ToString() << ".";
+  MS_LOG(DEBUG) << "Map \"" << func_graph->ToString() << "\" to \"" << functor->k_graph_->ToString() << "\"";
   return NewValueNode(functor->k_graph_);
 }
 
-// Construct representation graph for given node.
-AnfNodePtr DFunctor::MapToK(const AnfNodePtr &primal) {
+// Construct for ValueNode of Parameter.
+AnfNodePtr DFunctor::MapParameterToK(const AnfNodePtr &primal) {
+  if (!primal->isa<Parameter>()) {
+    MS_LOG(EXCEPTION) << "Primal graph \"" << primal->ToString() << "\" is not a ValueNode of Parameter.";
+  }
   ScopeGuard scope_guard(primal->scope());
-  // MapToK(prim)
-  if (IsValueNode<Primitive>(primal)) {
-    auto value_node = primal->cast<ValueNodePtr>();
-    auto prim = GetValueNode<PrimitivePtr>(value_node);
-    if (prim->Hash() == prim::kPrimStopGradient->Hash() && prim->name() == prim::kPrimStopGradient->name()) {
-      MS_LOG(DEBUG) << "Meet a kPrimStopGradient " << prim->ToString() << ".";
-      need_cut_ = true;
-    }
-    auto k_prim = g_k_prims.KPrimitive(value_node, resources_);
-    if (k_prim != nullptr) {
-      return NewValueNode(k_prim);
-    }
-    // When failed to find k_prim, try k_meta.
-    auto k_meta = g_k_prims.KMetaFuncGraph(prim);
-    if (k_meta != nullptr) {
-      return NewValueNode(k_meta);
-    }
-  }
-
-  // MapToK(func)
-  if (IsValueNode<FuncGraph>(primal)) {
-    auto func_graph = GetValueNode<FuncGraphPtr>(primal);
-    auto k_func = MapToK(func_graph);
-    return k_func;
-  }
-
-  if (primal->isa<Parameter>()) {
-    TraceManager::DebugTrace(std::make_shared<TraceGradFprop>(primal->debug_info()));
-    auto ret = k_graph_->add_parameter();
-    TraceManager::EndTrace();
-    return ret;
-  }
-
-  if (!primal->isa<ValueNode>()) {
-    MS_LOG(EXCEPTION) << "K node keeped node from primal_graph_ " << primal->ToString() << " that is not a ValueNode.";
-  }
-  return primal;
+  // Map Parameter to K
+  TraceGuard trace_guard(std::make_shared<TraceGradFprop>(primal->debug_info()));
+  auto ret = k_graph_->add_parameter();
+  return ret;
 }
 
 bool DFunctor::IsInScope(const AnfNodePtr &node) {
@@ -637,7 +646,7 @@ void DFunctor::MapParamObject() {
   for (auto &p : primal_graph_->parameters()) {
     ScopeGuard scope_guard(p->scope());
     MS_LOG(DEBUG) << "MapParamObject parameter " << p->ToString() << ".";
-    auto adjoint = std::make_shared<Adjoint>(p, MapToK(p), tape_);
+    auto adjoint = std::make_shared<Adjoint>(p, MapParameterToK(p), tape_);
     UpdateAdjoint(adjoint);
     anfnode_to_adjoin_[p] = adjoint;
   }
@@ -655,12 +664,32 @@ void DFunctor::MapValueObject() {
       anfnode_to_adjoin_[node] = adjoint;
       continue;
     }
-    // Skip Return.
-    if (IsValueNode<Primitive>(node) && GetValueNode<PrimitivePtr>(node) == prim::kPrimReturn) {
-      continue;
+
+    AdjointPtr adjoint = nullptr;
+    if (IsValueNode<Primitive>(node)) {  // Primitive.
+      if (GetValueNode<PrimitivePtr>(node) == prim::kPrimReturn) {
+        continue;
+      }
+      MS_LOG(DEBUG) << "Map Primitive node " << node->DebugString() << ".";
+      auto &users = manager->node_users()[node];
+      if (users.size() == 0) {
+        MS_LOG(ERROR) << "\"" << node->DebugString() << "\" has no user.";
+        continue;
+      } else if (users.size() > 1) {
+        MS_LOG(DEBUG) << "\"" << node->DebugString() << "\" supposed to be used once, but users size: " << users.size();
+      }
+      auto cnode = users.begin()->first->cast<CNodePtr>();  // We just use the first user.
+      auto index = users.begin()->second;
+      adjoint = std::make_shared<Adjoint>(node, MapPrimitiveToK(cnode, index), tape_);
+    } else if (IsValueNode<FuncGraph>(node)) {  // FuncGraph
+      MS_LOG(DEBUG) << "Map FuncGraph node " << node->DebugString() << ".";
+      adjoint = std::make_shared<Adjoint>(node, MapFuncGraphToK(node), tape_);
+    } else if (node->isa<Parameter>()) {  // Parameter, hardly reach here.
+      MS_LOG(DEBUG) << "Map Parameter node " << node->DebugString() << ".";
+      adjoint = std::make_shared<Adjoint>(node, MapParameterToK(node), tape_);
+    } else {
+      adjoint = std::make_shared<Adjoint>(node, node, tape_);
     }
-    MS_LOG(DEBUG) << "MapValueObject node " << node->ToString() << ".";
-    auto adjoint = std::make_shared<Adjoint>(node, MapToK(node), tape_);
     UpdateAdjoint(adjoint);
     anfnode_to_adjoin_[node] = adjoint;
   }
@@ -719,10 +748,7 @@ void DFunctor::CallDoutHoleOnTape() {
     }
   }
 }
-FuncGraphPtr DFunctor::k_graph() {
-  CallDoutHoleOnTape();
-  return k_graph_;
-}
+FuncGraphPtr DFunctor::k_graph() { return k_graph_; }
 
 void DFunctor::BroadCastStopFlag() {
   // As stop set expanding, all directly or indirectly stopped CNode will be cut off
@@ -758,6 +784,30 @@ bool DFunctor::AllReferencesStopped(const CNodePtr &node) {
     }
   }
   return true;
+}
+
+// To replace the primal graph with k graph
+void DFunctor::EliminatePrimalGraph() {
+  auto k_vnode = NewValueNode(k_graph_);
+  auto idx0 = NewValueNode(SizeToLong(0));
+  auto imm0 = std::make_shared<Int64Imm>(0);
+  idx0->set_abstract(std::make_shared<abstract::AbstractScalar>(imm0));
+  auto manager = primal_graph_->manager();
+  auto users = primal_graph_->func_graph_cnodes_index();
+  for (auto &it : users) {
+    auto cnode = it.first->first->cast<CNodePtr>();
+    auto index = it.first->second;
+    auto vnode = cnode->inputs()[index];
+    if (index != 0) {
+      MS_LOG(DEBUG) << "Primal is used but not called, at {" << cnode->DebugString(3) << "/" << index << "}";
+      continue;
+    }
+    cnode->set_input(0, k_vnode);  // Replace primal graph with k graph
+    auto construct_wrapper = cnode->func_graph();
+    TraceGuard trace_guard(std::make_shared<TraceGradFpropApp>(cnode->debug_info()));
+    auto getitem0 = construct_wrapper->NewCNode({NewValueNode(prim::kPrimTupleGetItem), cnode, idx0});
+    manager->Replace(cnode, getitem0);
+  }
 }
 }  // namespace ad
 }  // namespace mindspore

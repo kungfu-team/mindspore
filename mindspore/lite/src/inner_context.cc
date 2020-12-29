@@ -17,11 +17,28 @@
 #include "src/inner_context.h"
 #include "include/errorcode.h"
 #include "src/common/log_adapter.h"
+#ifdef SUPPORT_NPU
+#include "src/runtime/agent/npu/npu_manager.h"
+#endif
 
 namespace mindspore::lite {
+InnerContext::InnerContext(const Context *context) {
+  this->allocator = context->allocator;
+  this->thread_num_ = context->thread_num_;
+  this->device_list_.clear();
+  for (auto &device_ctx : context->device_list_) {
+    this->device_list_.push_back(device_ctx);
+  }
+}
+
 int InnerContext::Init() {
-  if (this->thread_pool_ == nullptr) {
-    this->thread_pool_ = CreateLiteThreadPool(this->thread_num_, this->cpu_bind_mode_);
+  if (RET_OK != this->IsValid()) {
+    MS_LOG(ERROR) << "Context is not valid";
+    return RET_NOT_SUPPORT;
+  }
+  if (this->thread_pool_ == nullptr && this->IsCpuEnabled()) {
+    this->thread_pool_ =
+      CreateLiteThreadPool(this->thread_num_, this->device_list_[0].device_info_.cpu_device_info_.cpu_bind_mode_);
     if (this->thread_pool_ == nullptr) {
       MS_LOG(ERROR) << "Create ThreadPool failed";
       return RET_NULL_PTR;
@@ -34,14 +51,112 @@ int InnerContext::Init() {
       return RET_NULL_PTR;
     }
   }
+  if (IsNpuEnabled()) {
+    MS_LOG(DEBUG) << "NPU enabled.";
+  }
+  if (IsGpuEnabled()) {
+    MS_LOG(DEBUG) << "GPU enabled.";
+  }
   return RET_OK;
 }
 
 InnerContext::~InnerContext() {
-  if (this->thread_pool_ != NULL) {
+  if (this->thread_pool_ != nullptr) {
     DestroyThreadPool(this->thread_pool_);
     free(this->thread_pool_);
-    this->thread_pool_ = NULL;
+    this->thread_pool_ = nullptr;
   }
 }
+
+int InnerContext::IsValid() const {
+  if (this->device_list_.empty()) {
+    MS_LOG(ERROR) << "Device list is empty.";
+    return RET_NOT_SUPPORT;
+  }
+  if (!IsCpuEnabled()) {
+    MS_LOG(ERROR) << "CPU is not supported.";
+    return RET_NOT_SUPPORT;
+  }
+#ifndef SUPPORT_GPU
+  if (IsGpuEnabled()) {
+    MS_LOG(ERROR) << "GPU is not supported.";
+    return RET_NOT_SUPPORT;
+  }
+#endif
+#ifndef SUPPORT_NPU
+  if (IsNpuEnabled()) {
+    MS_LOG(ERROR) << "NPU is not supported.";
+    return RET_NOT_SUPPORT;
+  }
+#endif
+  return RET_OK;
+}
+
+bool InnerContext::IsCpuFloat16Enabled() const {
+  if (!IsCpuEnabled()) {
+    return false;
+  }
+  return GetCpuInfo().enable_float16_;
+}
+
+bool InnerContext::IsGpuFloat16Enabled() const {
+  if (!IsGpuEnabled()) {
+    return false;
+  }
+  return GetGpuInfo().enable_float16_;
+}
+
+bool InnerContext::IsCpuEnabled() const {
+  return this->device_list_.end() !=
+         std::find_if(this->device_list_.begin(), this->device_list_.end(),
+                      [](const DeviceContext &device) { return device.device_type_ == DT_CPU; });
+}
+
+bool InnerContext::IsGpuEnabled() const {
+  return this->device_list_.end() !=
+         std::find_if(this->device_list_.begin(), this->device_list_.end(),
+                      [](const DeviceContext &device) { return device.device_type_ == DT_GPU; });
+}
+
+bool InnerContext::IsNpuEnabled() const {
+#ifdef SUPPORT_NPU
+  return this->device_list_.end() !=
+           std::find_if(this->device_list_.begin(), this->device_list_.end(),
+                        [](const DeviceContext &device) { return device.device_type_ == DT_NPU; }) &&
+         mindspore::lite::NPUManager::GetInstance()->IsSupportNPU();
+#else
+  return false;
+#endif
+}
+
+CpuDeviceInfo InnerContext::GetCpuInfo() const {
+  auto iter = std::find_if(this->device_list_.begin(), this->device_list_.end(),
+                           [](const DeviceContext &device) { return device.device_type_ == DT_CPU; });
+  if (iter == this->device_list_.end()) {
+    return {};
+  } else {
+    return iter->device_info_.cpu_device_info_;
+  }
+}
+
+GpuDeviceInfo InnerContext::GetGpuInfo() const {
+  auto iter = std::find_if(this->device_list_.begin(), this->device_list_.end(),
+                           [](const DeviceContext &device) { return device.device_type_ == DT_GPU; });
+  if (iter == this->device_list_.end()) {
+    return {};
+  } else {
+    return iter->device_info_.gpu_device_info_;
+  }
+}
+
+NpuDeviceInfo InnerContext::GetNpuInfo() const {
+  auto iter = std::find_if(this->device_list_.begin(), this->device_list_.end(),
+                           [](const DeviceContext &device) { return device.device_type_ == DT_NPU; });
+  if (iter == this->device_list_.end()) {
+    return {};
+  } else {
+    return iter->device_info_.npu_device_info_;
+  }
+}
+
 }  // namespace mindspore::lite

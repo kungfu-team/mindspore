@@ -19,6 +19,10 @@
 #include "src/common/log_adapter.h"
 #include "src/tensor.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 
@@ -38,9 +42,9 @@ int Shape::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outpu
   auto in_tensor = inputs_.front();
   auto out_tensor = outputs_.front();
   out_tensor->set_data_type(kNumberTypeInt32);
-  out_tensor->SetFormat(schema::Format::Format_NHWC);
-  if (!GetInferFlag()) {
-    return RET_OK;
+  out_tensor->set_format(schema::Format::Format_NHWC);
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   std::vector<int> out_shape;
   out_shape.push_back(static_cast<int>(in_tensor->shape().size()));
@@ -58,6 +62,9 @@ int Shape::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+PrimitiveC *ShapeCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Shape>(primitive); }
+Registry ShapeRegistry(schema::PrimitiveType_Shape, ShapeCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

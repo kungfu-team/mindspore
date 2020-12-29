@@ -13,253 +13,75 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "ut/src/runtime/kernel/opencl/common.h"
+#include "nnacl/scale.h"
 
-#include "common/common_test.h"
-#include "mindspore/lite/src/runtime/kernel/opencl/subgraph_opencl_kernel.h"
-#include "mindspore/lite/src/runtime/kernel/opencl/kernel/scale.h"
+namespace mindspore::lite::opencl::test {
 
-namespace mindspore {
+class TestOpenCL_Scale : public CommonTest {};
 
-template <class T>
-static void BoardcaseScale(const T *in, const T scale, const T offset, T *out, const int size) {
-  for (int i = 0; i < size; i++) {
-    out[i] = in[i] * scale + offset;
+namespace {
+// PrimitiveType_Resize: src/ops/populate/scale_populate.cc
+OpParameter *CreateParameter(int axis, int activation_type = schema::ActivationType_NO_ACTIVATION) {
+  auto *param = test::CreateParameter<ScaleParameter>(schema::PrimitiveType_Scale);
+  param->axis_ = axis;
+  param->activation_type_ = activation_type;
+  return reinterpret_cast<OpParameter *>(param);
+}
+}  // namespace
+
+TEST_F(TestOpenCL_Scale, Axis1) {
+  int axis = 1;
+  std::vector<int> input_shape = {1, 2, 2, 3};
+  std::vector<int> weight_shape = {input_shape[axis]};
+  std::vector<int> output_shape = input_shape;
+  float input_data[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  float scale_data[] = {1, 2};
+  float offset_data[] = {1, 2};
+  float output_data[] = {2, 3, 4, 5, 6, 7, 16, 18, 20, 22, 24, 26};
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(axis);
+    TestMain({{input_shape, input_data, VAR},
+              {weight_shape, scale_data, CONST_TENSOR},
+              {weight_shape, offset_data, CONST_TENSOR}},
+             {output_shape, output_data}, param, fp16_enable);
   }
 }
 
-template <class T>
-static void Scale(const T *in, const T *scale, T *offset, T *out, const int size) {
-  for (int i = 0; i < size; i++) {
-    out[i] = in[i] * scale[i] + offset[i];
+TEST_F(TestOpenCL_Scale, Axis3) {
+  int axis = 3;
+  std::vector<int> input_shape = {1, 2, 2, 3};
+  std::vector<int> weight_shape = {input_shape[axis]};
+  std::vector<int> output_shape = input_shape;
+  float input_data[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  float scale_data[] = {1, 2, 3};
+  float offset_data[] = {1, 2, 3};
+  float output_data[] = {2, 6, 12, 5, 12, 21, 8, 18, 30, 11, 24, 39};
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(axis);
+    TestMain({{input_shape, input_data, VAR},
+              {weight_shape, scale_data, CONST_TENSOR},
+              {weight_shape, offset_data, CONST_TENSOR}},
+             {output_shape, output_data}, param, fp16_enable);
   }
 }
 
-template <class T>
-static bool DataCompare(const T *a, const T *b, const int size, const T accuracy = 1e-4) {
-  for (int i = 0; i < size; i++) {
-    auto diff = fabs(a[i] - b[i]);
-    if (diff > accuracy) {
-      MS_LOG(ERROR) << "compare failed at " << i << " exp " << a[i] << " bug got " << b[i];
-      return false;
-    }
-  }
-  return true;
-}
-
-template <class T>
-static void InitData(void *data, const int size) {
-  T *data_float = reinterpret_cast<T *>(data);
-  static unsigned int seed = 123;
-  for (int i = 0; i < size; i++) {
-    data_float[i] = static_cast<int>(rand_r(&seed)) % 100;
+TEST_F(TestOpenCL_Scale, Axis3RELU6) {
+  int axis = 3;
+  std::vector<int> input_shape = {1, 2, 2, 3};
+  std::vector<int> weight_shape = {input_shape[axis]};
+  std::vector<int> output_shape = input_shape;
+  float input_data[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  float scale_data[] = {1, 2, -1};
+  float offset_data[] = {1, 2, 3};
+  float output_data[] = {2, 6, 0, 5, 6, 0, 6, 6, 0, 6, 6, 0};
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(axis, schema::ActivationType_RELU6);
+    TestMain({{input_shape, input_data, VAR},
+              {weight_shape, scale_data, CONST_TENSOR},
+              {weight_shape, offset_data, CONST_TENSOR}},
+             {output_shape, output_data}, param, fp16_enable);
   }
 }
 
-template <class T>
-static void LogData(void *data, const int size, const std::string prefix) {
-  std::cout << prefix;
-  T *data_float = reinterpret_cast<T *>(data);
-  for (int i = 0; i < size; i++) {
-    std::cout << data_float[i] << ",";
-  }
-  std::cout << std::endl;
-}
-
-template <class T>
-static void TestCase(const std::vector<int> &shape_a, const std::vector<int> &shape_b) {
-  bool is_log_data = false;
-  auto ocl_runtime = lite::opencl::OpenCLRuntimeWrapper().GetInstance();
-  auto allocator = ocl_runtime->GetAllocator();
-
-  bool is_broadcast = shape_b.empty();
-  auto format = schema::Format_NHWC4;
-
-  auto data_type = kNumberTypeFloat32;
-  if (sizeof(T) == 2) {
-    data_type = kNumberTypeFloat16;
-    ocl_runtime->SetFp16Enable(true);
-  }
-  lite::Tensor *tensor_in = new (std::nothrow) lite::Tensor(data_type, shape_a, format);
-  lite::Tensor *tensor_scale = new (std::nothrow) lite::Tensor(data_type, shape_b, format);
-  lite::Tensor *tensor_offset = new (std::nothrow) lite::Tensor(data_type, shape_b, format);
-  lite::Tensor *tensor_out = new (std::nothrow) lite::Tensor(data_type, shape_a, format);
-  if (tensor_in == nullptr || tensor_scale == nullptr || tensor_offset == nullptr) {
-    MS_LOG(ERROR) << "Create tensor failed!";
-    delete tensor_in;
-    delete tensor_scale;
-    delete tensor_offset;
-    delete tensor_out;
-    return;
-  }
-
-  int64_t element_num = tensor_in->ElementsC4Num();
-  int64_t element_num_b = is_broadcast ? 1 : tensor_scale->ElementsC4Num();
-
-  T *data_in = new (std::nothrow) T[element_num];
-  T *data_scale = new (std::nothrow) T[element_num_b];
-  T *data_offset = new (std::nothrow) T[element_num_b];
-  T *data_out_cpu = new (std::nothrow) T[element_num];
-  T *data_out_ocl = new (std::nothrow) T[element_num];
-  if (data_in == nullptr || data_scale == nullptr || data_out_cpu == nullptr || data_out_ocl == nullptr) {
-    MS_LOG(ERROR) << "Create buffer failed!";
-    delete tensor_in;
-    delete tensor_scale;
-    delete tensor_offset;
-    delete tensor_out;
-    delete[] data_in;
-    delete[] data_scale;
-    delete[] data_offset;
-    delete[] data_out_cpu;
-    delete[] data_out_ocl;
-    return;
-  }
-
-  InitData<T>(data_in, element_num);
-  InitData<T>(data_scale, element_num_b);
-  InitData<T>(data_offset, element_num_b);
-  memset(data_out_ocl, 0, sizeof(T) * element_num);
-
-  if (is_broadcast) {
-    BoardcaseScale(data_in, static_cast<T *>(data_scale)[0], static_cast<T *>(data_offset)[0], data_out_cpu,
-                   element_num);
-  } else {
-    Scale(data_in, data_scale, data_offset, data_out_cpu, element_num);
-  }
-
-  std::vector<lite::Tensor *> inputs = {tensor_in};
-  if (!is_broadcast) {
-    inputs.push_back(tensor_scale);
-    inputs.push_back(tensor_offset);
-  } else {
-    tensor_scale->MallocData();
-    tensor_offset->MallocData();
-    memcpy(tensor_scale->data_c(), data_scale, sizeof(T));
-    memcpy(tensor_offset->data_c(), data_offset, sizeof(T));
-  }
-  std::vector<lite::Tensor *> outputs = {tensor_out};
-
-  ScaleParameter *param = static_cast<ScaleParameter *>(malloc(sizeof(ScaleParameter)));
-  if (param == nullptr) {
-    MS_LOG(ERROR) << "Create parameter failed!";
-    delete tensor_in;
-    delete tensor_scale;
-    delete tensor_offset;
-    delete tensor_out;
-    delete[] data_in;
-    delete[] data_scale;
-    delete[] data_offset;
-    delete[] data_out_cpu;
-    delete[] data_out_ocl;
-    return;
-  }
-  param->axis_ = 0;
-  param->op_parameter_.type_ = schema::PrimitiveType_Scale;
-
-  std::vector<lite::Tensor *> scale_inputs = {tensor_in, tensor_scale, tensor_offset};
-  lite::InnerContext ctx;
-  ASSERT_EQ(lite::RET_OK, ctx.Init());
-  auto *scale_kernel =
-    new (std::nothrow) kernel::ScaleOpenCLKernel(reinterpret_cast<OpParameter *>(param), scale_inputs, outputs, &ctx);
-  if (scale_kernel == nullptr) {
-    MS_LOG(ERROR) << "Create ScaleOpenCLKernel failed!";
-    delete tensor_in;
-    delete tensor_scale;
-    delete tensor_offset;
-    delete tensor_out;
-    delete[] data_in;
-    delete[] data_scale;
-    delete[] data_offset;
-    delete[] data_out_cpu;
-    delete[] data_out_ocl;
-    free(param);
-    return;
-  }
-  scale_kernel->Init();
-
-  tensor_in->MallocData(allocator);
-  tensor_scale->MallocData(allocator);
-  tensor_offset->MallocData(allocator);
-  std::vector<kernel::LiteKernel *> kernels{scale_kernel};
-  auto *kernel = new (std::nothrow) kernel::SubGraphOpenCLKernel(inputs, outputs, kernels, kernels, kernels);
-  if (scale_kernel == nullptr) {
-    MS_LOG(ERROR) << "Create SubGraphOpenCLKernel failed!";
-    delete tensor_in;
-    delete tensor_scale;
-    delete tensor_offset;
-    delete tensor_out;
-    delete[] data_in;
-    delete[] data_scale;
-    delete[] data_offset;
-    delete[] data_out_cpu;
-    delete[] data_out_ocl;
-    delete scale_kernel;
-    return;
-  }
-  kernel->Init();
-
-  memcpy(inputs[0]->data_c(), data_in, sizeof(T) * element_num);
-  if (!is_broadcast) {
-    memcpy(inputs[1]->data_c(), data_scale, sizeof(T) * element_num_b);
-    memcpy(inputs[2]->data_c(), data_offset, sizeof(T) * element_num_b);
-  }
-
-  kernel->Run();
-
-  memcpy(data_out_ocl, outputs[0]->data_c(), sizeof(T) * element_num);
-
-  if (is_log_data) {
-    LogData<T>(data_in, 10, "Data input : ");
-    LogData<T>(data_scale, tensor_scale->shape().empty() ? 1 : 10, "Data scale : ");
-    LogData<T>(data_offset, tensor_offset->shape().empty() ? 1 : 10, "Data offset : ");
-    LogData<T>(data_out_cpu, 10, "Expect compute : ");
-    LogData<T>(outputs[0]->data_c(), 10, "OpenCL compute : ");
-  }
-  bool cmp = DataCompare(data_out_cpu, data_out_ocl, element_num);
-  MS_LOG(INFO) << "Compare " << (cmp ? "success!" : "failed!");
-  EXPECT_EQ(true, cmp);
-
-  // free
-  delete[] data_in;
-  delete[] data_scale;
-  delete[] data_offset;
-  delete[] data_out_cpu;
-  delete[] data_out_ocl;
-
-  delete kernel;
-  for (auto tensor : inputs) {
-    delete tensor;
-  }
-  for (auto tensor : outputs) {
-    delete tensor;
-  }
-}
-
-class TestScaleOpenCL : public mindspore::CommonTest {
- public:
-  TestScaleOpenCL() {}
-};
-
-TEST_F(TestScaleOpenCL, ElementFP32) {
-  const std::vector<int> &shape_a = {1, 1024, 1024, 4};
-  const std::vector<int> &shape_b = {1, 1024, 1024, 4};
-  TestCase<float>(shape_a, shape_b);
-}
-
-TEST_F(TestScaleOpenCL, BroadcastFP32) {
-  const std::vector<int> &shape_a = {1, 128, 128, 4};
-  const std::vector<int> &shape_b = {};
-  TestCase<float>(shape_a, shape_b);
-}
-
-TEST_F(TestScaleOpenCL, ElementFP16) {
-  const std::vector<int> &shape_a = {1, 1024, 1024, 4};
-  const std::vector<int> &shape_b = {1, 1024, 1024, 4};
-  TestCase<float16_t>(shape_a, shape_b);
-}
-
-TEST_F(TestScaleOpenCL, BroadcastFP16) {
-  const std::vector<int> &shape_a = {1, 128, 128, 4};
-  const std::vector<int> &shape_b = {};
-  TestCase<float16_t>(shape_a, shape_b);
-}
-}  // namespace mindspore
+}  // namespace mindspore::lite::opencl::test

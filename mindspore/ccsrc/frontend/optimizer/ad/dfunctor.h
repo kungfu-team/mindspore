@@ -24,6 +24,7 @@
 #include <unordered_map>
 #include <vector>
 #include <iostream>
+#include <utility>
 
 #include "ir/anf.h"
 #include "ir/meta_func_graph.h"
@@ -63,6 +64,7 @@ class DFunctor : public std::enable_shared_from_this<DFunctor> {
   FuncGraphPtr KUserDefined(const FuncGraphPtr &primal);
   // Register functor objects to form a global view.
   void Init(bool is_top = false);
+  void Finish();
   bool IsInScope(const AnfNodePtr &node);
 
   // Clear resources.
@@ -79,10 +81,12 @@ class DFunctor : public std::enable_shared_from_this<DFunctor> {
   void BackPropagate(const CNodePtr &cnode_morph, const CNodePtr &k_app, const AdjointPtr &node_adjoint);
   AnfNodePtr AttachFvDoutToTape(const AnfNodePtr &grad_fv);
   AnfNodePtr AttachIndirectFvDoutToTape(const AnfNodePtr &grad_fv);
-  // Map Anfnode object from D category to K category.
-  AnfNodePtr MapToK(const AnfNodePtr &primal);
-  // Map FuncGraph object from D category to K category.
-  AnfNodePtr MapToK(const FuncGraphPtr &primal);
+  // Map CNode/Index of Primitive to K.
+  AnfNodePtr MapPrimitiveToK(const CNodePtr &primitive_user, size_t index);
+  // Map ValueNode of FuncGraph to K.
+  AnfNodePtr MapFuncGraphToK(const AnfNodePtr &primal);
+  // Map ValueNode of Parameter to K.
+  AnfNodePtr MapParameterToK(const AnfNodePtr &primal);
   // MapObject impls.
   void MapFvObject();
   void MapValueObject();
@@ -95,11 +99,20 @@ class DFunctor : public std::enable_shared_from_this<DFunctor> {
   // Update k hole with adjoint_definition, only applied in recursive case.
   void UpdateAdjoint(const AdjointPtr &adjoint_definition);
   void CallDoutHoleOnTape();
+  // Replace the primal graph with k graph
+  void EliminatePrimalGraph();
+  // Pynative specialize
   void ReplaceEquivdout(const CNodePtr &cnode, const CNodePtr &cnode_morph);
+  ValuePtr GenNewTensorInner(const ValuePtr &value);
+  ValuePtr GenNewTensor(const FuncGraphManagerPtr &mng, const AnfNodePtr &node, const ValuePtr &value,
+                        bool need_replace_forward);
 
   std::unordered_map<AnfNodePtr, AdjointPtr> anfnode_to_adjoin_;
   // Cache for indirect fv backpropagation, K o K can only do backprop layer by layer.
   std::unordered_map<AnfNodePtr, AdjointPtr> anfnode_to_adjoin_indirect_fv_;
+  // Cache for fv node -> pair<embed<fv_node>, zeros_like<fv_node>>, so EnvGetItemTransform in optimizer
+  // can hit its cache if fv_node is same.
+  std::unordered_map<AnfNodePtr, std::pair<CNodePtr, CNodePtr>> anfnode_to_envitem_;
   FuncGraphPtr primal_graph_;
   // K object for primal_graph_;
   FuncGraphPtr k_graph_;
@@ -122,7 +135,8 @@ class KPrim {
   KPrim() = default;
   ~KPrim() = default;
 
-  FuncGraphPtr KPrimitive(const ValueNodePtr &value_node, const pipeline::ResourceBasePtr &resources);
+  FuncGraphPtr KPrimitive(const CNodePtr &primal_user, const ValueNodePtr &value_node,
+                          const pipeline::ResourceBasePtr &resources);
   MetaFuncGraphPtr KMetaFuncGraph(const PrimitivePtr &prim);
   FuncGraphPtr KUserDefinedCellBprop(FuncGraphPtr bprop);
 
@@ -138,7 +152,7 @@ class KPrim {
   FuncGraphPtr BpropCut(const ValueNodePtr &value_node, const pipeline::ResourceBasePtr &resources);
   // Given a bprop rule, do the K mapping.
   template <typename T>
-  FuncGraphPtr BpropToK(const T &primal, const FuncGraphPtr &bprop_g);
+  FuncGraphPtr BpropToK(const T &primal, const FuncGraphPtr &bprop_g, const CNodePtr &cnode);
   AnfNodePtr BuildOutput(const FuncGraphPtr &bprop_fg);
   void TransformArgs(const FuncGraphManagerPtr &mng, const FuncGraphPtr &bprop_fg, const FuncGraphPtr &outer,
                      std::vector<AnfNodePtr> *const transf_args);
@@ -149,7 +163,7 @@ class KPrim {
 };
 
 template <typename T>
-FuncGraphPtr KPrim::BpropToK(const T &primal, const FuncGraphPtr &bprop_fg) {
+FuncGraphPtr KPrim::BpropToK(const T &primal, const FuncGraphPtr &bprop_fg, const CNodePtr &cnode) {
   MS_EXCEPTION_IF_NULL(primal);
   MS_EXCEPTION_IF_NULL(bprop_fg);
   CheckBprop(bprop_fg, primal->ToString());
@@ -166,11 +180,13 @@ FuncGraphPtr KPrim::BpropToK(const T &primal, const FuncGraphPtr &bprop_fg) {
   AnfNodePtr bout = BuildOutput(cloned_bprop_fg);
   cloned_bprop_fg->set_output(bout);
 
-  TraceManager::DebugTrace(std::make_shared<TraceGradFprop>(debug_info));
-  auto outer = std::make_shared<FuncGraph>();
-  (void)outer->transforms().emplace("primal", FuncGraphTransform(primal));
-  outer->set_output(NewValueNode(kNone));
-  TraceManager::EndTrace();
+  FuncGraphPtr outer = nullptr;
+  {
+    TraceGuard guard(std::make_shared<TraceGradFprop>(debug_info));
+    outer = std::make_shared<FuncGraph>();
+    (void)outer->transforms().emplace("primal", FuncGraphTransform(primal));
+    outer->set_output(NewValueNode(kNone));
+  }
 
   auto mng = Manage({cloned_bprop_fg, outer}, false);
 
@@ -187,21 +203,22 @@ FuncGraphPtr KPrim::BpropToK(const T &primal, const FuncGraphPtr &bprop_fg) {
   std::vector<AnfNodePtr> transf_args;
   TransformArgs(mng, cloned_bprop_fg, outer, &transf_args);
 
-  TraceManager::DebugTrace(std::make_shared<TraceEquiv>(dout->debug_info()));
   (void)transf_args.insert(transf_args.begin(), NewValueNode(primal));
-  auto out_value = outer->NewCNode(transf_args);
-  TraceManager::EndTrace();
-
+  CNodePtr out_value = nullptr;
+  if (cnode != nullptr) {  // Set equiv debug info. for Primitive CNode out.
+    TraceGuard trace_guard(std::make_shared<TraceEquiv>(cnode->debug_info()));
+    out_value = outer->NewCNode(transf_args);
+  } else {
+    out_value = outer->NewCNode(transf_args);
+  }
   (void)mng->Replace(out_param, out_value);
 
-  TraceManager::DebugTrace(std::make_shared<TraceGradSens>(out_param->debug_info()));
+  TraceGuard guard(std::make_shared<TraceGradSens>(out_param->debug_info()));
   auto new_dout = cloned_bprop_fg->add_parameter();
   (void)mng->Replace(dout, new_dout);
   // We remove all parameters except new_dout.
   std::vector<AnfNodePtr> newBpropParams = {new_dout};
   cloned_bprop_fg->set_parameters(newBpropParams);
-  TraceManager::EndTrace();
-
   outer->set_output(outer->NewCNode({NewValueNode(prim::kPrimMakeTuple), out_value, NewValueNode(cloned_bprop_fg)}));
   return BasicClone(outer);
 }

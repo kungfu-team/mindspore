@@ -21,57 +21,31 @@
 #include <string>
 #include <map>
 
-namespace mindspore {
-namespace lite {
-STATUS TfliteBatchToSpaceParser::Parse(TfliteTensorsInfo *tensors_info,
-                                       const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                       const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
-  std::vector<std::string> node_name_str;
-  Split(op->name, &node_name_str, "-");
-  const char *node_name = node_name_str.data()->c_str();
-  if (std::strcmp(node_name, "BatchToSpace") == 0) {
-    MS_LOG(DEBUG) << "parse TfliteBatchToSpaceParser";
-  } else if (std::strcmp(node_name, "BatchToSpaceND") == 0) {
-    MS_LOG(DEBUG) << "parse TfliteBatchToSpaceNDParser";
-  }
-
+namespace mindspore::lite {
+PrimitiveC *TfliteBatchToSpaceParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                         const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  const auto &tflite_subgraph = tflite_model->subgraphs.front();
+  auto primitive = std::make_unique<schema::PrimitiveT>();
   std::unique_ptr<schema::BatchToSpaceT> attr = std::make_unique<schema::BatchToSpaceT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
-  if (GetTfliteData(tflite_op->inputs[1], tflite_model->subgraphs[0]->tensors, tflite_model->buffers,
-                    attr->blockShape)) {
+  if (GetTfliteData(tflite_op->inputs[1], tflite_subgraph->tensors, tflite_model->buffers, attr->blockShape)) {
     MS_LOG(ERROR) << "get batchToSpace -> blockShape failed";
-    return RET_ERROR;
+    return nullptr;
   }
-  if (GetTfliteData(tflite_op->inputs[2], tflite_model->subgraphs[0]->tensors, tflite_model->buffers, attr->crops)) {
+  if (GetTfliteData(tflite_op->inputs[2], tflite_subgraph->tensors, tflite_model->buffers, attr->crops)) {
     MS_LOG(ERROR) << "get batchToSpace -> crops failed";
-    return RET_ERROR;
+    return nullptr;
   }
 
-  op->primitive->value.type = schema::PrimitiveType_BatchToSpace;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  primitive->value.type = schema::PrimitiveType_BatchToSpace;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteBatchToSpaceParser("BatchToSpace", new TfliteBatchToSpaceParser());
-TfliteNodeRegister g_TfliteBatchToSpaceNDParser("BatchToSpaceND", new TfliteBatchToSpaceNDParser());
-}  // namespace lite
-}  // namespace mindspore
+TfliteNodeRegister g_tfliteBatchToSpaceNDParser(tflite::BuiltinOperator_BATCH_TO_SPACE_ND,
+                                                new TfliteBatchToSpaceParser());
+}  // namespace mindspore::lite

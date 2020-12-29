@@ -133,6 +133,9 @@ REGISTER(LogicalAndInfo);
 REGISTER(LogicalOrInfo);
 REGISTER(EluInfo);
 REGISTER(ReLUInfo);
+REGISTER(RepeatElementsInfo);
+REGISTER(TensorDotInfo);
+REGISTER(RangeInfo);
 REGISTER(ReLU6Info);
 REGISTER(ReLUV2Info);
 REGISTER(SoftplusInfo);
@@ -173,15 +176,21 @@ REGISTER(ExpandDimsInfo);
 REGISTER(SqueezeInfo);
 REGISTER(SigmoidCrossEntropyWithLogitsInfo);
 REGISTER(SquareInfo);
+REGISTER(UniformCandidateSamplerInfo);
+REGISTER(UnsortedSegmentSumInfo);
+REGISTER(UnsortedSegmentMinInfo);
+REGISTER(UnsortedSegmentMaxInfo);
 REGISTER(GatherV2PInfo);
 REGISTER(EmbeddingLookupInfo);
 REGISTER(TileInfo);
 REGISTER(BroadcastToInfo);
 REGISTER(StridedSliceInfo);
+REGISTER(SliceInfo);
 REGISTER(DropoutInfo);
 REGISTER(PackInfo);
 REGISTER(ConcatInfo);
 REGISTER(SplitInfo);
+REGISTER(UniqueInfo);
 }  // namespace parallel
 }  // namespace mindspore
 

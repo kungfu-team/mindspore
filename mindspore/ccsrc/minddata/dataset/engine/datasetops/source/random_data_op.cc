@@ -15,6 +15,8 @@
  */
 
 #include "minddata/dataset/engine/datasetops/source/random_data_op.h"
+
+#include <algorithm>
 #include <iomanip>
 #include <random>
 #include "minddata/dataset/engine/execution_tree.h"
@@ -63,7 +65,7 @@ Status RandomDataOp::Builder::SanityCheck() const {
 
 // Constructor for RandomDataOp
 RandomDataOp::RandomDataOp(int32_t num_workers, int32_t op_connector_size, int64_t rows_per_buffer, int64_t total_rows,
-                           std::unique_ptr<DataSchema> data_schema, std::shared_ptr<Sampler> sampler)
+                           std::unique_ptr<DataSchema> data_schema, std::shared_ptr<SamplerRT> sampler)
     : ParallelOp(num_workers, op_connector_size, std::move(sampler)),
       buffer_id_(0),
       rows_per_buffer_(rows_per_buffer),
@@ -145,6 +147,10 @@ void RandomDataOp::GenerateSchema() {
 // All DatasetOps operate by launching a thread (see ExecutionTree). This class functor will
 // provide the master loop that drives the logic for performing the work.
 Status RandomDataOp::operator()() {
+  CHECK_FAIL_RETURN_UNEXPECTED(total_rows_ >= num_workers_,
+                               "RandomDataOp expects total_rows < num_workers. total_row=" +
+                                 std::to_string(total_rows_) + ", num_workers=" + std::to_string(num_workers_) + " .");
+
   // First, compute how many buffers we'll need to satisfy the total row count.
   // The only reason we do this is for the purpose of throttling worker count if needed.
   int64_t buffers_needed = total_rows_ / rows_per_buffer_;
@@ -418,5 +424,6 @@ Status RandomDataOp::ComputeColMap() {
   }
   return Status::OK();
 }
+
 }  // namespace dataset
 }  // namespace mindspore

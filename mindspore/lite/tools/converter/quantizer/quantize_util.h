@@ -24,6 +24,7 @@
 #include <vector>
 #include <algorithm>
 #include <limits>
+#include <utility>
 #include "tools/converter/quantizer/quantizer.h"
 #include "src/ops/primitive_c.h"
 #include "include/errorcode.h"
@@ -33,11 +34,11 @@
 #include "base/base.h"
 #include "ir/primitive.h"
 #include "abstract/dshape.h"
+#include "tools/converter/quantizer/bitpacking.h"
 
-namespace mindspore {
-namespace lite {
-namespace quant {
+namespace mindspore::lite::quant {
 static constexpr size_t UINT8_QUANTIZATION = 8;
+static constexpr size_t WEIGHT_INDEX = 1;
 
 /**
  * 1. when op's weight size > mWeightSize just skip
@@ -61,11 +62,19 @@ class QuantStrategy {
   static const std::vector<schema::PrimitiveType> mul_types;
 };
 
+constexpr float delta = 0.1;
+constexpr float ratio = 10.0;
+constexpr int percent = 10;
+
 STATUS CalQuantizationParams(schema::QuantParamT *quantParam, double mMin, double mMax, bool narrowRange, int quant_max,
                              int quant_min, int num_bits);
 
 STATUS CalQuantizationParams(schema::QuantParamT *quantParam, double mMin, double mMax, bool narrowRange = false,
                              int numBits = UINT8_QUANTIZATION);
+
+std::pair<float, float> OutlierMethod(std::vector<float> min_datas, std::vector<float> max_datas);
+
+std::vector<int8_t> KMeans(float *data, size_t elem_count, size_t k, size_t epochs, schema::QuantParamT *quantParam);
 
 template <typename T>
 T QuantizeData(const float originData, const schema::QuantParamT *quantParam) {
@@ -76,16 +85,16 @@ T QuantizeData(const float originData, const schema::QuantParamT *quantParam) {
   const auto numBit = quantParam->numBits;
   const auto narrowRange = quantParam->narrowRange;
   double maxLimitTemp = static_cast<float>((1 << (unsigned int)numBit) - 1);
-  const double maxLimit = static_cast<float>(maxLimitTemp - zeroPoint + std::numeric_limits<int8_t>::min()) * scale;
+  const double maxLimit = static_cast<float>(maxLimitTemp - zeroPoint + std::numeric_limits<T>::min()) * scale;
   double minLimit;
   if (narrowRange) {
-    minLimit = static_cast<float>(std::numeric_limits<int8_t>::min() + 1 - zeroPoint) * scale;
+    minLimit = static_cast<float>(std::numeric_limits<T>::min() + 1 - zeroPoint) * scale;
   } else {
-    minLimit = static_cast<float>(std::numeric_limits<int8_t>::min() - zeroPoint) * scale;
+    minLimit = static_cast<float>(std::numeric_limits<T>::min() - zeroPoint) * scale;
   }
 
   return [maxLimit, minLimit, zeroPoint, scale, narrowRange, originData] {
-    double tmp = 0.0f;
+    double tmp;
     if (originData > maxLimit) {
       tmp = maxLimit;
     } else if (originData < minLimit) {
@@ -119,15 +128,17 @@ T QuantizeData(float originData, const schema::QuantParamT &quantParam, int quan
   }();
 }
 template <typename T>
-STATUS QuantFilter(ParamValueLitePtr weight, std::shared_ptr<PrimitiveC> primitive_c, QuantType quantType,
-                   int quant_max, int quant_min, size_t bitNum, bool per_channel) {
+STATUS QuantFilter(const ParamValueLitePtr &weight, const std::shared_ptr<PrimitiveC> &primitive_c, QuantType quantType,
+                   int quant_max, int quant_min, size_t bitNum, bool per_channel, bool k_means = false) {
+  MS_ASSERT(weight != nullptr);
+  MS_ASSERT(primitive_c != nullptr);
   auto dims = weight->tensor_shape();
+  auto op_type = (schema::PrimitiveType)primitive_c->Type();
   if (per_channel) {
-    if (dims.size() != 4 && dims.size() != 2) {
+    if (dims.size() != 4 && dims.size() != 2 && op_type != schema::PrimitiveType_MatMul) {
       MS_LOG(INFO) << "weight dims size: " << dims.size() << " switch to per-layer quant mode.";
       per_channel = false;
     } else {
-      auto op_type = (schema::PrimitiveType)primitive_c->Type();
       if (dims.size() == 2 && op_type != schema::PrimitiveType_FullConnection) {
         MS_LOG(INFO) << "weight dims size is 2 but op_type is not FullConnection, switch to per-layer quant mode.";
         per_channel = false;
@@ -198,7 +209,7 @@ STATUS QuantFilter(ParamValueLitePtr weight, std::shared_ptr<PrimitiveC> primiti
           average_raw += raw_data;
         }
       }
-      if (quantType == QuantType_WeightQuant) {
+      if (quantType == QuantType_WeightQuant && !k_means) {
         // mean
         average_dequant = average_dequant / one_filter_size;
         average_raw = average_raw / one_filter_size;
@@ -216,20 +227,20 @@ STATUS QuantFilter(ParamValueLitePtr weight, std::shared_ptr<PrimitiveC> primiti
         }
         variance_dequant = std::sqrt(variance_dequant / one_filter_size);
         variance_raw = std::sqrt(variance_raw / one_filter_size);
-        quant_param.var_corr = 1;
+        quant_param.varCorr = 1;
         if (variance_raw != 0 && variance_dequant != 0) {
           auto temp_var_corr = variance_raw / variance_dequant;
           if (temp_var_corr > 0 && temp_var_corr < 10) {
-            quant_param.var_corr = temp_var_corr;
+            quant_param.varCorr = temp_var_corr;
           } else {
             MS_LOG(WARNING) << "unexpected var_corr: " << temp_var_corr;
           }
         }
-        quant_param.mean_corr = average_raw - average_dequant * quant_param.var_corr;
+        quant_param.meanCorr = average_raw - average_dequant * quant_param.varCorr;
       }
       quant_params.emplace_back(quant_param);
     }
-    auto ret = memcpy_s(raw_datas, weight->tensor_size(), quant_datas.data(), elem_count * sizeof(int8_t));
+    auto ret = memcpy_s(raw_datas, weight->tensor_size(), quant_datas.data(), elem_count * sizeof(T));
     if (ret != EOK) {
       MS_LOG(ERROR) << "memcpy error: " << ret;
       return RET_ERROR;
@@ -246,35 +257,69 @@ STATUS QuantFilter(ParamValueLitePtr weight, std::shared_ptr<PrimitiveC> primiti
     }
 
     schema::QuantParamT quant_param;
-    STATUS status = CalQuantizationParams(&quant_param, min, max, false, quant_max, quant_min, bitNum);
-    if (status != RET_OK) {
-      MS_LOG(ERROR) << "CalQuantizationParams failed" << status;
-      return status;
+    if (!k_means) {
+      STATUS status = CalQuantizationParams(&quant_param, min, max, false, quant_max, quant_min, bitNum);
+      if (status != RET_OK) {
+        MS_LOG(ERROR) << "CalQuantizationParams failed" << status;
+        return status;
+      }
     }
     quant_params.emplace_back(quant_param);
     // update data and datatype
     for (uint32_t i = 0; i < elem_count; i++) {
       float raw_data = raw_datas[i];
-      auto quant_data = QuantizeData<T>(raw_data, quant_param, quant_max, quant_min);
-      quant_datas[i] = quant_data;
+      if (!k_means) {
+        auto quant_data = QuantizeData<T>(raw_data, quant_param, quant_max, quant_min);
+        quant_datas[i] = quant_data;
+      }
     }
-    auto ret = memcpy_s(raw_datas, weight->tensor_size(), quant_datas.data(), elem_count * sizeof(int8_t));
+    auto ret = memcpy_s(raw_datas, weight->tensor_size(), quant_datas.data(), elem_count * sizeof(T));
     if (ret != EOK) {
       MS_LOG(ERROR) << "memcpy error: " << ret;
       return RET_ERROR;
     }
     weight->set_tensor_size(elem_count * sizeof(T));
   }
+
+  // do bit pack
+  if (bitNum != 8 && bitNum != 16) {
+    std::vector<T> data{};
+    for (size_t i = 0; i < quant_datas.size(); ++i) {
+      data.emplace_back((static_cast<T>(quant_datas[i])));
+    }
+    if (bitNum > 0 && bitNum < 8) {
+      std::vector<uint8_t> pack_data{};
+      BitPack::BitPacking<T, uint8_t>(bitNum, data, &pack_data);
+      auto ret = memcpy_s(raw_datas, weight->tensor_size(), pack_data.data(), pack_data.size() * sizeof(uint8_t));
+      if (ret != EOK) {
+        MS_LOG(ERROR) << "PostBitPack memcpy_s qDatas_packed failed";
+        return RET_ERROR;
+      }
+      weight->set_tensor_size(pack_data.size() * sizeof(uint8_t));
+    } else if (bitNum > 8 && bitNum < 16) {
+      std::vector<uint16_t> pack_data{};
+      BitPack::BitPacking<T, uint16_t>(bitNum, data, &pack_data);
+      auto ret = memcpy_s(raw_datas, weight->tensor_size(), pack_data.data(), pack_data.size() * sizeof(uint16_t));
+      if (ret != EOK) {
+        MS_LOG(ERROR) << "PostBitPack memcpy_s qDatas_packed failed";
+        return RET_ERROR;
+      }
+      weight->set_tensor_size(pack_data.size() * sizeof(uint16_t));
+    }
+  }
+
   if (quant_params.empty()) {
     MS_LOG(ERROR) << "quant_params empty";
     return RET_ERROR;
   }
-  primitive_c->AddInputQuantParam(quant_params);
+  if (quantType == QuantType_PostTraining) {
+    primitive_c->AddInputQuantParam(quant_params);
+  } else {
+    primitive_c->set_input_quant_param(WEIGHT_INDEX, quant_params);
+  }
   return RET_OK;
 }
 
-STATUS PostBitPack(float *weights, size_t shapeSize, size_t bitNum = UINT8_QUANTIZATION);
-}  // namespace quant
-}  // namespace lite
-}  // namespace mindspore
+schema::PrimitiveType NodePrimitiveType(const CNodePtr &cnode);
+}  // namespace mindspore::lite::quant
 #endif

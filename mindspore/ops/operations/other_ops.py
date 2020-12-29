@@ -37,18 +37,24 @@ class Assign(PrimitiveWithCheck):
     Outputs:
         Tensor, has the same type as original `variable`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.y = mindspore.Parameter(Tensor([1.0], mindspore.float32), name="y")
-        >>>
-        >>>     def construct(self, x):
-        >>>         P.Assign()(self.y, x)
-        >>>         return x
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.y = mindspore.Parameter(Tensor([1.0], mindspore.float32), name="y")
+        ...
+        ...     def construct(self, x):
+        ...         ops.Assign()(self.y, x)
+        ...         return self.y
+        ...
         >>> x = Tensor([2.0], mindspore.float32)
         >>> net = Net()
-        >>> net(x)
+        >>> output = net(x)
+        >>> print(output)
+        Parameter (name=y)
     """
     __mindspore_signature__ = (
         sig.make_sig('variable', sig.sig_rw.RW_WRITE, dtype=sig.sig_dtype.T),
@@ -60,9 +66,47 @@ class Assign(PrimitiveWithCheck):
         self.init_prim_io_names(inputs=['ref', 'value'], outputs=['output'])
 
     def check_dtype(self, variable, value):
+        types = mstype.number_type + (mstype.bool_,)
         if variable != mstype.type_refkey:
-            validator.check_tensor_type_same({"variable": variable}, mstype.number_type, self.name)
-        validator.check_scalar_or_tensor_type_same({"value": value}, mstype.number_type, self.name)
+            validator.check_tensor_dtype_valid("variable", variable, types, self.name)
+        validator.check_scalar_or_tensor_types_same({"value": value}, types, self.name)
+
+
+class InplaceAssign(PrimitiveWithInfer):
+    """
+    Inplace assign `Parameter` with a value.
+    This primitive can only use in graph kernel.
+    Inputs:
+        - **variable** (Parameter) - The `Parameter`.
+        - **value** (Tensor) - The value to be assigned.
+        - **depend** (Tensor) - The dependent tensor to keep this op connected in graph.
+    Outputs:
+        Tensor, has the same type as original `variable`.
+    Examples:
+        >>> class Net(nn.Cell):
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.inplace_assign = ops.InplaceAssign()
+        ...
+        ...     def construct(self, x):
+        ...         val = x - 1.0
+        ...         ret = x + 2.0
+        ...         return self.inplace_assign(x, val, ret)
+        ...
+        >>> x = Tensor([2.0], mindspore.float32)
+        >>> net = Net()
+        >>> output = net(x)
+        >>> print(output)
+   """
+    @ prim_attr_register
+    def __init__(self):
+        self.init_prim_io_names(inputs=['x', 'y', 'z'], outputs=['output'])
+
+    def infer_shape(self, x, y, z):
+        return z
+
+    def infer_dtype(self, x, y, z):
+        return z
 
 
 class BoundingBoxEncode(PrimitiveWithInfer):
@@ -80,14 +124,17 @@ class BoundingBoxEncode(PrimitiveWithInfer):
     Outputs:
         Tensor, encoded bounding boxes.
 
-    Examples:
-        >>> anchor_box = Tensor([[4,1,2,1],[2,2,2,3]],mindspore.float32)
-        >>> groundtruth_box = Tensor([[3,1,2,2],[1,2,1,4]],mindspore.float32)
-        >>> boundingbox_encode = P.BoundingBoxEncode(means=(0.0, 0.0, 0.0, 0.0), stds=(1.0, 1.0, 1.0, 1.0))
-        >>> boundingbox_encode(anchor_box, groundtruth_box)
-        [[5.0000000e-01  5.0000000e-01  -6.5504000e+04  6.9335938e-01]
-         [-1.0000000e+00  2.5000000e-01  0.0000000e+00  4.0551758e-01]]
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
+    Examples:
+        >>> anchor_box = Tensor([[4, 1, 2, 1], [2, 2, 2, 3]], mindspore.float32)
+        >>> groundtruth_box = Tensor([[3, 1, 2, 2], [1, 2, 1, 4]], mindspore.float32)
+        >>> boundingbox_encode = ops.BoundingBoxEncode(means=(0.0, 0.0, 0.0, 0.0), stds=(1.0, 1.0, 1.0, 1.0))
+        >>> output = boundingbox_encode(anchor_box, groundtruth_box)
+        >>> print(output)
+        [[ 5.0000000e-01  5.0000000e-01 -6.5504000e+04  6.9335938e-01]
+         [-1.0000000e+00  2.5000000e-01  0.0000000e+00  4.0551758e-01]]
     """
 
     @prim_attr_register
@@ -98,21 +145,21 @@ class BoundingBoxEncode(PrimitiveWithInfer):
             validator.check_value_type("means[%d]" % i, value, [float], self.name)
         for i, value in enumerate(stds):
             validator.check_value_type("stds[%d]" % i, value, [float], self.name)
-        validator.check_integer("means len", len(means), 4, Rel.EQ, self.name)
-        validator.check_integer("stds len", len(stds), 4, Rel.EQ, self.name)
+        validator.check_equal_int(len(means), 4, "means len", self.name)
+        validator.check_equal_int(len(stds), 4, "stds len", self.name)
 
     def infer_shape(self, anchor_box, groundtruth_box):
         validator.check('anchor_box shape[0]', anchor_box[0], 'groundtruth_box shape[0]', groundtruth_box[0], Rel.EQ,
                         self.name)
         validator.check("anchor_box rank", len(anchor_box), "", 2, Rel.EQ, self.name)
         validator.check("groundtruth_box rank", len(groundtruth_box), "", 2, Rel.EQ, self.name)
-        validator.check_integer('anchor_box shape[1]', anchor_box[1], 4, Rel.EQ, self.name)
-        validator.check_integer('groundtruth_box shape[1]', groundtruth_box[1], 4, Rel.EQ, self.name)
+        validator.check_equal_int(anchor_box[1], 4, 'anchor_box shape[1]', self.name)
+        validator.check_equal_int(groundtruth_box[1], 4, 'groundtruth_box shape[1]', self.name)
         return anchor_box
 
     def infer_dtype(self, anchor_box, groundtruth_box):
         args = {"anchor_box": anchor_box, "groundtruth_box": groundtruth_box}
-        validator.check_tensor_type_same(args, mstype.number_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, mstype.number_type, self.name)
         return anchor_box
 
 
@@ -133,14 +180,18 @@ class BoundingBoxDecode(PrimitiveWithInfer):
     Outputs:
         Tensor, decoded boxes.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> anchor_box = Tensor([[4,1,2,1],[2,2,2,3]],mindspore.float32)
-        >>> deltas = Tensor([[3,1,2,2],[1,2,1,4]],mindspore.float32)
-        >>> boundingbox_decode = P.BoundingBoxDecode(means=(0.0, 0.0, 0.0, 0.0), stds=(1.0, 1.0, 1.0, 1.0),
-        >>>                                          max_shape=(768, 1280), wh_ratio_clip=0.016)
-        >>> boundingbox_decode(anchor_box, deltas)
-        [[4.1953125  0.  0.  5.1953125]
-         [2.140625  0.  3.859375  60.59375]]
+        >>> anchor_box = Tensor([[4, 1, 2, 1], [2, 2, 2, 3]], mindspore.float32)
+        >>> deltas = Tensor([[3, 1, 2, 2], [1, 2, 1, 4]], mindspore.float32)
+        >>> boundingbox_decode = ops.BoundingBoxDecode(means=(0.0, 0.0, 0.0, 0.0), stds=(1.0, 1.0, 1.0, 1.0),
+        ...                                          max_shape=(768, 1280), wh_ratio_clip=0.016)
+        >>> output = boundingbox_decode(anchor_box, deltas)
+        >>> print(output)
+        [[ 4.1953125  0.         0.         5.1953125]
+         [ 2.140625   0.         3.859375  60.59375  ]]
 
     """
 
@@ -153,23 +204,23 @@ class BoundingBoxDecode(PrimitiveWithInfer):
         for i, value in enumerate(stds):
             validator.check_value_type("stds[%d]" % i, value, [float], self.name)
         validator.check_value_type('wh_ratio_clip', wh_ratio_clip, [float], self.name)
-        validator.check_integer("means len", len(means), 4, Rel.EQ, self.name)
-        validator.check_integer("stds len", len(stds), 4, Rel.EQ, self.name)
+        validator.check_equal_int(len(means), 4, "means len", self.name)
+        validator.check_equal_int(len(stds), 4, "stds len", self.name)
         if max_shape is not None:
             validator.check_value_type('max_shape', max_shape, [tuple], self.name)
-            validator.check_integer("max_shape len", len(max_shape), 2, Rel.EQ, self.name)
+            validator.check_equal_int(len(max_shape), 2, "max_shape len", self.name)
 
     def infer_shape(self, anchor_box, deltas):
         validator.check('anchor_box shape[0]', anchor_box[0], 'deltas shape[0]', deltas[0], Rel.EQ, self.name)
         validator.check("anchor_box rank", len(anchor_box), "", 2, Rel.EQ, self.name)
         validator.check("deltas rank", len(deltas), "", 2, Rel.EQ, self.name)
-        validator.check_integer('anchor_box shape[1]', anchor_box[1], 4, Rel.EQ, self.name)
-        validator.check_integer('deltas shape[1]', deltas[1], 4, Rel.EQ, self.name)
+        validator.check_equal_int(anchor_box[1], 4, 'anchor_box shape[1]', self.name)
+        validator.check_equal_int(deltas[1], 4, 'deltas shape[1]', self.name)
         return anchor_box
 
     def infer_dtype(self, anchor_box, deltas):
         args = {"anchor_box": anchor_box, "deltas": deltas}
-        validator.check_tensor_type_same(args, mstype.number_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, mstype.number_type, self.name)
         return anchor_box
 
 
@@ -185,27 +236,31 @@ class CheckValid(PrimitiveWithInfer):
           Data type must be float16 or float32.
 
     Outputs:
-        Tensor, the valided tensor.
+        Tensor, with shape of (N,) and dtype of bool.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Examples:
         >>> import mindspore
         >>> import mindspore.nn as nn
         >>> import numpy as np
         >>> from mindspore import Tensor
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.check_valid = P.CheckValid()
-        >>>     def construct(self, x, y):
-        >>>         valid_result = self.check_valid(x, y)
-        >>>         return valid_result
-        >>>
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.check_valid = ops.CheckValid()
+        ...     def construct(self, x, y):
+        ...         valid_result = self.check_valid(x, y)
+        ...         return valid_result
+        ...
         >>> bboxes = Tensor(np.linspace(0, 6, 12).reshape(3, 4), mindspore.float32)
         >>> img_metas = Tensor(np.array([2, 1, 3]), mindspore.float32)
         >>> net = Net()
-        >>> result = net(bboxes, img_metas)
-        [True   False   False]
+        >>> output = net(bboxes, img_metas)
+        >>> print(output)
+        [ True False False]
     """
 
     @prim_attr_register
@@ -221,8 +276,8 @@ class CheckValid(PrimitiveWithInfer):
 
     def infer_dtype(self, bboxes_type, metas_type):
         valid_type = [mstype.float32, mstype.float16, mstype.int16, mstype.uint8]
-        validator.check_tensor_type_same({"bboxes_type": bboxes_type}, valid_type, self.name)
-        validator.check_tensor_type_same({"metas_type": metas_type}, valid_type, self.name)
+        validator.check_tensor_dtype_valid("bboxes_type", bboxes_type, valid_type, self.name)
+        validator.check_tensor_dtype_valid("metas_type", metas_type, valid_type, self.name)
         return mstype.bool_
 
 
@@ -255,14 +310,16 @@ class IOU(PrimitiveWithInfer):
     Raises:
         KeyError: When `mode` is not 'iou' or 'iof'.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> iou = P.IOU()
+        >>> iou = ops.IOU()
         >>> anchor_boxes = Tensor(np.random.randint(1.0, 5.0, [3, 4]), mindspore.float16)
         >>> gt_boxes = Tensor(np.random.randint(1.0, 5.0, [3, 4]), mindspore.float16)
-        >>> iou(anchor_boxes, gt_boxes)
-        [[0.0, 65504, 65504],
-         [0.0, 0.0, 0.0],
-         [0.22253, 0.0, 0.0]]
+        >>> output = iou(anchor_boxes, gt_boxes)
+        >>> print(output.shape)
+        (3, 3)
     """
 
     @prim_attr_register
@@ -272,17 +329,17 @@ class IOU(PrimitiveWithInfer):
         self.init_prim_io_names(inputs=['anchor_boxes', 'gt_boxes'], outputs=['overlap'])
 
     def infer_shape(self, anchor_boxes, gt_boxes):
-        validator.check_integer('gt_boxes shape[1]', gt_boxes[1], 4, Rel.EQ, self.name)
-        validator.check_integer('anchor_boxes shape[1]', anchor_boxes[1], 4, Rel.EQ, self.name)
-        validator.check_integer('anchor_boxes rank', len(anchor_boxes), 2, Rel.EQ, self.name)
-        validator.check_integer('gt_boxes rank', len(gt_boxes), 2, Rel.EQ, self.name)
+        validator.check_equal_int(gt_boxes[1], 4, 'gt_boxes shape[1]', self.name)
+        validator.check_equal_int(anchor_boxes[1], 4, 'anchor_boxes shape[1]', self.name)
+        validator.check_equal_int(len(anchor_boxes), 2, 'anchor_boxes rank', self.name)
+        validator.check_equal_int(len(gt_boxes), 2, 'gt_boxes rank', self.name)
         iou = [gt_boxes[0], anchor_boxes[0]]
         return iou
 
     def infer_dtype(self, anchor_boxes, gt_boxes):
         valid_type = [mstype.float32, mstype.float16]
-        validator.check_tensor_type_same({"anchor_boxes": anchor_boxes}, valid_type, self.name)
-        validator.check_tensor_type_same({"gt_boxes": gt_boxes}, valid_type, self.name)
+        validator.check_tensor_dtype_valid("anchor_boxes", anchor_boxes, valid_type, self.name)
+        validator.check_tensor_dtype_valid("gt_boxes", gt_boxes, valid_type, self.name)
         return anchor_boxes
 
 
@@ -300,22 +357,31 @@ class MakeRefKey(Primitive):
     Outputs:
         RefKeyType, made from the Parameter name.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
-        >>> from mindspore.ops import functional as F
+        >>> import numpy as np
+        >>> from mindspore import Parameter, Tensor
+        >>> from mindspore import dtype as mstype
+        >>> import mindspore.ops as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.y = mindspore.Parameter(Tensor(np.ones([6, 8, 10]), mindspore.int32), name="y")
-        >>>         self.make_ref_key = P.MakeRefKey("y")
-        >>>
-        >>>     def construct(self, x):
-        >>>         key = self.make_ref_key()
-        >>>         ref = F.make_ref(key, x, self.y)
-        >>>         return ref * x
-        >>>
-        >>> x = Tensor(np.ones([3, 4, 5]), mindspore.int32)
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.y = Parameter(Tensor(np.ones([2, 3]), mstype.int32), name="y")
+        ...         self.make_ref_key = ops.MakeRefKey("y")
+        ...
+        ...     def construct(self, x):
+        ...         key = self.make_ref_key()
+        ...         ref = ops.make_ref(key, x, self.y)
+        ...         return ref * x
+        ...
+        >>> x = Tensor(np.array([[1, 2, 3], [4, 5, 6]]), mindspore.int32)
         >>> net = Net()
-        >>> net(x)
+        >>> output = net(x)
+        >>> print(output)
+        [[ 1  4  9]
+         [16 25 36]]
     """
 
     @prim_attr_register
@@ -351,12 +417,18 @@ class Depend(Primitive):
     """
     Depend is used for processing side-effect operations.
 
+    Note:
+        Internal API, not for public use.
+
     Inputs:
         - **value** (Tensor) - the real value to return for depend operator.
         - **expr** (Expression) - the expression to execute with no outputs.
 
     Outputs:
         Tensor, the value passed by last operator.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
     """
 
     @prim_attr_register
@@ -385,7 +457,7 @@ class CheckBprop(PrimitiveWithInfer):
     Examples:
         >>> input_x = (Tensor(np.array([[2, 2], [2, 2]]), mindspore.float32),)
         >>> input_y = (Tensor(np.array([[2, 2], [2, 2]]), mindspore.float32),)
-        >>> out = P.CheckBprop()(input_x, input_y)
+        >>> out = ops.CheckBprop()(input_x, input_y)
     """
 
     @prim_attr_register
@@ -453,10 +525,15 @@ class ConfusionMatrix(PrimitiveWithInfer):
         Tensor, the confusion matrix, with shape (`num_classes`, `num_classes`).
 
     Examples:
-        >>> confusion_matrix = P.ConfusionMatrix(4)
+        >>> confusion_matrix = ops.ConfusionMatrix(4)
         >>> labels = Tensor([0, 1, 1, 3], mindspore.int32)
         >>> predictions = Tensor([1, 2, 1, 3], mindspore.int32)
-        >>> confusion_matrix(labels, predictions)
+        >>> output = confusion_matrix(labels, predictions)
+        >>> print(output)
+        [[0 1 0 0]
+         [0 1 1 0]
+         [0 0 0 0]
+         [0 0 0 1]]
     """
 
     @prim_attr_register
@@ -478,7 +555,7 @@ class ConfusionMatrix(PrimitiveWithInfer):
         if weights is not None:
             validator.check_subclass('weights', weights, mstype.tensor, self.name)
         args = {"labels": labels, "predictions": predictions}
-        validator.check_tensor_type_same(args, (mstype.number_type), self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, (mstype.number_type), self.name)
         return labels
 
 
@@ -492,10 +569,15 @@ class PopulationCount(PrimitiveWithInfer):
     Outputs:
         Tensor, with the sam  shape as the input.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> population_count = P.PopulationCount()
+        >>> population_count = ops.PopulationCount()
         >>> x_input = Tensor([0, 1, 3], mindspore.int16)
-        >>> population_count(x_input)
+        >>> output = population_count(x_input)
+        >>> print(output)
+        [0 1 2]
     """
 
     @prim_attr_register
@@ -506,9 +588,9 @@ class PopulationCount(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        args = {"x": x_dtype}
-        validator.check_tensor_type_same(args, (mstype.int16, mstype.uint16,), self.name)
+        validator.check_tensor_dtype_valid("x", x_dtype, (mstype.int16, mstype.uint16,), self.name)
         return mstype.tensor_type(mstype.uint8)
+
 
 class Push(PrimitiveWithInfer):
     """
@@ -540,6 +622,7 @@ class Push(PrimitiveWithInfer):
     def infer_dtype(self, inputs, shapes):
         return mstype.uint64
 
+
 class Pull(PrimitiveWithInfer):
     """
     Pulls weight from parameter server.
@@ -563,6 +646,7 @@ class Pull(PrimitiveWithInfer):
 
     def infer_dtype(self, key_dtype, weight_dtype):
         return mstype.float32
+
 
 class identity(Primitive):
     """

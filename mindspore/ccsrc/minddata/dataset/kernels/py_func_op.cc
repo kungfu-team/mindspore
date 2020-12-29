@@ -81,6 +81,8 @@ Status PyFuncOp::Compute(const TensorRow &input, TensorRow *output) {
         }
       }
     } catch (const py::error_already_set &e) {
+      MS_LOG(ERROR) << "Pyfunc error, " << e.what() << ". Under sink mode, progress will late exit after 30s "
+                    << "for resource release and thread safe";
       ret = Status(StatusCode::kPyFuncException, e.what());
     }
   }
@@ -104,6 +106,9 @@ Status PyFuncOp::CastOutput(const py::object &ret_py_obj, TensorRow *output) {
       case DataType::DE_INT32:
         RETURN_IF_NOT_OK(Tensor::CreateEmpty(TensorShape({1}), DataType(DataType::DE_INT32), &out));
         RETURN_IF_NOT_OK(out->SetItemAt({0}, ret_py_obj.cast<int32_t>()));
+        break;
+      case DataType::DE_BOOL:
+        RETURN_IF_NOT_OK(Tensor::CreateScalar(ret_py_obj.cast<bool>(), &out));
         break;
       default:
         RETURN_STATUS_UNEXPECTED("No cast for the specified DataType was found.");

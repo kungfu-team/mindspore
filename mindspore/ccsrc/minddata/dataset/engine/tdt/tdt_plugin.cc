@@ -15,8 +15,11 @@
  */
 #include "minddata/dataset/engine/tdt/tdt_plugin.h"
 #include "utils/ms_utils.h"
-#include "utils/log_adapter.h"
 #include "minddata/dataset/engine/perf/profiling.h"
+#include "minddata/dataset/util/log_adapter.h"
+#if ENABLE_D
+#include "ps/ps_cache/ps_data/ps_data_prefetch.h"
+#endif
 
 namespace mindspore {
 namespace dataset {
@@ -49,6 +52,14 @@ TdtStatus TdtPlugin::hostPush(TensorRow ts_row, bool is_wait, std::string channe
   if (profiling) {
     start_time = ProfilingTime::GetCurMilliSecond();
   }
+#if ENABLE_D
+  // Data prefetch only when PS mode enables cache.
+  if (items.size() > 0) {
+    if (!ps::PsDataPrefetch::GetInstance().PrefetchData(channel_name, items[0].dataPtr_.get(), items[0].dataLen_)) {
+      return FAILED;
+    }
+  }
+#endif
   if (tdt::TdtHostPushData(channel_name, items) != 0) {
     return FAILED;
   }
@@ -129,8 +140,8 @@ TdtStatus TdtPlugin::translate(const TensorRow &ts_row, std::vector<DataItem> &i
     data_item.dataPtr_ =
       std::shared_ptr<void>(reinterpret_cast<uchar *>(&(*ts->begin<uint8_t>())), [](const void *elem) {});
     items.emplace_back(data_item);
-    MS_LOG(INFO) << "TDT data type is TDT_TENSOR, tensor type is " << datatype << ", tensor shape is " << dataShapes
-                 << ", data length is " << ts->Size() << ".";
+    MS_LOG(DEBUG) << "TDT data type is TDT_TENSOR, tensor type is " << datatype << ", tensor shape is " << dataShapes
+                  << ", data length is " << ts->Size() << ".";
   }
   return SUCCESS;
 }

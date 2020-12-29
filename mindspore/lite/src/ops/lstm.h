@@ -27,19 +27,20 @@ namespace mindspore {
 namespace lite {
 class Lstm : public PrimitiveC {
  public:
+  Lstm() = default;
+  ~Lstm() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(Lstm, PrimitiveC);
-  Lstm() = default;
   explicit Lstm(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
   void SetBidirection(bool bidirection);
+  void SetSmooth(float smooth);
 
 #else
-  Lstm() = default;
-
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
   int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
   bool GetBidirection() const;
+  float GetSmooth() const;
 };
 }  // namespace lite
 }  // namespace mindspore

@@ -34,8 +34,15 @@ class ConvolutionGradFilterCPUKernel : public LiteKernel {
   int ReSize() override;
   int Run() override;
   int Execute(int task_id);
-};
 
+ private:
+  size_t ws_size = 0;
+#ifdef ENABLE_ARM32
+  const int chunk = C4NUM;
+#else
+  const int chunk = C12NUM;
+#endif
+};
 }  // namespace mindspore::kernel
 
 #endif  // MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_FP32_GRAD_CONVOLUTION_GRAD_FILTER_H_

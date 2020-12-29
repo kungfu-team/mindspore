@@ -19,15 +19,13 @@
 #include "schema/model_generated.h"
 #include "include/errorcode.h"
 #include "src/runtime/runtime_api.h"
-#include "src/runtime/kernel/arm/fp32/reduce.h"
-#include "src/runtime/kernel/arm/int8/reduce_int8.h"
+#include "src/runtime/kernel/arm/fp32/reduce_fp32.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_NULL_PTR;
 using mindspore::lite::RET_OK;
-using mindspore::schema::PrimitiveType_Mean;
 using mindspore::schema::PrimitiveType_Reduce;
 
 namespace mindspore::kernel {
@@ -102,6 +100,10 @@ int ReduceBaseCPUKernel::Init() {
   if (in_tensors_.size() > 1) {
     auto axes_ptr = in_tensors_.at(1);
     num_axes_ = axes_ptr->ElementsNum();
+    if (axes_ptr->ElementsNum() > REDUCE_MAX_AXES_NUM) {
+      MS_LOG(ERROR) << "input axes invalid.";
+      return RET_ERROR;
+    }
     memcpy(axes_, axes_ptr->MutableData(), axes_ptr->Size());
   } else {
     num_axes_ = reduce_param->num_axes_;
@@ -109,7 +111,6 @@ int ReduceBaseCPUKernel::Init() {
   }
 
   mode_ = reduce_param->mode_;
-  memcpy(axes_, reduce_param->axes_, sizeof(reduce_param->axes_));
   reduce_to_end_ = reduce_param->reduce_to_end_;
 
   auto ret = CheckInputsOutputs();
@@ -129,33 +130,34 @@ void ReduceBaseCPUKernel::CalculateInnerOuterSize() {
     int axis = axes_[i];
     auto outer_size = 1;
     for (int j = 0; j < axis; j++) {
-      outer_size *= tmp_shape[j];
+      outer_size *= tmp_shape.at(j);
     }
     outer_sizes_.emplace_back(outer_size);
     auto inner_size = 1;
     for (int k = axis + 1; k < static_cast<int>(tmp_shape.size()); k++) {
-      inner_size *= tmp_shape[k];
+      inner_size *= tmp_shape.at(k);
     }
     inner_sizes_.emplace_back(inner_size);
-    axis_sizes_.emplace_back(tmp_shape[axis]);
-    tmp_shape[axis] = 1;
+    axis_sizes_.emplace_back(tmp_shape.at(axis));
+    tmp_shape.at(axis) = 1;
   }
 }
 
 void ReduceBaseCPUKernel::CalculateTmpBufferSize() {
   buffer_sizes_.clear();
   auto input_shape = in_tensors_.at(0)->shape();
-  for (auto i = 0; i < num_axes_; i++) {
+  // calculate size of buffer to malloc for each reducing axis
+  for (auto i = 0; i < num_axes_ - 1; i++) {
     int axis = axes_[i];
     size_t size = 1;
     for (size_t j = 0; j < input_shape.size(); j++) {
       if (axis != static_cast<int>(j)) {
-        size *= input_shape[j];
+        size *= input_shape.at(j);
       }
     }
     MS_ASSERT(context_->allocator != nullptr);
     buffer_sizes_.emplace_back(size);
-    input_shape[axis] = 1;
+    input_shape.at(axis) = 1;
   }
 }
 
@@ -181,11 +183,13 @@ kernel::LiteKernel *CpuReduceFp32KernelCreator(const std::vector<lite::Tensor *>
   }
   if (desc.type != schema::PrimitiveType_Reduce) {
     MS_LOG(ERROR) << "Reduce op desc.type should be PrimitiveType_Reduce, got " << desc.type;
+    free(opParameter);
     return nullptr;
   }
   auto *kernel = new (std::nothrow) ReduceCPUKernel(opParameter, inputs, outputs, ctx, primitive);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "Reduce new ReduceCPUKernel failed.";
+    free(opParameter);
     return nullptr;
   }
   auto ret = kernel->Init();
@@ -197,69 +201,4 @@ kernel::LiteKernel *CpuReduceFp32KernelCreator(const std::vector<lite::Tensor *>
   }
   return kernel;
 }
-
-kernel::LiteKernel *CpuMeanFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                             const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                             const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                             const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(opParameter != nullptr);
-  MS_ASSERT(desc.type == schema::PrimitiveType_Mean);
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Reduce opParameter nullptr";
-    return nullptr;
-  }
-  if (desc.type != schema::PrimitiveType_Mean) {
-    MS_LOG(ERROR) << "Reduce op desc.type should be PrimitiveType_Mean, got " << desc.type;
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) ReduceCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "Reduce new ReduceCPUKernel failed.";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-kernel::LiteKernel *CpuReduceInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                               const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                               const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                               const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(opParameter != nullptr);
-  MS_ASSERT(desc.type == schema::PrimitiveType_Reduce);
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Reduce opParameter nullptr";
-    return nullptr;
-  }
-  if (desc.type != schema::PrimitiveType_Reduce) {
-    MS_LOG(ERROR) << "Reduce op desc.type should be PrimitiveType_Reduce, got " << desc.type;
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) ReduceInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "Reduce new ReduceCPUKernel failed.";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Reduce, CpuReduceFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt, PrimitiveType_Reduce, CpuReduceFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_Reduce, CpuReduceFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_Mean, CpuMeanFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Reduce, CpuReduceInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Mean, CpuReduceInt8KernelCreator)
 }  // namespace mindspore::kernel

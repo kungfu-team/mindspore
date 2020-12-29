@@ -16,15 +16,14 @@
 #include "common/common.h"
 #include "minddata/dataset/include/datasets.h"
 #include "minddata/dataset/include/vision.h"
-#include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/core/global_context.h"
 
 using namespace mindspore::dataset;
-using namespace mindspore::dataset::api;
-using mindspore::dataset::Tensor;
-using mindspore::dataset::ShuffleMode;
-using mindspore::dataset::TensorShape;
+
 using mindspore::dataset::DataType;
+using mindspore::dataset::ShuffleMode;
+using mindspore::dataset::Tensor;
+using mindspore::dataset::TensorShape;
 
 class MindDataTestPipeline : public UT::DatasetOpTesting {
  protected:
@@ -83,6 +82,38 @@ TEST_F(MindDataTestPipeline, TestTFRecordDatasetBasic) {
 
   // Manually terminate the pipeline
   iter->Stop();
+}
+
+TEST_F(MindDataTestPipeline, TestTFRecordDatasetBasicGetters) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestTFRecordDatasetBasicGetters.";
+
+  // Create a TFRecord Dataset
+  std::string file_path = datasets_root_path_ + "/test_tf_file_3_images2/train-0000-of-0001.data";
+  std::string schema_path = datasets_root_path_ + "/test_tf_file_3_images2/datasetSchema.json";
+  std::shared_ptr<Dataset> ds = TFRecord({file_path}, schema_path, {"image"}, 0);
+  EXPECT_NE(ds, nullptr);
+
+  // Create a Repeat operation on ds
+  int32_t repeat_num = 2;
+  ds = ds->Repeat(repeat_num);
+  EXPECT_NE(ds, nullptr);
+
+  // Create objects for the tensor ops
+  std::shared_ptr<TensorOperation> random_horizontal_flip_op = vision::RandomHorizontalFlip(0.5);
+  EXPECT_NE(random_horizontal_flip_op, nullptr);
+
+  // Create a Map operation on ds
+  ds = ds->Map({random_horizontal_flip_op}, {}, {}, {"image"});
+  EXPECT_NE(ds, nullptr);
+
+  // Create a Batch operation on ds
+  int32_t batch_size = 1;
+  ds = ds->Batch(batch_size);
+  EXPECT_NE(ds, nullptr);
+
+  EXPECT_EQ(ds->GetDatasetSize(), 6);
+  std::vector<std::string> column_names = {"image"};
+  EXPECT_EQ(ds->GetColumnNames(), column_names);
 }
 
 TEST_F(MindDataTestPipeline, TestTFRecordDatasetShuffle) {
@@ -355,14 +386,12 @@ TEST_F(MindDataTestPipeline, TestTFRecordDatasetShard) {
 
   // Create a TFRecord Dataset
   // Each file has two columns("image", "label") and 3 rows
-  std::vector<std::string> files = {
-    datasets_root_path_ + "/test_tf_file_3_images2/train-0000-of-0001.data",
-    datasets_root_path_ + "/test_tf_file_3_images2/train-0000-of-0002.data",
-    datasets_root_path_ + "/test_tf_file_3_images2/train-0000-of-0003.data"
-  };
-  std::shared_ptr<Dataset> ds1 = TFRecord({files}, "", {}, 0, ShuffleMode::kFalse, 2, 1, true);
+  std::vector<std::string> files = {datasets_root_path_ + "/test_tf_file_3_images2/train-0000-of-0001.data",
+                                    datasets_root_path_ + "/test_tf_file_3_images2/train-0000-of-0002.data",
+                                    datasets_root_path_ + "/test_tf_file_3_images2/train-0000-of-0003.data"};
+  std::shared_ptr<Dataset> ds1 = TFRecord(files, "", {}, 0, ShuffleMode::kFalse, 2, 1, true);
   EXPECT_NE(ds1, nullptr);
-  std::shared_ptr<Dataset> ds2 = TFRecord({files}, "", {}, 0, ShuffleMode::kFalse, 2, 1, false);
+  std::shared_ptr<Dataset> ds2 = TFRecord(files, "", {}, 0, ShuffleMode::kFalse, 2, 1, false);
   EXPECT_NE(ds2, nullptr);
 
   // Create an iterator over the result of the above dataset
@@ -402,28 +431,34 @@ TEST_F(MindDataTestPipeline, TestTFRecordDatasetExeception) {
 
   // This case expected to fail because the list of dir_path cannot be empty.
   std::shared_ptr<Dataset> ds1 = TFRecord({});
-  EXPECT_EQ(ds1, nullptr);
+  EXPECT_EQ(ds1->CreateIterator(), nullptr);
 
   // This case expected to fail because the file in dir_path is not exist.
   std::string file_path = datasets_root_path_ + "/testTFTestAllTypes/test.data";
   std::shared_ptr<Dataset> ds2 = TFRecord({file_path, "noexist.data"});
-  EXPECT_EQ(ds2, nullptr);
+  EXPECT_EQ(ds2->CreateIterator(), nullptr);
 
   // This case expected to fail because the file of schema is not exist.
   std::shared_ptr<Dataset> ds4 = TFRecord({file_path, "notexist.json"});
-  EXPECT_EQ(ds4, nullptr);
+  EXPECT_EQ(ds4->CreateIterator(), nullptr);
 
   // This case expected to fail because num_samples is negative.
   std::shared_ptr<Dataset> ds5 = TFRecord({file_path}, "", {}, -1);
-  EXPECT_EQ(ds5, nullptr);
+  EXPECT_EQ(ds5->CreateIterator(), nullptr);
 
   // This case expected to fail because num_shards is negative.
   std::shared_ptr<Dataset> ds6 = TFRecord({file_path}, "", {}, 10, ShuffleMode::kFalse, 0);
-  EXPECT_EQ(ds6, nullptr);
+  EXPECT_EQ(ds6->CreateIterator(), nullptr);
 
   // This case expected to fail because shard_id is out_of_bound.
   std::shared_ptr<Dataset> ds7 = TFRecord({file_path}, "", {}, 10, ShuffleMode::kFalse, 3, 3);
-  EXPECT_EQ(ds7, nullptr);
+  EXPECT_EQ(ds7->CreateIterator(), nullptr);
+
+  // This case expected to fail because the provided number of files < num_shards in file-based sharding.
+  std::string file_path1 = datasets_root_path_ + "/test_tf_file_3_images2/train-0000-of-0001.data";
+  std::string file_path2 = datasets_root_path_ + "/test_tf_file_3_images2/train-0000-of-0002.data";
+  std::shared_ptr<Dataset> ds8 = TFRecord({file_path1, file_path2}, "", {}, 0, ShuffleMode::kFalse, 3);
+  EXPECT_EQ(ds8->CreateIterator(), nullptr);
 }
 
 TEST_F(MindDataTestPipeline, TestTFRecordDatasetExeception2) {
@@ -441,4 +476,27 @@ TEST_F(MindDataTestPipeline, TestTFRecordDatasetExeception2) {
   // This attempts to create Execution Tree and launch it.
   std::shared_ptr<Iterator> iter = ds->CreateIterator();
   EXPECT_EQ(iter, nullptr);
+}
+
+TEST_F(MindDataTestPipeline, TestIncorrectTFSchemaObject) {
+  std::string path = datasets_root_path_ + "/test_tf_file_3_images2/train-0000-of-0001.data";
+  std::shared_ptr<SchemaObj> schema = Schema();
+  schema->add_column("image", "uint8", {1});
+  schema->add_column("label", "int64", {1});
+  std::shared_ptr<Dataset> ds = TFRecord({path}, schema);
+  EXPECT_NE(ds, nullptr);
+  auto itr = ds->CreateIterator();
+  EXPECT_NE(itr, nullptr);
+  TensorMap mp;
+  // this will fail due to the incorrect schema used
+  EXPECT_FALSE(itr->GetNextRow(&mp));
+}
+
+TEST_F(MindDataTestPipeline, TestIncorrectTFrecordFile) {
+  std::string path = datasets_root_path_ + "/test_tf_file_3_images2/datasetSchema.json";
+  std::shared_ptr<Dataset> ds = TFRecord({path});
+  EXPECT_NE(ds, nullptr);
+  // the tf record file is incorrect, hence validate param will fail
+  auto itr = ds->CreateIterator();
+  EXPECT_EQ(itr, nullptr);
 }

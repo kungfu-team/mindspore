@@ -21,11 +21,13 @@
 #include <arm_neon.h>
 #endif
 #include "nnacl/op_base.h"
-#include "nnacl/fp32/pooling.h"
+#include "nnacl/fp32/pooling_fp32.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+#define MAX_MAXPOOL_SIZE 256
+
 int AvgPoolingInt8(const int8_t *input_ptr, int8_t *output_ptr, PoolingParameter *pooling_param, int task_id);
 
 int AvgPoolingOptInt8(const int8_t *input_ptr, int8_t *output_ptr, PoolingParameter *pooling_param, int task_id);

@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2020 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ namespace kernel {
 template <typename T, typename S>
 class GatherGpuFwdKernel : public GpuKernel {
  public:
-  GatherGpuFwdKernel() : axis_(0), handle_(nullptr) {}
+  GatherGpuFwdKernel() : axis_(0) {}
   ~GatherGpuFwdKernel() = default;
 
   const std::vector<size_t> &GetInputSizeList() const override { return input_size_list_; }
@@ -38,11 +38,10 @@ class GatherGpuFwdKernel : public GpuKernel {
               const std::vector<AddressPtr> &outputs, void *stream_ptr) override {
     VARIABLE_NOT_USED(workspace);
     T *input_addr = GetDeviceAddress<T>(inputs, 0);
-    S *indices_addr = GetDeviceAddress<S>(inputs, 1);
+    S *index_addr = GetDeviceAddress<S>(inputs, 1);
     T *output_addr = GetDeviceAddress<T>(outputs, 0);
 
-    auto input_dim1 = input_shapes_[IntToSize(axis_)];
-    Gather(input_addr, indices_addr, output_addr, dims_[0], dims_[1], dims_[2], input_dim1,
+    Gather(input_addr, index_addr, output_addr, dims_[0], dims_[1], dims_[2], dims_[3],
            reinterpret_cast<cudaStream_t>(stream_ptr));
     return true;
   }
@@ -53,29 +52,28 @@ class GatherGpuFwdKernel : public GpuKernel {
       MS_LOG(EXCEPTION) << "Argument number is " << input_num << ", but GatherGpuFwdKernel needs 2.";
     }
     input_shapes_ = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 0);
-    indices_shapes_ = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 1);
+    index_shapes_ = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 1);
     output_shapes_ = AnfAlgo::GetOutputInferShape(kernel_node, 0);
 
-    axis_ = GetAttr<int>(kernel_node, "axis");
+    axis_ = static_cast<int>(GetAttr<int64_t>(kernel_node, "dim"));
     if (axis_ < 0) {
       axis_ = axis_ + SizeToInt(input_shapes_.size());
     }
-
     Reshape();
     InitSizeLists();
     return true;
   }
 
  protected:
-  void InitResource() override { handle_ = device::gpu::GPUDeviceManager::GetInstance().GetCudnnHandle(); }
+  void InitResource() override {}
   void InitSizeLists() override {
-    size_t size = GetSize(input_shapes_);
+    size_t size = GetSize(input_shapes_, true);
     input_size_list_.push_back(size);
 
-    size = GetSize(indices_shapes_);
+    size = GetSize(index_shapes_, false);
     input_size_list_.push_back(size);
 
-    size = GetSize(output_shapes_);
+    size = GetSize(output_shapes_, true);
     output_size_list_.push_back(size);
   }
 
@@ -85,27 +83,24 @@ class GatherGpuFwdKernel : public GpuKernel {
     for (size_t i = 0; i < IntToSize(axis_); i++) {
       dim_before_axis *= output_shapes_[i];
     }
-
-    size_t dim_of_indices = 1;
-    for (size_t i = 0; i < indices_shapes_.size(); i++) {
-      dim_of_indices *= indices_shapes_[i];
-    }
-
-    size_t dim_after_indices = 1;
-    for (size_t i = IntToSize(axis_) + indices_shapes_.size(); i < output_shapes_.size(); i++) {
-      dim_after_indices *= output_shapes_[i];
+    size_t dim_at_axis_input = input_shapes_[IntToSize(axis_)];
+    size_t dim_at_axis_output = output_shapes_[IntToSize(axis_)];
+    size_t dim_after_axis = 1;
+    for (size_t i = IntToSize(axis_) + 1; i < output_shapes_.size(); i++) {
+      dim_after_axis *= output_shapes_[i];
     }
 
     dims_[0] = dim_before_axis;
-    dims_[1] = dim_of_indices;
-    dims_[2] = dim_after_indices;
+    dims_[1] = dim_at_axis_input;
+    dims_[2] = dim_at_axis_output;
+    dims_[3] = dim_after_axis;
     return;
   }
-  size_t GetSize(const std::vector<size_t> &shape) const {
+  size_t GetSize(const std::vector<size_t> &shape, const bool flag = true) const {
     if (shape.size() == 0) {
       return 0;
     }
-    size_t result = sizeof(T);
+    size_t result = flag ? sizeof(T) : sizeof(S);
     for (size_t i = 0; i < shape.size(); i++) {
       result *= shape[i];
     }
@@ -113,12 +108,11 @@ class GatherGpuFwdKernel : public GpuKernel {
   }
 
   std::vector<size_t> input_shapes_;
-  std::vector<size_t> indices_shapes_;
+  std::vector<size_t> index_shapes_;
   std::vector<size_t> output_shapes_;
 
-  size_t dims_[3] = {};
+  size_t dims_[4] = {};
   int axis_;
-  cudnnHandle_t handle_;
 
   std::vector<size_t> input_size_list_;
   std::vector<size_t> output_size_list_;

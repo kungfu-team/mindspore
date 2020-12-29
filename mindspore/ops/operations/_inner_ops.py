@@ -19,8 +19,9 @@ from ..._checkparam import Rel
 from ..._checkparam import Validator as validator
 from ... import context
 from ...common import dtype as mstype
-from ..primitive import PrimitiveWithInfer, prim_attr_register
+from ..primitive import PrimitiveWithCheck, PrimitiveWithInfer, prim_attr_register
 from ..operations.math_ops import _infer_shape_reduce
+from ...communication.management import GlobalComm
 
 
 class ExtractImagePatches(PrimitiveWithInfer):
@@ -30,11 +31,11 @@ class ExtractImagePatches(PrimitiveWithInfer):
 
     Args:
         ksizes (Union[tuple[int], list[int]]): The size of sliding window, must be a tuple or a list of integers,
-            and the format is [1, ksize_row, ksize_col, 1].
+            and the format is [1, 1, ksize_row, ksize_col].
         strides (Union[tuple[int], list[int]]): Distance between the centers of the two consecutive patches,
-            must be a tuple or list of int, and the format is [1, stride_row, stride_col, 1].
+            must be a tuple or list of int, and the format is [1, 1, stride_row, stride_col].
         rates (Union[tuple[int], list[int]]): In each extracted patch, the gap between the corresponding dimension
-            pixel positions, must be a tuple or a list of integers, and the format is [1, rate_row, rate_col, 1].
+            pixel positions, must be a tuple or a list of integers, and the format is [1, 1, rate_row, rate_col].
         padding (str): The type of padding algorithm, is a string whose value is "same" or "valid",
             not case sensitive. Default: "valid".
 
@@ -54,32 +55,31 @@ class ExtractImagePatches(PrimitiveWithInfer):
     @prim_attr_register
     def __init__(self, ksizes, strides, rates, padding="valid"):
         """init"""
+
         def _check_tuple_or_list(arg_name, arg_val, prim_name):
             validator.check_value_type(f"{arg_name}s", ksizes, [tuple, list], self.name)
-            if len(arg_val) != 4 or arg_val[0] != 1 or arg_val[3] != 1:
+            if len(arg_val) != 4 or arg_val[0] != 1 or arg_val[1] != 1:
                 raise ValueError(f"For \'{prim_name}\' the format of {arg_name}s should be [1, {arg_name}_row, "
                                  f"{arg_name}_col, 1], but got {arg_val}.")
-            if not isinstance(arg_val[1], int) or not isinstance(arg_val[2], int) or arg_val[1] < 1 or arg_val[2] < 1:
+            if not isinstance(arg_val[2], int) or not isinstance(arg_val[3], int) or arg_val[2] < 1 or arg_val[3] < 1:
                 raise ValueError(f"For '{prim_name}' the {arg_name}_row and {arg_name}_col in {arg_name}s should be an "
-                                 f"positive integer number, but got {arg_name}_row is {arg_val[1]}, {arg_name}_col "
-                                 f"is {arg_val[2]}")
+                                 f"positive integer number, but got {arg_name}_row is {arg_val[2]}, {arg_name}_col "
+                                 f"is {arg_val[3]}")
 
         _check_tuple_or_list("ksize", ksizes, self.name)
         _check_tuple_or_list("stride", strides, self.name)
         _check_tuple_or_list("rate", rates, self.name)
         self.padding = validator.check_string(padding.upper(), ['VALID', 'SAME'], 'padding', self.name)
         self.add_prim_attr("padding", self.padding)
-        self.add_prim_attr("io_format", "NHWC")
+        self.add_prim_attr("io_format", "NCHW")
         self.is_ge = context.get_context("enable_ge")
 
     def infer_shape(self, input_x):
         """infer shape"""
         in_batch, in_depth, in_row, in_col = input_x
-        if self.is_ge:
-            in_batch, in_row, in_col, in_depth = input_x
-        _, ksize_row, ksize_col, _ = self.ksizes
-        _, stride_row, stride_col, _ = self.strides
-        _, rate_row, rate_col, _ = self.rates
+        _, _, ksize_row, ksize_col = self.ksizes
+        _, _, stride_row, stride_col = self.strides
+        _, _, rate_row, rate_col = self.rates
         if len(input_x) != 4:
             raise ValueError("The `input_x` should be a 4-D tensor, "
                              f"but got a {len(input_x)}-D tensor whose shape is {input_x}")
@@ -97,13 +97,11 @@ class ExtractImagePatches(PrimitiveWithInfer):
             out_col = (in_col - 1) // stride_col + 1
 
         out_shape = [out_batch, out_depth, out_row, out_col]
-        if self.is_ge:
-            out_shape = [out_batch, out_row, out_col, out_depth]
         return out_shape
 
     def infer_dtype(self, input_x):
         """infer dtype"""
-        validator.check_tensor_type_same({"input_x": input_x}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid("input_x", input_x, mstype.number_type, self.name)
         return input_x
 
 
@@ -129,9 +127,10 @@ class Range(PrimitiveWithInfer):
         Tensor, has the same shape and dtype as `input_x`.
 
     Examples:
-        >>> range = P.Range(1.0, 8.0, 2.0)
+        >>> range = ops.Range(1.0, 8.0, 2.0)
         >>> x = Tensor(np.array([1, 2, 3, 2]), mindspore.int32)
-        >>> range(x)
+        >>> output = range(x)
+        >>> print(output)
         [3, 5, 7, 5]
     """
 
@@ -161,7 +160,7 @@ class Range(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({'x_dtype': x_dtype}, [mstype.float32, mstype.int32], self.name)
+        validator.check_tensor_dtype_valid('x', x_dtype, [mstype.float32, mstype.int32], self.name)
         return x_dtype
 
 
@@ -197,7 +196,7 @@ class Quant(PrimitiveWithInfer):
 
     Examples:
         >>> input_x = Tensor([100.0, 150.0], mstype.float32)
-        >>> quant = P.Quant(80.0, 0.0, False, "Round")
+        >>> quant = ops.Quant(80.0, 0.0, False, "Round")
         >>> y = quant(input_x)
     """
 
@@ -251,9 +250,10 @@ class Dequant(PrimitiveWithInfer):
 
     Examples:
         >>> input_x = Tensor([100.0, 150.0], mstype.float32)
-        >>> dequant = P.Dequant(False, False)
+        >>> dequant = ops.Dequant(False, False)
         >>> y = dequant(input_x)
     """
+
     @prim_attr_register
     def __init__(self, sqrt_mode=False, relu_flag=False):
         self.sqrt_mode = validator.check_value_type("sqrt_mode", sqrt_mode, [bool], self.name)
@@ -269,45 +269,6 @@ class Dequant(PrimitiveWithInfer):
         validator.check_type_name("x", x_type, [mstype.int32], self.name)
         validator.check_type_name("deq_scale", deq_scale_type, [mstype.float16, mstype.uint64], self.name)
         return mstype.float16
-
-
-class LinSpace(PrimitiveWithInfer):
-    r"""
-    Generates values in an interval. And return the corresponding interpolation accroding to assist.
-
-    Inputs:
-        - **assist** (Tensor[float32]) - The assist value, With shape of 0-D or 1-D.
-        - **start** (Tensor[float32]) - The start of interval, With shape of 0-D.
-        - **stop** (Tensor[float32]) - The end of interval, With shape of 0-D.
-        - **num** (Tensor[int32]) - ticks number in the interval, the ticks include start and stop value.
-          With shape of 0-D.
-
-    Outputs:
-        Tensor, has the same shape as `assist`.
-
-    Examples:
-        >>> linspace = P.LinSpace()
-        >>> assist = Tensor([5, 5.5], mindspore.float32)
-        >>> start = Tensor(1, mindspore.float32)
-        >>> stop = Tensor(10, mindspore.float32)
-        >>> num = Tensor(5, mindspore.int32)
-        >>> output = linspace(assist, start, stop, num)
-        [12.25, 13.375]
-    """
-
-    @prim_attr_register
-    def __init__(self):
-        pass
-
-    def infer_shape(self, assist, start, stop, num):
-        return assist
-
-    def infer_dtype(self, assist, start, stop, num):
-        args = {"num": num}
-        validator.check_tensor_type_same(args, (mstype.int32,), self.name)
-        args = {"assist": assist, "start": start, "stop": stop}
-        validator.check_tensor_type_same(args, (mstype.float32,), self.name)
-        return assist
 
 
 class MatrixDiag(PrimitiveWithInfer):
@@ -326,8 +287,9 @@ class MatrixDiag(PrimitiveWithInfer):
     Examples:
         >>> x = Tensor(np.array([1, -1]), mstype.float32)
         >>> assist = Tensor(np.arange(-12, 0).reshape(3, 2, 2), mindspore.float32)
-        >>> matrix_diag = P.MatrixDiag()
+        >>> matrix_diag = ops.MatrixDiag()
         >>> result = matrix_diag(x, assist)
+        >>> print(result)
         [[[-12.   11.]
           [-10.    9.]]
          [[ -8.    7.]
@@ -343,12 +305,12 @@ class MatrixDiag(PrimitiveWithInfer):
     def infer_dtype(self, x_dtype, assist_dtype):
         valid_type = [mstype.float16, mstype.float32, mstype.int32, mstype.int8, mstype.uint8]
         args = {"x": x_dtype, "assist": assist_dtype}
-        validator.check_tensor_type_same(args, valid_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_type, self.name)
         return x_dtype
 
     def infer_shape(self, x_shape, assist_shape):
-        validator.check_integer("assist rank", len(assist_shape), 2, Rel.GE, self.name)
-        validator.check('rank of x', len(x_shape)+1,
+        validator.check_int(len(assist_shape), 2, Rel.GE, "assist rank", self.name)
+        validator.check('rank of x', len(x_shape) + 1,
                         'rank of assist', len(assist_shape), Rel.LE, self.name)
         validator.check('assist\'s penultimate dimension', assist_shape[-2], 'assist\'s last dimension',
                         assist_shape[-1], Rel.EQ, self.name)
@@ -358,7 +320,7 @@ class MatrixDiag(PrimitiveWithInfer):
         while r_idx >= r_end_dim:
             if x_shape[r_idx] != 1:
                 validator.check("reverse x dim %d" % r_idx, x_shape[r_idx], "reverse assist dim %d" %
-                                assist_shape[r_idx-1], assist_shape[r_idx-1], Rel.EQ, self.name)
+                                assist_shape[r_idx - 1], assist_shape[r_idx - 1], Rel.EQ, self.name)
             r_idx = r_idx - 1
 
         return assist_shape
@@ -379,8 +341,9 @@ class MatrixDiagPart(PrimitiveWithInfer):
     Examples:
         >>> x = Tensor([[[-1, 0], [0, 1]], [[-1, 0], [0, 1]], [[-1, 0], [0, 1]]], mindspore.float32)
         >>> assist = Tensor(np.arange(-12, 0).reshape(3, 2, 2), mindspore.float32)
-        >>> matrix_diag_part = P.MatrixDiagPart()
+        >>> matrix_diag_part = ops.MatrixDiagPart()
         >>> result = matrix_diag_part(x, assist)
+        >>> print(result)
         [[12., -9.], [8., -5.], [4., -1.]]
     """
 
@@ -391,11 +354,11 @@ class MatrixDiagPart(PrimitiveWithInfer):
     def infer_dtype(self, x_dtype, assist_dtype):
         valid_type = [mstype.float16, mstype.float32, mstype.int32, mstype.int8, mstype.uint8]
         args = {"x": x_dtype, "assist": assist_dtype}
-        validator.check_tensor_type_same(args, valid_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_type, self.name)
         return x_dtype
 
     def infer_shape(self, x_shape, assist_shape):
-        validator.check_integer("x rank", len(x_shape), 2, Rel.GE, self.name)
+        validator.check_int(len(x_shape), 2, Rel.GE, "x rank", self.name)
         validator.check("x shape", x_shape, "assist shape", assist_shape, Rel.EQ, self.name)
 
         if assist_shape[-2] < assist_shape[-1]:
@@ -405,15 +368,125 @@ class MatrixDiagPart(PrimitiveWithInfer):
         return out_shape
 
 
+class Send(PrimitiveWithInfer):
+    """
+    Send tensors from src_rank to the specified dest_rank.
+
+    Note:
+        Send and Recveive must be used in combination and have same sr_tag.
+        Send must be used between servers.
+
+    Args:
+        sr_tag (int): A required integer identifying the send/recv message tag. The message will
+                      will be received by the Receive op with the same "sr_tag".
+        dest_rank (int): A required integer identifying the destination rank.
+        group (str): The communication group to work on. Default: "hccl_world_group/nccl_world_group".
+
+    Inputs:
+        - **input_x** (Tensor) - The shape of tensor is :math:`(x_1, x_2, ..., x_R)`.
+
+    Examples:
+        >>> import mindspore.ops.operations as ops
+        >>> import mindspore.nn as nn
+        >>> from mindspore.communication import init
+        >>> from mindspore import Tensor
+        >>> import numpy as np
+        >>>
+        >>> init()
+        >>> class Net(nn.Cell):
+        >>>     def __init__(self):
+        >>>         super(Net, self).__init__()
+        >>>         self.depend = ops.Depend()
+        >>>         self.send = ops.Send(st_tag=0, dest_rank=8, group="hccl_world_group")
+        >>>
+        >>>     def construct(self, x):
+        >>>         out = self.depend(x, self.send(x))
+        >>>         return out
+        >>>
+        >>> input_ = Tensor(np.ones([2, 8]).astype(np.float32))
+        >>> net = Net()
+        >>> output = net(input_)
+    """
+    @prim_attr_register
+    def __init__(self, sr_tag, dest_rank, group=GlobalComm.WORLD_COMM_GROUP):
+        self.rank = dest_rank
+        self.sr_tag = sr_tag
+        self.group = group
+
+    def infer_shape(self, x_shape):
+        self.add_prim_attr("shape", x_shape)
+        return x_shape
+
+    def infer_dtype(self, x_dtype):
+        self.add_prim_attr("dtype", x_dtype)
+        return x_dtype
+
+
+class Receive(PrimitiveWithInfer):
+    """
+    receive tensors from src_rank.
+
+    Note:
+        Send and Recveive must be used in combination and have same sr_tag.
+        Receive must be used between servers.
+
+    Args:
+        sr_tag (int): A required integer identifying the send/recv message tag. The message will
+                      will be send by the Send op with the same "sr_tag".
+        src_rank (int): A required integer identifying the source rank.
+        shape (list[int]): A required list identifying the shape of the tensor to be received.
+        dtype (Type): A required Type indentifying the type of the tensor to be received. The supported types:
+                       int8, int16, int32, float16, float32.
+        group (str): The communication group to work on. Default: "hccl_world_group/nccl_world_group".
+
+    Inputs:
+        - **input_x** (Tensor) - The shape of tensor is :math:`(x_1, x_2, ..., x_R)`.
+
+    Examples:
+        >>> import mindspore.ops.operations as ops
+        >>> import mindspore.nn as nn
+        >>> from mindspore.communication import init
+        >>> from mindspore import Tensor
+        >>> import numpy as np
+        >>>
+        >>> init()
+        >>> class Net(nn.Cell):
+        >>>     def __init__(self):
+        >>>         super(Net, self).__init__()
+        >>>         self.recv = ops.Receive(st_tag=0, src_rank=0, shape=[2, 8], dtype=np.float32,
+        >>>                               group="hccl_world_group")
+        >>>
+        >>>     def construct(self):
+        >>>         out = self.recv()
+        >>>         return out
+        >>>
+        >>> net = Net()
+        >>> output = net()
+    """
+    @prim_attr_register
+    def __init__(self, sr_tag, src_rank, shape, dtype, group=GlobalComm.WORLD_COMM_GROUP):
+        self.rank = src_rank
+        self.tag = sr_tag
+        self.shape = shape
+        self.dtype = dtype
+        self.group = group
+
+    def infer_shape(self, x_shape=None):
+        return self.shape
+
+    def infer_dtype(self, x_dtype=None):
+        return self.dtype
+
+
 class MatrixSetDiag(PrimitiveWithInfer):
     r"""
     Modifies the batched diagonal part of a batched tensor.
 
     Inputs:
-        - **x** (Tensor) - The batched tensor. It can be one of the following data types:
+        - **x** (Tensor) - The batched tensor. Rank k+1, where k >= 1. It can be one of the following data types:
           float32, float16, int32, int8, uint8.
+        - **diagonal** (Tensor) - The diagonal values. Must have the same type as input `x`. Rank k, where k >= 1.
         - **assist** (Tensor) - A eye tensor of the same type as `x`. With shape same as `x`.
-        - **diagonal** (Tensor) - The diagonal values.
 
     Outputs:
         Tensor, data type same as input `x`. The shape same as `x`.
@@ -421,8 +494,9 @@ class MatrixSetDiag(PrimitiveWithInfer):
     Examples:
         >>> x = Tensor([[[-1, 0], [0, 1]], [[-1, 0], [0, 1]], [[-1, 0], [0, 1]]], mindspore.float32)
         >>> diagonal = Tensor([[-1., 2.], [-1., 1.], [-1., 1.]], mindspore.float32)
-        >>> matrix_set_diag = P.MatrixSetDiag()
+        >>> matrix_set_diag = ops.MatrixSetDiag()
         >>> result = matrix_set_diag(x, diagonal)
+        >>> print(result)
         [[[-1, 0], [0, 2]], [[-1, 0], [0, 1]], [[-1, 0], [0, 1]]]
 
     """
@@ -434,11 +508,11 @@ class MatrixSetDiag(PrimitiveWithInfer):
     def infer_dtype(self, x_dtype, diagonal_dtype, assist_dtype):
         valid_type = [mstype.float16, mstype.float32, mstype.int32, mstype.int8, mstype.uint8]
         args = {"x": x_dtype, "diagonal": diagonal_dtype, "assist": assist_dtype}
-        validator.check_tensor_type_same(args, valid_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_type, self.name)
         return x_dtype
 
     def infer_shape(self, x_shape, diagonal_shape, assist_shape):
-        validator.check_integer("x rank", len(x_shape), 2, Rel.GE, self.name)
+        validator.check_int(len(x_shape), 2, Rel.GE, "x rank", self.name)
         validator.check("x shape", x_shape, "assist shape", assist_shape, Rel.EQ, self.name)
 
         if x_shape[-2] < x_shape[-1]:
@@ -481,7 +555,7 @@ class ConfusionMulGrad(PrimitiveWithInfer):
               the shape of output is :math:`(x_1,x_4,...x_R)`.
 
     Examples:
-        >>> confusion_mul_grad = P.ConfusionMulGrad()
+        >>> confusion_mul_grad = ops.ConfusionMulGrad()
         >>> input_0 = Tensor(np.random.randint(-2, 2, (2, 3)), mindspore.float32)
         >>> input_1 = Tensor(np.random.randint(0, 4, (2, 3)), mindspore.float32)
         >>> input_2 = Tensor(np.random.randint(-4, 0, (2, 3)), mindspore.float32)
@@ -509,3 +583,144 @@ class ConfusionMulGrad(PrimitiveWithInfer):
         validator.check_subclass("input1_dtype", input1_dtype, mstype.tensor, self.name)
         validator.check_subclass("input2_dtype", input2_dtype, mstype.tensor, self.name)
         return input0_dtype, input1_dtype
+
+
+class GpuConvertToDynamicShape(PrimitiveWithCheck):
+    """
+    This op is used for dynamic shape testing. Its inferred shape will be unknown
+    during compile time, so that its output will appear to be dynamically shaped.
+    The input will not be altered in any way. Put this operator before the operator
+    being tested for dynamic shape support.
+
+    Inputs:
+        - **input** (Tensor) - The tensor used for testing.
+
+    Outputs:
+        - **output** (Tensor) - Same shape, type and value as `input`.
+
+    Examples:
+          >>> # make a model, since dynamic shape operators must be in GRAPH_MODE
+          >>> class TestDynamicShapeReshapeNet(nn.Cell):
+          >>>     def __init__(self):
+          >>>         super(TestDynamicShapeReshapeNet, self).__init__()
+          >>>         self.convert_to_dynamic_shape = inner.GpuConvertToDynamicShape()
+          >>>         # suppose we are testing Reshape op
+          >>>         self.reshape = P.Reshape()
+          >>>
+          >>>     def construct(self, input, new_shape):
+          >>>         dynamic_shape_input = self.convert_to_dynamic_shape(input)
+          >>>         reshaped_input = self.reshape(input, new_shape)
+          >>>
+          >>> context.set_context(mode=context.GRAPH_MODE, device_target="GPU")
+          >>> input = Tensor(np.array([0, 1, 2, 3])
+          >>> new_shape = (2, 2)
+          >>> net = TestDynamicShapeReshapeNet()
+          >>> output = net(input, new_shape)
+          >>> print(output)
+          [[0, 1], [2, 3]
+    """
+
+    @prim_attr_register
+    def __init__(self):
+        self.init_prim_io_names(inputs=["input"], outputs=["output"])
+
+    def check_shape(self, input_shape):
+        validator.check("input_shape rank", len(input_shape), "", 0, Rel.GT, self.name)
+
+    def check_dtype(self, input_dtype):
+        validator.check_subclass("input_dtype", input_dtype, mstype.tensor, self.name)
+
+class ErrorOnDynamicShapeInput(PrimitiveWithInfer):
+    """
+    This op is used for dynamic shape testing. The only purpose of this operator is
+    that it will throw a value error if the input is dynamically shaped.
+
+    Inputs:
+        - **input** (Tensor) - The tensor used for testing.
+
+    Outputs:
+        - **output** (Tensor) - Same shape, type and value as `input`.
+
+    Examples:
+          >>> # make a model, since dynamic shape operators must be in GRAPH_MODE
+          >>> class AssertDynamicShapeNet(nn.Cell):
+          >>>     def __init__(self):
+          >>>         super(AssertDynamicShapeNet, self).__init__()
+          >>>         self.convert_to_dynamic_shape = inner.GpuConvertToDynamicShape()
+          >>>         self.error_on_dynamic_shape_input = inner.ErrorOnDynamicShapeInput()
+          >>>
+          >>>     def construct(self, input, new_shape):
+          >>>         dynamic_shape_input = self.convert_to_dynamic_shape(input)
+          >>>         self.error_on_dynamic_shape_input(dynamic_shape_input)
+          >>>
+          >>> context.set_context(mode=context.GRAPH_MODE, device_target="GPU")
+          >>> input = Tensor(np.array([0])
+          >>> net = TestDynamicShapeReshapeNet()
+          >>> output = net(input, new_shape)
+          ValueError: Input is dynamically shaped.
+    """
+
+    @prim_attr_register
+    def __init__(self):
+        self.init_prim_io_names(inputs=["input"], outputs=["output"])
+
+    def infer_shape(self, input_shape):
+        shape = list(input_shape)
+
+        for dim in shape:
+            if dim == -1:
+                raise ValueError("Input is dynamically shaped.")
+
+        return input_shape
+
+    def infer_type(self, input_dtype):
+        validator.check_subclass("input_dtype", input_dtype, mstype.tensor, self.name)
+        return input_dtype
+
+    def infer_value(self, input_tensor):
+        return input_tensor
+
+
+class SequenceMask(PrimitiveWithCheck):
+    """
+    Returns a mask tensor representing the first N positions of each cell.
+
+    If lengths has shape [d_1, d_2, ..., d_n], then the resulting tensor mask has type dtype and shape
+    [d_1, d_2, ..., d_n, maxlen], with mask[i_1, i_2, ..., i_n, j] = (j < lengths[i_1, i_2, ..., i_n])
+
+    Inputs:
+        - **lengths** (Tensor) - Tensor to calculate the mask for. All values in this tensor should be
+          less than or equal to `maxlen`. Values greater than `maxlen` will be treated as `maxlen`.
+          Must be type int32 or int64.
+
+        - **maxlen** (int) - size of the last dimension of returned tensor. Must be positive and same
+          type as elements in `lengths`.
+
+    Outputs:
+        One mask tensor of shape lengths.shape + (maxlen,).
+
+    Supported Platforms:
+        ``GPU``
+
+    Examples:
+        >>> x = Tensor(np.array([[1, 3], [2, 0]]))
+        >>> sequence_mask = ops.SequenceMask()
+        >>> output = sequence_mask(x, 3)
+        >>> print(output)
+        [[[True, False, False],
+          [True, True, True]],
+         [[True, True, False],
+          [False, False, False]]]
+    """
+
+    @prim_attr_register
+    def __init__(self):
+        self.init_prim_io_names(inputs=["lengths", "maxlen"], outputs=["mask"])
+
+    def check_shape(self, lengths_shape, maxlen_shape):
+        validator.check("lengths_shape", len(lengths_shape), "", 0, Rel.GT, self.name)
+        validator.check("maxlen_shape", len(maxlen_shape), "", 0, Rel.EQ, self.name)
+
+    def check_dtype(self, lengths_dtype, maxlen_dtype):
+        validator.check_subclass("lengths_dtype", lengths_dtype, mstype.tensor, self.name)
+        validator.check_subclass("maxlen", maxlen_dtype, mstype.number, self.name)

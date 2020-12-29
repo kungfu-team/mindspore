@@ -26,7 +26,7 @@
 
 namespace mindspore {
 namespace kernel {
-constexpr int MAX_DIMS = 7;
+constexpr int MAX_DIMS = 8;
 template <typename T>
 class StridedSliceGpuKernel : public GpuKernel {
  public:
@@ -51,7 +51,8 @@ class StridedSliceGpuKernel : public GpuKernel {
   bool Init(const CNodePtr &kernel_node) override {
     input_shape_ = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 0);
     if (input_shape_.size() > MAX_DIMS) {
-      MS_LOG(ERROR) << "StridedSlice support support dims less than " << input_shape_.size();
+      MS_LOG(ERROR) << "StridedSlice support dims no more than " << MAX_DIMS << ", but the input shape is "
+                    << input_shape_.size();
       return false;
     }
 
@@ -81,9 +82,15 @@ class StridedSliceGpuKernel : public GpuKernel {
 
  private:
   void FillEmptyDims(const CNodePtr &kernel_node) {
-    begin_ = GetAttr<std::vector<int>>(kernel_node, "begin");
-    end_ = GetAttr<std::vector<int>>(kernel_node, "end");
-    strides_ = GetAttr<std::vector<int>>(kernel_node, "strides");
+    std::vector<int64_t> begin_me = GetAttr<std::vector<int64_t>>(kernel_node, "begin");
+    std::vector<int64_t> end_me = GetAttr<std::vector<int64_t>>(kernel_node, "end");
+    std::vector<int64_t> strides_me = GetAttr<std::vector<int64_t>>(kernel_node, "strides");
+    (void)std::transform(begin_me.begin(), begin_me.end(), std::back_inserter(begin_),
+                         [](const int64_t &value) { return static_cast<int>(value); });
+    (void)std::transform(end_me.begin(), end_me.end(), std::back_inserter(end_),
+                         [](const int64_t &value) { return static_cast<int>(value); });
+    (void)std::transform(strides_me.begin(), strides_me.end(), std::back_inserter(strides_),
+                         [](const int64_t &value) { return static_cast<int>(value); });
 
     for (size_t i = 0; i < MAX_DIMS; i++) {
       if (i < begin_.size()) {
@@ -111,7 +118,7 @@ class StridedSliceGpuKernel : public GpuKernel {
   }
 
   void ParseMasks(const CNodePtr &kernel_node) {
-    auto begin_mask_int = GetAttr<int>(kernel_node, "begin_mask");
+    auto begin_mask_int = static_cast<int64_t>(GetAttr<int64_t>(kernel_node, "begin_mask"));
     auto begin_mask = Dec2Bin(begin_mask_int);
     for (size_t i = 0; i < begin_mask.size(); i++) {
       if (begin_mask[i]) {
@@ -119,7 +126,7 @@ class StridedSliceGpuKernel : public GpuKernel {
       }
     }
 
-    auto end_mask_int = GetAttr<int>(kernel_node, "end_mask");
+    auto end_mask_int = static_cast<int64_t>(GetAttr<int64_t>(kernel_node, "end_mask"));
     auto end_mask = Dec2Bin(end_mask_int);
     for (size_t j = 0; j < end_mask.size(); j++) {
       if (end_mask[j]) {
@@ -127,7 +134,7 @@ class StridedSliceGpuKernel : public GpuKernel {
       }
     }
 
-    auto ellipsis_mask_int = GetAttr<int>(kernel_node, "ellipsis_mask");
+    auto ellipsis_mask_int = static_cast<int64_t>(GetAttr<int64_t>(kernel_node, "ellipsis_mask"));
     auto ellipsis_mask = Dec2Bin(ellipsis_mask_int);
     for (size_t k = 0; k < ellipsis_mask.size(); k++) {
       if (ellipsis_mask[k]) {
@@ -137,12 +144,22 @@ class StridedSliceGpuKernel : public GpuKernel {
       }
     }
 
-    auto shrink_axis_mask_str = GetAttr<int>(kernel_node, "shrink_axis_mask");
-    auto shrink_axis_mask = Dec2Bin(shrink_axis_mask_str);
-    for (size_t l = 0; l < shrink_axis_mask.size(); l++) {
-      if (shrink_axis_mask[l]) {
-        end_[l] = end_[l] > begin_[l] ? begin_[l] + 1 : begin_[l] - 1;
-        strides_[l] = end_[l] > begin_[l] ? 1 : -1;
+    auto new_axis_mask_int = static_cast<int64_t>(GetAttr<int64_t>(kernel_node, "new_axis_mask"));
+    auto new_axis_mask = Dec2Bin(new_axis_mask_int);
+    for (size_t l = 0; l < new_axis_mask.size(); l++) {
+      if (new_axis_mask[l]) {
+        begin_[l] = 0;
+        end_[l] = input_shape_[l];
+        strides_[l] = 1;
+      }
+    }
+
+    auto shrink_axis_mask_int = static_cast<int64_t>(GetAttr<int64_t>(kernel_node, "shrink_axis_mask"));
+    auto shrink_axis_mask = Dec2Bin(shrink_axis_mask_int);
+    for (size_t m = 0; m < shrink_axis_mask.size(); m++) {
+      if (shrink_axis_mask[m]) {
+        end_[m] = end_[m] > begin_[m] ? begin_[m] + 1 : begin_[m] - 1;
+        strides_[m] = end_[m] > begin_[m] ? 1 : -1;
       }
     }
   }

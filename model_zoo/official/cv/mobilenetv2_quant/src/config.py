@@ -24,7 +24,7 @@ config_ascend_quant = ed({
     "data_load_mode": "mindata",
     "epoch_size": 60,
     "start_epoch": 200,
-    "warmup_epochs": 1,
+    "warmup_epochs": 0,
     "lr": 0.3,
     "momentum": 0.9,
     "weight_decay": 4e-5,
@@ -34,17 +34,18 @@ config_ascend_quant = ed({
     "save_checkpoint_epochs": 1,
     "keep_checkpoint_max": 300,
     "save_checkpoint_path": "./checkpoint",
-    "quantization_aware": True,
 })
 
 config_gpu_quant = ed({
     "num_classes": 1000,
-    "batch_size": 134,
+    "image_height": 224,
+    "image_width": 224,
+    "batch_size": 300,
     "epoch_size": 60,
     "start_epoch": 200,
-    "warmup_epochs": 1,
-    "lr": 0.3,
-    "momentum": 0.9,
+    "warmup_epochs": 0,
+    "lr": 0.05,
+    "momentum": 0.997,
     "weight_decay": 4e-5,
     "label_smooth": 0.1,
     "loss_scale": 1024,
@@ -53,3 +54,14 @@ config_gpu_quant = ed({
     "keep_checkpoint_max": 300,
     "save_checkpoint_path": "./checkpoint",
 })
+
+def config_quant(device_target):
+    if device_target not in ["Ascend", "GPU"]:
+        raise ValueError("Unsupported device target: {}.".format(device_target))
+    configs = ed({
+        "Ascend": config_ascend_quant,
+        "GPU": config_gpu_quant
+    })
+    config = configs.Ascend if device_target == "Ascend" else configs.GPU
+    config["device_target"] = device_target
+    return config

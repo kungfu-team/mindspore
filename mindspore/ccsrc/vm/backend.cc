@@ -18,13 +18,13 @@
 #include <algorithm>
 #include <vector>
 
-#include "utils/log_adapter.h"
+#include "backend/session/session_factory.h"
 #include "ir/anf.h"
+#include "pybind_api/ir/base_ref_py.h"
 #include "utils/callbacks.h"
 #include "utils/convert_utils.h"
-#include "backend/session/session_factory.h"
+#include "utils/log_adapter.h"
 #include "utils/ms_utils.h"
-#include "pybind_api/ir/base_ref_py.h"
 #ifdef ENABLE_GE
 #include "utils/callbacks_ge.h"
 #endif
@@ -32,42 +32,64 @@
 namespace mindspore {
 namespace compile {
 bool Backend::GetCond(const BaseRef &c, bool *const value) { return BaseRefToBool(c, value); }
-bool Backend::GetIndex(const BaseRef &c, int *const value) { return BaseRefToInt(utils::cast<ValuePtr>(c), value); }
+bool Backend::GetIndex(const BaseRef &c, int64_t *const value) { return BaseRefToInt(utils::cast<ValuePtr>(c), value); }
 
-LinConvertResult MsBackend::MsConvert(const AnfNodePtrList &lst, const std::string &target) {
+Backend::Backend(const std::string &name) : name_(name) {
+  MS_LOG(DEBUG) << "select backend:" << name;
+  convert_fn_ = MsVmConvert;
+  is_multi_graph_sink_ = false;
+}
+
+LinConvertResult MsBackend::MsConvert(const GraphSegmentPtr &segment, const std::string &target) {
   MS_LOG(DEBUG) << "MsConvert";
+  MS_EXCEPTION_IF_NULL(segment);
   MS_EXCEPTION_IF_NULL(MsContext::GetInstance());
-  auto cached = g_ConvertCache.find(lst);
+  auto cached = g_ConvertCache.find(segment);
   if (cached != g_ConvertCache.end()) {
     return cached->second;
   }
-
   LinConvertResult result;
-
   FuncGraphPtr fg;
   AnfNodePtrList inputs;
   AnfNodePtrList outputs;
-
-  std::tie(fg, inputs, outputs) = TransformSegmentToAnfGraph(lst);
+  std::tie(fg, inputs, outputs) = TransformSegmentToAnfGraph(segment->nodes_);
   result.inputs = inputs;
   result.outputs = outputs;
   result.graph_id = kInvalidGraphId;
-  GraphId graph_id = kInvalidGraphId;
+  auto current_session = target_sess_;
   if (target != target_device_ && !target.empty()) {
     CreateOtherSession(target);
-    graph_id = other_sess_->CompileGraph(lst, outputs);
-  } else {
-    graph_id = target_sess_->CompileGraph(lst, outputs);
+    current_session = other_sess_;
+  }
+  MS_EXCEPTION_IF_NULL(current_session);
+  GraphId graph_id = current_session->CompileGraph(segment, outputs);
+  segment->graph_id_ = graph_id;
+  auto graph = current_session->GetGraph(graph_id);
+  MS_EXCEPTION_IF_NULL(graph);
+  for (auto &pre_segment : segment->pre_segments_) {
+    MS_EXCEPTION_IF_NULL(pre_segment);
+    auto pre_graph = target_sess_->GetGraph(pre_segment->graph_id_);
+    if (pre_graph == nullptr) {
+      pre_graph = other_sess_->GetGraph(pre_segment->graph_id_);
+    }
+    MS_EXCEPTION_IF_NULL(pre_graph);
+    pre_graph->AddPostGraph(graph);
+    graph->AddPreGraph(pre_graph);
+    MS_LOG(INFO) << "Link graph " << pre_segment->graph_id_ << " to " << graph_id;
   }
 
   if (MsContext::GetInstance()->get_param<bool>(MS_CTX_PRECOMPILE_ONLY)) {
     MS_LOG(INFO) << "PrecompileOnly, stop run graph";
     return result;
   }
-  if (target != target_device_ && !target.empty()) {
-    other_sess_->BuildGraph(graph_id);
-  } else if (!is_multi_graph_sink_) {
-    target_sess_->BuildGraph(graph_id);
+  auto ms_context = MsContext::GetInstance();
+  const bool pynative_mode = (ms_context->get_param<int>(MS_CTX_EXECUTION_MODE) == kPynativeMode);
+  if (!pynative_mode || target != "Ascend") {
+    if (target != target_device_ && !target.empty()) {
+      other_sess_->BuildGraph(graph_id);
+    } else if (!is_multi_graph_sink_) {
+      target_sess_->BuildGraph(graph_id);
+    }
   }
   result.run = std::make_shared<RunFunc>(
     [graph_id, target, this](const VectorRef &args) -> VectorRef { return MsRunGraph(graph_id, args, target); });
@@ -79,7 +101,7 @@ LinConvertResult MsBackend::MsConvert(const AnfNodePtrList &lst, const std::stri
   result.graph_id = graph_id;
 
   graph_id_map_[graph_id] = result;
-  (void)g_ConvertCache.emplace(lst, result);
+  (void)g_ConvertCache.emplace(segment, result);
   return result;
 }
 
@@ -135,12 +157,19 @@ VectorRef MsBackend::MsRunGraph(const GraphId &g, const VectorRef &args, const s
     PushInputTensor(arg, &inputs);
   }
 
+  auto ms_context = MsContext::GetInstance();
+  const bool pynative_mode = (ms_context->get_param<int>(MS_CTX_EXECUTION_MODE) == kPynativeMode);
+
   VectorRef outputs;
   // call ms rungraph (graphId, input ,output)
   if (target != target_device_ && !target.empty()) {
     other_sess_->RunGraphAsync(g, inputs, &outputs);
   } else {
-    target_sess_->RunGraphAsync(g, inputs, &outputs);
+    if (pynative_mode && target == "Ascend") {
+      target_sess_->RunOpsInGraph(g, inputs, &outputs);
+    } else {
+      target_sess_->RunGraphAsync(g, inputs, &outputs);
+    }
   }
 
   MS_LOG(DEBUG) << "RunGraph finished:" << outputs.size();
@@ -152,12 +181,6 @@ void MsBackend::Link(GraphId graph_id) {
     graph_id = target_sess_->GetFinalRunGraph();
   }
   target_sess_->BuildGraph(graph_id);
-}
-
-Backend::Backend(const std::string &name) : name_(name) {
-  MS_LOG(DEBUG) << "select backend:" << name;
-  convert_fn_ = backends[name_];
-  is_multi_graph_sink_ = false;
 }
 
 MsBackend::MsBackend(const std::string &name, const std::string &target, uint32_t device_id) : Backend(name) {
@@ -194,6 +217,5 @@ VectorRef MsBackend::RunGraph(GraphId graph_id, const VectorRef &args) { return 
 #ifdef ENABLE_DEBUGGER
 void MsBackend::SetDebugger() { target_sess_->SetDebugger(); }
 #endif
-
 }  // namespace compile
 }  // namespace mindspore

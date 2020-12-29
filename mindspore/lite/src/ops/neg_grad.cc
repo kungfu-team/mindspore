@@ -16,6 +16,10 @@
 
 #include "src/ops/neg_grad.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifndef PRIMITIVE_WRITEABLE
@@ -28,6 +32,10 @@ int NegGrad::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers
   return RET_OK;
 }
 
+PrimitiveC *NegGradCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<NegGrad>(primitive); }
+Registry NegGradRegistry(schema::PrimitiveType_NegGrad, NegGradCreator);
+
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

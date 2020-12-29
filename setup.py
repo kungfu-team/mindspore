@@ -23,7 +23,7 @@ from setuptools import setup, find_packages
 from setuptools.command.egg_info import egg_info
 from setuptools.command.build_py import build_py
 
-version = '1.0.0'
+version = '1.1.0'
 
 backend_policy = os.getenv('BACKEND_POLICY')
 device_target = os.getenv('BACKEND_TARGET')
@@ -109,15 +109,17 @@ def build_dependencies():
 build_dependencies()
 
 required_package = [
-    'numpy >= 1.17.0',
+    'numpy >= 1.17.0, <= 1.17.5',
     'protobuf >= 3.8.0',
     'asttokens >= 1.1.13',
     'pillow >= 6.2.0',
-    'scipy == 1.3.3',
+    'scipy >= 1.5.3',
     'easydict >= 1.9',
     'sympy >= 1.4',
     'cffi >= 1.13.2',
+    'wheel >= 0.32.0',
     'decorator >= 4.4.0',
+    'setuptools >= 40.8.0',
     'astunparse >= 1.6.3',
     'packaging >= 20.0'
 ]
@@ -129,8 +131,13 @@ package_data = {
         '*.dll',
         'lib/*.so*',
         'lib/*.a',
+        'lib/*.dylib*',
         '.commit_id',
-        'ms_serving'
+        'config/*',
+        'include/*',
+        'include/*/*',
+        'include/*/*/*',
+        'include/*/*/*/*'
     ]
 }
 
@@ -153,8 +160,6 @@ def update_permissions(path):
         for filename in filenames:
             file_fullpath = os.path.join(dirpath, filename)
             os.chmod(file_fullpath, stat.S_IREAD)
-            if filename == "ms_serving":
-                os.chmod(file_fullpath, stat.S_IREAD | stat.S_IEXEC)
 
 def bin_files():
     """

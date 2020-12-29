@@ -18,6 +18,10 @@
 #include <vector>
 #include <memory>
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -57,6 +61,11 @@ int MakeTuple::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffe
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *MakeTupleCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<MakeTuple>(primitive);
+}
+Registry MakeTupleRegistry(schema::PrimitiveType_MakeTuple, MakeTupleCreator);
 #endif
 }  // namespace lite
 }  // namespace mindspore

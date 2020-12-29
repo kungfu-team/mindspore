@@ -16,13 +16,18 @@
 
 #include "src/runtime/kernel/arm/int8/pooling_int8.h"
 #include "nnacl/int8/pooling_int8.h"
-#include "nnacl/fp32/cast.h"
+#include "nnacl/fp32/cast_fp32.h"
 #include "include/errorcode.h"
 #include "src/runtime/runtime_api.h"
+#include "src/kernel_registry.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
+
+using mindspore::lite::KernelRegistrar;
+using mindspore::lite::RET_MEMORY_FAILED;
+using mindspore::schema::PrimitiveType_Pooling;
 
 namespace mindspore::kernel {
 int PoolingInt8CPUKernel::Init() {
@@ -60,7 +65,10 @@ int PoolingInt8CPUKernel::ReSize() {
 
 int PoolingInt8CPUKernel::RunImpl(int task_id) {
   auto input_data = reinterpret_cast<int8_t *>(in_tensors_.at(kInputIndex)->MutableData());
+  MS_ASSERT(input_data);
   auto output_data = reinterpret_cast<int8_t *>(out_tensors_.at(kOutputIndex)->MutableData());
+  MS_ASSERT(output_data);
+  MS_ASSERT(pooling_param_);
   if (pooling_param_->pool_mode_ == PoolMode_MaxPool) {
     if (pooling_param_->quantize_) {
       MaxPoolingWithQuantInt8(input_data, output_data, pooling_param_, task_id);
@@ -88,11 +96,6 @@ int PoolingInt8Impl(void *cdata, int task_id) {
 }
 
 int PoolingInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare failed.";
-    return RET_ERROR;
-  }
   int error_code = ParallelLaunch(this->context_->thread_pool_, PoolingInt8Impl, this, thread_count_);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "poolingInt8 error error_code[" << error_code << "]";
@@ -100,4 +103,6 @@ int PoolingInt8CPUKernel::Run() {
   }
   return RET_OK;
 }
+
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Pooling, LiteKernelCreator<PoolingInt8CPUKernel>)
 }  // namespace mindspore::kernel

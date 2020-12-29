@@ -16,13 +16,21 @@
 
 #include "src/lite_kernel.h"
 #include <algorithm>
+#include <queue>
+#include <set>
+#include "src/tensor.h"
+#include "src/common/utils.h"
 
 namespace mindspore::kernel {
-
+using mindspore::lite::RET_ERROR;
+using mindspore::lite::RET_OK;
+#ifdef SUPPORT_TRAIN
 void *LiteKernel::workspace_ = nullptr;
 
 void LiteKernel::AllocWorkspace(size_t size) {
-  if (size == 0) return;
+  if (size == 0) {
+    return;
+  }
   workspace_ = malloc(size);
   if (workspace_ == nullptr) {
     MS_LOG(ERROR) << "fail to alloc " << size;
@@ -33,17 +41,33 @@ void LiteKernel::FreeWorkspace() {
   free(workspace_);
   workspace_ = nullptr;
 }
+#endif
+bool LiteKernel::IsReady(const std::vector<lite::Tensor *> &scope_tensors) {
+  return std::all_of(this->in_tensors().begin(), this->in_tensors().end(), [&](lite::Tensor *kernel_in_tensor) {
+    if (IsContain(scope_tensors, kernel_in_tensor)) {
+      return (kernel_in_tensor->IsConst() || kernel_in_tensor->IsGraphInput() || kernel_in_tensor->ref_count() >= 1);
+    } else {
+      return true;
+    }
+  });
+}
 
-void LiteKernel::InitOutTensorRefCount() {
+void LiteKernel::InitOutTensorInitRefCount() {
   for (auto *tensor : this->out_tensors_) {
-    tensor->SetRefCount(this->out_kernels_.size());
+    size_t init_ref_count = 0;
+    for (auto *post_kernel : this->out_kernels_) {
+      init_ref_count +=
+        std::count_if(post_kernel->in_tensors_.begin(), post_kernel->in_tensors_.end(),
+                      [&tensor](const lite::Tensor *post_kernel_in_tensor) { return post_kernel_in_tensor == tensor; });
+    }
+    tensor->set_init_ref_count(init_ref_count);
   }
 }
 
 int LiteKernel::DecOutTensorRefCount() {
   for (auto *tensor : this->out_tensors_) {
-    tensor->decRefCount();
-    if (0 >= tensor->RefCount()) {
+    tensor->DecRefCount();
+    if (0 >= tensor->ref_count()) {
       auto ret = tensor->FreeData();
       if (0 != ret) {
         MS_LOG(ERROR) << "Free tensor data failed";
@@ -54,12 +78,31 @@ int LiteKernel::DecOutTensorRefCount() {
   return 0;
 }
 
-int LiteKernel::Prepare() {
+int LiteKernel::FreeInWorkTensor() const {
+  for (auto &in_tensor : this->in_tensors_) {
+    MS_ASSERT(in_tensor != nullptr);
+    if (in_tensor->IsConst() || in_tensor->IsGraphInput()) {
+      continue;
+    }
+    MS_ASSERT(in_tensor->ref_count() > 0);
+    in_tensor->set_ref_count(in_tensor->ref_count() - 1);
+    if (in_tensor->ref_count() <= 0) {
+      auto ret = in_tensor->FreeData();
+      if (0 != ret) {
+        MS_LOG(ERROR) << "Free tensor data failed";
+        return ret;
+      }
+    }
+  }
+  return RET_OK;
+}
+
+int LiteKernel::PreProcess() {
   if (!InferShapeDone()) {
-    (const_cast<mindspore::lite::PrimitiveC *>(primitive_))->SetInferFlag(true);
+    (const_cast<mindspore::lite::PrimitiveC *>(primitive_))->set_infer_flag(true);
     auto ret = (const_cast<mindspore::lite::PrimitiveC *>(primitive_))->InferShape(in_tensors_, out_tensors_);
     if (ret != 0) {
-      (const_cast<mindspore::lite::PrimitiveC *>(primitive_))->SetInferFlag(false);
+      (const_cast<mindspore::lite::PrimitiveC *>(primitive_))->set_infer_flag(false);
       MS_LOG(ERROR) << "InferShape fail!";
       return ret;
     }
@@ -70,168 +113,275 @@ int LiteKernel::Prepare() {
     }
   }
 
-  auto &outputs = this->out_tensors();
-  for (auto *output : outputs) {
+  for (auto *output : this->out_tensors()) {
     MS_ASSERT(output != nullptr);
-    output->MallocData();
+    if (output->ElementsNum() >= lite::MAX_MALLOC_SIZE / static_cast<int>(sizeof(int64_t))) {
+      MS_LOG(ERROR) << "The size of output tensor is too big";
+      return RET_ERROR;
+    }
+    auto ret = output->MallocData();
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "MallocData failed";
+      return ret;
+    }
   }
   return RET_OK;
 }
 
-std::vector<kernel::LiteKernel *> LiteKernelUtil::SubgraphInputKernels(
-  const std::vector<kernel::LiteKernel *> &kernels) {
-  std::vector<kernel::LiteKernel *> input_kernels;
-  for (const auto &kernel : kernels) {
-    if (kernel->in_kernels().empty() && !kernel->in_tensors().empty()) {
-      input_kernels.emplace_back(kernel);
+int LiteKernel::PostProcess() {
+#ifdef SUPPORT_TRAIN
+  for (auto input_kernel : this->in_kernels()) {
+    MS_ASSERT(input_kernel != nullptr);
+    if (input_kernel->is_model_output()) {
       continue;
     }
-    for (const auto &input : kernel->in_kernels()) {
-      auto iter = std::find(kernels.begin(), kernels.end(), input);
-      auto item = std::find(input_kernels.begin(), input_kernels.end(), kernel);
-      if (iter == kernels.end() && item == input_kernels.end()) {
-        input_kernels.emplace_back(kernel);
+    auto ret = input_kernel->DecOutTensorRefCount();
+    if (0 != ret) {
+      MS_LOG(WARNING) << "DecOutTensorRefCount for kernel" << this->name() << " failed";
+    }
+  }
+  return RET_OK;
+#else
+  for (auto *output : this->out_tensors()) {
+    MS_ASSERT(output != nullptr);
+    output->ResetRefCount();
+  }
+  return FreeInWorkTensor();
+#endif
+}
+
+int LiteKernel::Run(const KernelCallBack &before, const KernelCallBack &after) {
+  if (before != nullptr) {
+    if (!before(TensorVectorCast(this->in_tensors_), TensorVectorCast(this->out_tensors_),
+                {this->name_, this->type_str()})) {
+      MS_LOG(WARNING) << "run kernel before_callback failed, name: " << this->name_;
+    }
+  }
+  auto ret = Run();
+  if (RET_OK != ret) {
+    MS_LOG(ERROR) << "run kernel failed, name: " << this->name_;
+    return ret;
+  }
+  if (after != nullptr) {
+    if (!after(TensorVectorCast(this->in_tensors_), TensorVectorCast(this->out_tensors_),
+               {this->name_, this->type_str()})) {
+      MS_LOG(ERROR) << "run kernel after_callback failed, name: " << this->name_;
+    }
+  }
+  return RET_OK;
+}
+
+std::string LiteKernel::ToString() const {
+  std::ostringstream oss;
+  oss << "LiteKernel: " << this->name_;
+  oss << ", Type: " << this->type_str();
+  oss << ", " << this->in_tensors_.size() << " InputTensors:";
+  for (auto tensor : in_tensors_) {
+    oss << " " << tensor;
+  }
+  oss << ", " << this->out_tensors_.size() << " OutputTensors:";
+  for (auto tensor : out_tensors_) {
+    oss << " " << tensor;
+  }
+  oss << ", " << this->in_kernels_.size() << " InputKernels:";
+  for (auto in_kernel : in_kernels_) {
+    oss << " " << in_kernel->name_;
+  }
+  oss << ", " << this->out_kernels_.size() << " OutputKernels:";
+  for (auto out_kernel : out_kernels_) {
+    oss << " " << out_kernel->name_;
+  }
+  return oss.str();
+}
+
+void LiteKernel::FindInoutKernels(const std::vector<kernel::LiteKernel *> &scope_kernels) {
+  // clean io kernels
+  this->in_kernels_.clear();
+  this->out_kernels_.clear();
+  // find io kernels
+  for (auto *scope_kernel : scope_kernels) {
+    if (scope_kernel == this) {
+      continue;
+    }
+    for (auto *tensor : this->in_tensors_) {
+      if (lite::IsContain(scope_kernel->out_tensors(), tensor)) {
+        if (!lite::IsContain(this->in_kernels(), scope_kernel)) {
+          this->AddInKernel(scope_kernel);
+        }
+      }
+    }
+    for (auto *tensor : this->out_tensors_) {
+      if (lite::IsContain(scope_kernel->in_tensors(), tensor)) {
+        if (!lite::IsContain(this->out_kernels(), scope_kernel)) {
+          this->AddOutKernel(scope_kernel);
+        }
       }
     }
   }
-  return input_kernels;
 }
 
-std::vector<kernel::LiteKernel *> LiteKernelUtil::SubgraphOutputKernels(
-  const std::vector<kernel::LiteKernel *> &kernels) {
-  std::vector<kernel::LiteKernel *> output_kernels;
+std::vector<kernel::LiteKernel *> LiteKernelUtil::SubgraphInputNodes(const std::vector<kernel::LiteKernel *> &kernels) {
+  std::set<kernel::LiteKernel *> input_nodes;
   for (const auto &kernel : kernels) {
-    if (kernel->out_kernels().empty() && !kernel->out_tensors().empty()) {
-      output_kernels.emplace_back(kernel);
+    // if kernel has no pre-kernel, kernel is a graph input, it must be a subgraph input
+    if (kernel->in_kernels().empty() && !kernel->in_tensors().empty()) {
+      input_nodes.insert(kernel);
+      continue;
+    }
+    auto all_input_tensors = kernel->in_tensors();
+    // remove all const tensor from input tensors
+    for (auto iter = all_input_tensors.begin(); iter != all_input_tensors.end();) {
+      if ((*iter)->IsConst()) {
+        iter = all_input_tensors.erase(iter);
+      } else {
+        iter++;
+      }
+    }
+    for (const auto &kernel_in_subgraph : kernels) {
+      // remove input tensors from kernel in subgraph
+      for (const auto *tensor : kernel_in_subgraph->out_tensors()) {
+        auto ret = std::find(all_input_tensors.begin(), all_input_tensors.end(), tensor);
+        if (ret != all_input_tensors.end()) {
+          all_input_tensors.erase(ret);
+        }
+      }
+    }
+    // if some input tensor is not from kernel in subgraph
+    if (!all_input_tensors.empty()) {
+      input_nodes.insert(kernel);
+    }
+  }
+  std::vector<kernel::LiteKernel *> result;
+  result.insert(result.end(), input_nodes.begin(), input_nodes.end());
+  return result;
+}
+
+std::vector<kernel::LiteKernel *> LiteKernelUtil::SubgraphOutputNodes(
+  const std::vector<kernel::LiteKernel *> &kernels) {
+  std::set<kernel::LiteKernel *> output_nodes;
+  // if kernel has no post-kernel, kernel is a graph output, it must be a subgraph output
+  for (const auto &kernel : kernels) {
+    if (kernel->is_model_output() || (kernel->out_kernels().empty() && !kernel->out_tensors().empty())) {
+      output_nodes.insert(kernel);
       continue;
     }
     for (const auto &output : kernel->out_kernels()) {
-      auto iter = std::find(kernels.begin(), kernels.end(), output);
-      auto item = std::find(output_kernels.begin(), output_kernels.end(), kernel);
-      if (iter == kernels.end() && item == output_kernels.end()) {
-        output_kernels.emplace_back(kernel);
+      auto out_kernel_in_graph = std::find(kernels.begin(), kernels.end(), output);
+      if (out_kernel_in_graph == kernels.end()) {
+        output_nodes.insert(kernel);
+        break;
       }
     }
   }
-  return output_kernels;
+  std::vector<kernel::LiteKernel *> result;
+  result.insert(result.end(), output_nodes.begin(), output_nodes.end());
+  return result;
 }
 
 std::vector<lite::Tensor *> LiteKernelUtil::SubgraphInputTensors(const std::vector<kernel::LiteKernel *> &kernels) {
-  std::vector<lite::Tensor *> input_tensors;
-  std::vector<lite::Tensor *> all_output_tensors;
-  for (const auto &kernel : kernels) {
-    all_output_tensors.insert(all_output_tensors.end(), kernel->out_tensors().begin(), kernel->out_tensors().end());
-  }
-  std::vector<kernel::LiteKernel *> input_kernels = SubgraphInputKernels(kernels);
-  for (const auto &kernel : input_kernels) {
-    for (const auto &tensor : kernel->in_tensors()) {
-      auto iter = std::find(all_output_tensors.begin(), all_output_tensors.end(), tensor);
-      if (iter == all_output_tensors.end() &&
-          !(tensor->category() == mindspore::lite::Tensor::CONST && tensor->data_c() != nullptr)) {
-        input_tensors.emplace_back(tensor);
+  std::set<lite::Tensor *> input_tensors;
+  std::vector<kernel::LiteKernel *> input_nodes = SubgraphInputNodes(kernels);
+  for (const auto &input_node : input_nodes) {
+    auto &in_node_in_kernels = input_node->in_kernels();
+    auto &in_node_in_tensors = input_node->in_tensors();
+    for (auto &in_node_in_tensor : in_node_in_tensors) {
+      if (in_node_in_tensor->IsGraphInput()) {
+        input_tensors.insert(in_node_in_tensor);
+      }
+    }
+    for (auto in_node_in_kernel : in_node_in_kernels) {
+      auto iter = std::find(kernels.begin(), kernels.end(), in_node_in_kernel);
+      if (iter != kernels.end()) {
+        continue;
+      }
+      auto &outer_in_kernel_out_tensors = in_node_in_kernel->out_tensors();
+      for (auto in_node_in_tensor : in_node_in_tensors) {
+        auto outer_in_kernel_out_tensors_iter =
+          std::find(outer_in_kernel_out_tensors.begin(), outer_in_kernel_out_tensors.end(), in_node_in_tensor);
+        if (outer_in_kernel_out_tensors_iter != outer_in_kernel_out_tensors.end()) {
+          input_tensors.insert(in_node_in_tensor);
+        }
       }
     }
   }
-  return input_tensors;
+  std::vector<lite::Tensor *> result;
+  result.insert(result.end(), input_tensors.begin(), input_tensors.end());
+  return result;
 }
 
 std::vector<lite::Tensor *> LiteKernelUtil::SubgraphOutputTensors(const std::vector<kernel::LiteKernel *> &kernels) {
-  std::vector<lite::Tensor *> output_tensors;
-  std::vector<lite::Tensor *> all_input_tensors;
-  for (const auto &kernel : kernels) {
-    all_input_tensors.insert(all_input_tensors.end(), kernel->in_tensors().begin(), kernel->in_tensors().end());
-  }
-  std::vector<kernel::LiteKernel *> output_kernels = SubgraphOutputKernels(kernels);
-  for (const auto &kernel : output_kernels) {
-    for (const auto &tensor : kernel->out_tensors()) {
-      auto iter = std::find(all_input_tensors.begin(), all_input_tensors.end(), tensor);
-      if (iter == all_input_tensors.end()) {
-        output_tensors.emplace_back(tensor);
+  std::set<lite::Tensor *> output_tensors;
+  std::vector<kernel::LiteKernel *> output_nodes = SubgraphOutputNodes(kernels);
+  for (const auto &output_kernel : output_nodes) {
+    auto &outer_out_kernels = output_kernel->out_kernels();
+    auto &out_kernel_out_tensors = output_kernel->out_tensors();
+    if (outer_out_kernels.empty()) {
+      for (auto out_kernel_out_tensor : out_kernel_out_tensors) {
+        output_tensors.insert(out_kernel_out_tensor);
       }
+      continue;
     }
-  }
-  return output_tensors;
-}
-
-void LiteKernelUtil::TopologicalSortKernels(std::vector<kernel::LiteKernel *> &kernels) {
-  for (auto *kernel : kernels) {
-    for (auto *search_kernel : kernels) {
-      if (search_kernel == kernel) {
+    for (auto outer_out_kernel : outer_out_kernels) {
+      auto iter = std::find(kernels.begin(), kernels.end(), outer_out_kernel);
+      if (iter != kernels.end()) {
         continue;
       }
-      for (auto *tensor : kernel->in_tensors()) {
-        if (lite::IsContain(search_kernel->out_tensors(), tensor)) {
-          kernel->AddInKernel(search_kernel);
-        }
-      }
-      for (auto *tensor : kernel->out_tensors()) {
-        if (lite::IsContain(search_kernel->in_tensors(), tensor)) {
-          kernel->AddOutKernel(search_kernel);
+      auto &outer_out_kernel_in_tensors = outer_out_kernel->in_tensors();
+      for (auto out_kernel_out_tensor : out_kernel_out_tensors) {
+        auto outer_out_kernel_in_tensors_iter =
+          std::find(outer_out_kernel_in_tensors.begin(), outer_out_kernel_in_tensors.end(), out_kernel_out_tensor);
+        if (outer_out_kernel_in_tensors_iter != outer_out_kernel_in_tensors.end()) {
+          output_tensors.insert(out_kernel_out_tensor);
         }
       }
     }
   }
+  std::vector<lite::Tensor *> result;
+  result.insert(result.end(), output_tensors.begin(), output_tensors.end());
+  return result;
 }
 
-void LiteKernelUtil::InitTensorRefCount(std::vector<kernel::LiteKernel *> &kernels) {
+int LiteKernelUtil::TopologicalSortKernels(std::vector<kernel::LiteKernel *> *kernels) {
+  auto old_kernels = *kernels;
+  kernels->clear();
+  std::queue<kernel::LiteKernel *> kernel_queue;
+  for (auto kernel : old_kernels) {
+    if (kernel->in_kernels().empty()) {
+      kernel_queue.push(kernel);
+      kernels->emplace_back(kernel);
+    }
+  }
+  while (!kernel_queue.empty()) {
+    auto cur_kernel = kernel_queue.front();
+    kernel_queue.pop();
+    MS_ASSERT(cur_kernel != nullptr);
+    auto next_kernels = cur_kernel->out_kernels();
+    for (auto next_kernel : next_kernels) {
+      auto in_kernels = next_kernel->in_kernels();
+      if (lite::IsContain(*kernels, const_cast<kernel::LiteKernel *>(next_kernel))) {
+        MS_LOG(ERROR) << "TopologicalSortKernels failed, loop exist";
+        return RET_ERROR;
+      }
+      if (std::all_of(in_kernels.begin(), in_kernels.end(), [&](const kernel::LiteKernel *in_kernel) {
+            return lite::IsContain(*kernels, const_cast<kernel::LiteKernel *>(in_kernel));
+          })) {
+        kernel_queue.push(next_kernel);
+      }
+    }
+  }
+  if (kernels->size() != old_kernels.size()) {
+    MS_LOG(ERROR) << "TopologicalSortKernels failed, kernels size before sort: " << old_kernels.size()
+                  << ", kernels size after sort: " << kernels->size();
+    return RET_ERROR;
+  }
+  return RET_OK;
+}
+
+void LiteKernelUtil::InitTensorInitRefCount(std::vector<kernel::LiteKernel *> &kernels) {
   for (auto *kernel : kernels) {
-    kernel->InitOutTensorRefCount();
+    kernel->InitOutTensorInitRefCount();
   }
 }
 
-int LiteKernelUtil::SetInput(LiteKernel &kernelMod, std::vector<lite::Tensor *> inputs) { return -1; }
-
-float *LiteKernelUtil::DequantWeight(lite::Tensor *input_tensor) {
-  MS_ASSERT(input_tensor != nullptr);
-  if (input_tensor->data_type() != kNumberTypeInt8) {
-    MS_LOG(ERROR) << "conv weight input type error" << input_tensor->data_type();
-    return nullptr;
-  }
-  if (input_tensor->GetQuantParams().empty()) {
-    MS_LOG(ERROR) << "no quant param";
-    return nullptr;
-  }
-  const auto *quant_datas = static_cast<const int8_t *>(input_tensor->MutableData());
-  auto *dequant_datas = static_cast<float *>(malloc(input_tensor->ElementsNum() * sizeof(float)));
-  if (dequant_datas == nullptr) {
-    MS_LOG(ERROR) << "malloc faile";
-    return nullptr;
-  }
-
-  if (input_tensor->GetQuantParams().size() != kPerTensor) {
-    size_t channels = static_cast<size_t>(input_tensor->Batch());
-    if (input_tensor->GetQuantParams().size() != channels) {
-      MS_LOG(ERROR) << "Quant param not equal channel num " << input_tensor->GetQuantParams().size() << channels;
-      free(dequant_datas);
-      return nullptr;
-    }
-    size_t per_channel_size = input_tensor->ElementsNum() / channels;
-    auto quant_param = input_tensor->GetQuantParams();
-    for (size_t i = 0; i < channels; i++) {
-      auto param = quant_param.at(i);
-      auto scale = param.scale;
-      auto zero_point = param.zeroPoint;
-      auto var_corr = param.var_corr;
-      auto mean_corr = param.mean_corr;
-      if (var_corr < 0 || var_corr > 10) {
-        MS_LOG(WARNING) << "unexpeted var_corr: " << var_corr;
-        var_corr = 1;
-      }
-      for (size_t j = 0; j < per_channel_size; j++) {
-        auto dequant_data = (quant_datas[per_channel_size * i + j] - zero_point) * scale;
-        dequant_datas[per_channel_size * i + j] = static_cast<float>(dequant_data * var_corr + mean_corr);
-      }
-    }
-  } else {
-    auto quant_param = input_tensor->GetQuantParams();
-    auto param = quant_param.front();
-    auto scale = param.scale;
-    auto zero_point = param.zeroPoint;
-    for (int64_t j = 0; j < input_tensor->ElementsNum(); j++) {
-      dequant_datas[j] = static_cast<float>((quant_datas[j] - zero_point) * scale);
-    }
-  }
-
-  return dequant_datas;
-}
+int LiteKernelUtil::SetInput(LiteKernel &kernelMod, const std::vector<lite::Tensor *> &inputs) { return -1; }
 }  // namespace mindspore::kernel

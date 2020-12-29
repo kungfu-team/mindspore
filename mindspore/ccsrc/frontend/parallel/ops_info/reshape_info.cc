@@ -39,7 +39,7 @@ Status ReshapeInfo::CheckStrategy(const StrategyPtr &strategy) { return CheckStr
 Status ReshapeInfo::InferDevMatrixShape() {
   Strategys stra = strategy_->GetInputDim();
   input_strategy_ = stra.at(0);
-  dev_matrix_shape_.push_back(input_strategy_[0]);
+  dev_matrix_shape_ = stra.at(0);
   return SUCCESS;
 }
 
@@ -101,8 +101,8 @@ Status ReshapeInfo::GetParameterInput() {
 
   for (auto &element : elements) {
     MS_EXCEPTION_IF_NULL(element);
-    if (element->isa<Int32Imm>()) {
-      int32_t axis = element->cast<Int32ImmPtr>()->value();
+    if (element->isa<Int64Imm>()) {
+      int64_t axis = element->cast<Int64ImmPtr>()->value();
       parameter_input_v_.push_back(axis);
     } else {
       MS_LOG(ERROR) << name_ << ": The value of axis must be int32.";
@@ -113,7 +113,7 @@ Status ReshapeInfo::GetParameterInput() {
 }
 
 Status ReshapeInfo::ComputeReplaceOp() {
-  RankList dev_list = global_device_list();
+  RankList dev_list = stage_device_list();
   TensorRedistribution tensor_redistribution(!is_generating_costs_, true);
   if (tensor_redistribution.Init(input_layout_, output_layout_, dev_list) == FAILED) {
     if (is_generating_costs_) {
@@ -162,17 +162,13 @@ Status ReshapeInfo::InferTensorMap() {
   }
 
   Shape tensor_map_index_input;
-  tensor_map_index_input.push_back(0);
-
-  for (size_t j = 1; j < inputs_shape_[0].size(); ++j) {
-    tensor_map_index_input.push_back(MAP_NONE);
+  for (size_t j = 0; j < inputs_shape_[0].size(); ++j) {
+    tensor_map_index_input.push_back((int64_t)(inputs_shape_[0].size() - j - 1));
   }
   inputs_tensor_map_.push_back(tensor_map_index_input);
 
   Shape tensor_map_index_output;
-  tensor_map_index_output.push_back(0);
-
-  for (size_t j = 1; j < outputs_shape_[0].size(); ++j) {
+  for (size_t j = 0; j < outputs_shape_[0].size(); ++j) {
     tensor_map_index_output.push_back(MAP_NONE);
   }
   outputs_tensor_map_.push_back(tensor_map_index_output);
@@ -186,8 +182,7 @@ Status ReshapeInfo::InferTensorMap() {
 Strategys ReshapeInfo::GetOutputsStrategy() {
   Strategys outputs_strategy;
   Dimensions strategy;
-  strategy.push_back(input_strategy_[0]);
-  for (size_t j = 1; j < outputs_shape_[0].size(); ++j) {
+  for (size_t j = 0; j < outputs_shape_[0].size(); ++j) {
     strategy.push_back(1);
   }
   outputs_strategy.push_back(strategy);
@@ -294,13 +289,7 @@ void ReshapeInfo::InferTensorInfoByLayout() {
 Status ReshapeInfo::GetAttrs() { return GetParameterInput(); }
 
 void ReshapeInfo::device_number(const StrategyPtr &strategy) {
-  int32_t stage = 0;
-  if (strategy != nullptr) {
-    stage = strategy->GetInputStage();
-  }
-  CheckGlobalDeviceManager();
-  global_device_list_ = g_device_manager->GetDeviceListByStageId(stage);
-  dev_num_ = SizeToInt(global_device_list_.size());
+  dev_num_ = stage_device_size_;
   MS_ASSERT(dev_num_ > 0);
 }
 
@@ -403,7 +392,7 @@ void ReshapeInfo::SetCostForReshapeWithParameter() {
 
 void ReshapeInfo::SetCostForReshape(const mindspore::parallel::StrategyPtr &strategy) {
   MS_EXCEPTION_IF_NULL(strategy);
-  int32_t stage_id = strategy->GetInputStage();
+  int64_t stage_id = strategy->GetInputStage();
   double computation_cost =
     operator_cost()->GetForwardComputationCost(inputs_tensor_info_, outputs_tensor_info_, stage_id);
   double communication_cost = operator_cost()->GetCommCost(inputs_tensor_info_, outputs_tensor_info_, stage_id);
@@ -425,7 +414,7 @@ void ReshapeInfo::SetCostForReshape(const mindspore::parallel::StrategyPtr &stra
   strategy_cost_.emplace_back(swc);
 }
 
-Status ReshapeInfo::GenerateStrategies(int32_t stage_id) {
+Status ReshapeInfo::GenerateStrategies(int64_t stage_id) {
   if (GetAttrs() != SUCCESS) {
     MS_LOG(ERROR) << name_ << ": GetAttrs failed.";
     return FAILED;
@@ -449,7 +438,7 @@ Status ReshapeInfo::GenerateStrategies(int32_t stage_id) {
 
 Status ReshapeInfo::GenetateStrategyCosts(const std::vector<std::shared_ptr<StrategyWithCost>> &pre_stra_costs,
                                           const std::vector<std::shared_ptr<StrategyWithCost>> &next_stra_costs,
-                                          int32_t out_index, int32_t in_index, bool is_prev_param) {
+                                          int64_t out_index, int64_t in_index, bool is_prev_param) {
   is_generating_costs_ = true;
   for (auto pre_stra_cost : pre_stra_costs) {
     std::vector<TensorInfo> pre_out_tensor_infos;
@@ -458,7 +447,7 @@ Status ReshapeInfo::GenetateStrategyCosts(const std::vector<std::shared_ptr<Stra
     } else {
       pre_out_tensor_infos = pre_stra_cost->outputs_ptr;
     }
-    if (pre_out_tensor_infos.size() <= IntToSize(out_index)) {
+    if (pre_out_tensor_infos.size() <= LongToSize(out_index)) {
       MS_LOG(ERROR) << "out_index is out of range of the tensor_infos in setting reshape's input_layout";
       return FAILED;
     }
@@ -482,16 +471,14 @@ Status ReshapeInfo::GenetateStrategyCosts(const std::vector<std::shared_ptr<Stra
     }
     for (auto next_stra_cost : next_stra_costs) {
       std::vector<TensorInfo> next_in_tensor_infos = next_stra_cost->inputs_ptr;
-      if (next_in_tensor_infos.size() <= IntToSize(in_index)) {
+      if (next_in_tensor_infos.size() <= LongToSize(in_index)) {
         MS_LOG(ERROR) << "in_index is out of range of the tensor_infos in setting reshape's output_layout";
         return FAILED;
       }
       TensorInfo next_in_tensor_info = next_in_tensor_infos[in_index];
       SetOutputLayout(next_in_tensor_info.tensor_layout());
-      if (Init(nullptr) == FAILED) {
-        MS_LOG(DEBUG) << "Failure:operator reshape init failed";
-        continue;
-      }
+      ResetQueueMember();
+      InferTensorInfoByLayout();
       SetCostForReshape(reshape_stra);
     }
   }

@@ -17,6 +17,10 @@
 #include "src/ops/mul.h"
 #include <memory>
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -72,6 +76,9 @@ int Mul::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::Fl
   return RET_OK;
 }
 
+PrimitiveC *MulCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Mul>(primitive); }
+Registry MulRegistry(schema::PrimitiveType_Mul, MulCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

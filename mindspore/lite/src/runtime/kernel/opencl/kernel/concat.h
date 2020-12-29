@@ -19,34 +19,40 @@
 
 #include <vector>
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
-#include "src/runtime/kernel/arm/base/concat_base.h"
+#include "nnacl/concat_parameter.h"
 
 namespace mindspore::kernel {
 
 class ConcatOpenCLKernel : public OpenCLKernel {
  public:
-  explicit ConcatOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                              const std::vector<lite::Tensor *> &outputs)
+  ConcatOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
+                     const std::vector<lite::Tensor *> &outputs)
       : OpenCLKernel(parameter, inputs, outputs) {}
 
-  ~ConcatOpenCLKernel() override{};
+  ~ConcatOpenCLKernel() override = default;
 
-  int Init() override;
+  int Prepare() override;
 
-  int ReSize() override;
-
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
   int Run() override;
 
-  int RunAxis0();
-
-  int GetImageSize(size_t idx, std::vector<size_t> *img_size) override;
-
-  int IntegraShapeToXYZ();
+ private:
+  std::vector<size_t> local;
+  uint32_t OH = {1};
+  uint32_t OW = {1};
+  uint32_t OC = {1};
+  std::vector<size_t> global;
+  bool Align_{true};
+  bool enable_fp16_{false};
+  cl_int stride_w{1};
+  cl_int4 in_shape_{};
+  cl_int4 out_shape_{};
+  int axis_{0};
 
  private:
-  cl::Kernel kernel_;
-  std::vector<cl_int3> XYZShape;
-  cl_int4 shape_nhwc;
+  int RunAxis0();
 };
 
 }  // namespace mindspore::kernel

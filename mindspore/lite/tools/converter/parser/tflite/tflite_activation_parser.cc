@@ -18,72 +18,44 @@
 #include <memory>
 #include <vector>
 #include <string>
-#include <map>
+#include "src/ops/activation.h"
+#include "src/ops/primitive_c.h"
+#include "tools/converter/parser/tflite/tflite_util.h"
 
-namespace mindspore {
-namespace lite {
-STATUS TfliteActivationParser::Parse(TfliteTensorsInfo *tensors_info,
-                                     const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                     const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
+namespace mindspore::lite {
+lite::PrimitiveC *TfliteActivationParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                             const std::unique_ptr<tflite::ModelT> &tflite_model) {
   std::unique_ptr<schema::ActivationT> attr = std::make_unique<schema::ActivationT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
-  std::vector<std::string> node_name_str;
-  Split(op->name, &node_name_str, "-");
-  const char *node_name = node_name_str.data()->c_str();
-  if (std::strcmp(node_name, "Relu") == 0) {
-    MS_LOG(DEBUG) << "parse TfliteReluParser";
-    attr->type = schema::ActivationType_RELU;
-  } else if (std::strcmp(node_name, "Relu6") == 0) {
-    MS_LOG(DEBUG) << "parse TfliteRelu6Parser";
-    attr->type = schema::ActivationType_RELU6;
-  } else if (std::strcmp(node_name, "Tanh") == 0) {
-    MS_LOG(DEBUG) << "parse TfliteTanhParser";
-    attr->type = schema::ActivationType_TANH;
-  } else if (std::strcmp(node_name, "Logistic") == 0) {
-    MS_LOG(DEBUG) << "parse TfliteLogisticParser";
-    attr->type = schema::ActivationType_SIGMOID;
-  } else if (std::strcmp(node_name, "HardSwish") == 0) {
-    MS_LOG(DEBUG) << "parse TfliteHardSwishParser";
-    attr->type = schema::ActivationType_HSWISH;
-  } else if (std::strcmp(node_name, "LeakyRelu") == 0) {
+  auto tflite_op_type = (tflite_model->operator_codes[tflite_op->opcode_index])->builtin_code;
+  auto ms_op_type = GetMSOpType(tflite_op_type);
+  if (kActivationTypeMap.find(ms_op_type) == kActivationTypeMap.end()) {
+    MS_LOG(ERROR) << ms_op_type << "is a not supported activation type";
+    return nullptr;
+  }
+  attr->type = kActivationTypeMap.find(GetMSOpType(tflite_op_type))->second;
+  if (attr->type == schema::ActivationType_LEAKY_RELU) {
     const auto &tflite_attr = tflite_op->builtin_options.AsLeakyReluOptions();
     if (tflite_attr == nullptr) {
-      MS_LOG(ERROR) << "get op: " << op->name.c_str() << " attr failed";
-      return RET_NULL_PTR;
+      MS_LOG(ERROR) << "get op: " << GetMSOpType(tflite_op_type) << " attr failed";
+      return nullptr;
     }
     attr->alpha = tflite_attr->alpha;
-    attr->type = schema::ActivationType_LEAKY_RELU;
   }
-
-  op->primitive->value.type = schema::PrimitiveType_Activation;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  primitive->value.type = schema::PrimitiveType_Activation;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_TfliteReluParser("Relu", new TfliteReluParser());
-TfliteNodeRegister g_TfliteRelu6Parser("Relu6", new TfliteRelu6Parser());
-TfliteNodeRegister g_TfliteTanhParser("Tanh", new TfliteTanhParser());
-TfliteNodeRegister g_TfliteHardSwishParser("HardSwish", new TfliteHardSwishParser());
-TfliteNodeRegister g_tfliteLogisticParser("Logistic", new TfliteLogisticParser());
-TfliteNodeRegister g_TfliteLeakyReluParser("LeakyRelu", new TfliteLeakyReluParser());
-}  // namespace lite
-}  // namespace mindspore
+TfliteNodeRegister g_TfliteReluParser(tflite::BuiltinOperator_RELU, new TfliteActivationParser());
+TfliteNodeRegister g_TfliteRelu6Parser(tflite::BuiltinOperator_RELU6, new TfliteActivationParser());
+TfliteNodeRegister g_TfliteTanhParser(tflite::BuiltinOperator_TANH, new TfliteActivationParser());
+TfliteNodeRegister g_TfliteSwishParser(tflite::BuiltinOperator_HARD_SWISH, new TfliteActivationParser());
+TfliteNodeRegister g_tfliteLogisticParser(tflite::BuiltinOperator_LOGISTIC, new TfliteActivationParser());
+TfliteNodeRegister g_TfliteLeakyReluParser(tflite::BuiltinOperator_LEAKY_RELU, new TfliteActivationParser());
+}  // namespace mindspore::lite

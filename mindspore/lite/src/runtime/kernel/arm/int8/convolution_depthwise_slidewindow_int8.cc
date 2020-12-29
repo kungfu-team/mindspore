@@ -29,9 +29,9 @@ using mindspore::schema::PrimitiveType_DepthwiseConv2D;
 
 namespace mindspore::kernel {
 ConvolutionDepthwiseSWInt8CPUKernel::~ConvolutionDepthwiseSWInt8CPUKernel() {
-  if (sliding != nullptr) {
-    delete sliding;
-    sliding = nullptr;
+  if (sliding_ != nullptr) {
+    delete sliding_;
+    sliding_ = nullptr;
   }
   if (packed_weight_ != nullptr) {
     free(packed_weight_);
@@ -44,7 +44,7 @@ ConvolutionDepthwiseSWInt8CPUKernel::~ConvolutionDepthwiseSWInt8CPUKernel() {
 int ConvolutionDepthwiseSWInt8CPUKernel::InitWeightBias() {
   // init weight, int8 -> int16
   // o, h, w, i -> o/8, h, w, i, 8; o == group, i == 1
-  auto weight_tensor = in_tensors_[kWeightIndex];
+  auto weight_tensor = in_tensors_.at(kWeightIndex);
   auto origin_weight = reinterpret_cast<int8_t *>(weight_tensor->MutableData());
   int OC8 = UP_DIV(weight_tensor->Batch(), C8NUM);
   int pack_weight_size = C8NUM * OC8 * weight_tensor->Height() * weight_tensor->Width();
@@ -72,7 +72,7 @@ int ConvolutionDepthwiseSWInt8CPUKernel::InitWeightBias() {
   return RET_OK;
 }
 
-int ConvolutionDepthwiseSWInt8CPUKernel::InitBuffer() {
+int ConvolutionDepthwiseSWInt8CPUKernel::InitPackedInputOutput() {
   if (conv_param_->input_channel_ % C8NUM != 0) {
     need_align_ = true;
 
@@ -87,7 +87,7 @@ int ConvolutionDepthwiseSWInt8CPUKernel::InitBuffer() {
     int pack_output_size = conv_param_->output_batch_ * conv_param_->output_h_ * conv_param_->output_w_ * C8NUM *
                            UP_DIV(conv_param_->output_channel_, C8NUM);
     packed_output_ = reinterpret_cast<int8_t *>(context_->allocator->Malloc(pack_output_size * sizeof(int8_t)));
-    if (packed_input_ == nullptr) {
+    if (packed_output_ == nullptr) {
       MS_LOG(ERROR) << "Malloc buffer failed.";
       return RET_ERROR;
     }
@@ -162,15 +162,15 @@ int ConvolutionDepthwiseSWInt8CPUKernel::ReinitQuantParam() {
     MS_LOG(ERROR) << "malloc input_zp_ failed.";
     return RET_ERROR;
   }
-  if (input_tensor->GetQuantParams().size() == kPerTensor) {
+  if (input_tensor->quant_params().size() == kPerTensor) {
     for (int i = 0; i < channel; i++) {
-      auto input_quant_arg = input_tensor->GetQuantParams().front();
+      auto input_quant_arg = input_tensor->quant_params().front();
       input_zp_[i] = input_quant_arg.zeroPoint;
       input_scale_[i] = input_quant_arg.scale;
     }
   } else {
     for (int i = 0; i < channel; i++) {
-      auto input_quant_arg = input_tensor->GetQuantParams()[i];
+      auto input_quant_arg = input_tensor->quant_params()[i];
       input_zp_[i] = input_quant_arg.zeroPoint;
       input_scale_[i] = input_quant_arg.scale;
     }
@@ -187,15 +187,15 @@ int ConvolutionDepthwiseSWInt8CPUKernel::ReinitQuantParam() {
     MS_LOG(ERROR) << "malloc output_zp_ failed.";
     return RET_ERROR;
   }
-  if (output_tensor->GetQuantParams().size() == kPerTensor) {
+  if (output_tensor->quant_params().size() == kPerTensor) {
     for (int i = 0; i < channel; i++) {
-      auto output_quant_arg = output_tensor->GetQuantParams().front();
+      auto output_quant_arg = output_tensor->quant_params().front();
       output_zp_[i] = output_quant_arg.zeroPoint;
       output_scale_[i] = output_quant_arg.scale;
     }
   } else {
     for (int i = 0; i < channel; i++) {
-      auto output_quant_arg = output_tensor->GetQuantParams()[i];
+      auto output_quant_arg = output_tensor->quant_params()[i];
       output_zp_[i] = output_quant_arg.zeroPoint;
       output_scale_[i] = output_quant_arg.scale;
     }
@@ -238,14 +238,14 @@ int ConvolutionDepthwiseSWInt8CPUKernel::ReinitQuantParam() {
     return RET_ERROR;
   }
   auto weight_tensor = in_tensors_.at(kWeightIndex);
-  if (weight_tensor->GetQuantParams().size() == kPerTensor) {
+  if (weight_tensor->quant_params().size() == kPerTensor) {
     for (int i = 0; i < channel; i++) {
-      auto weight_quant_arg = weight_tensor->GetQuantParams().front();
+      auto weight_quant_arg = weight_tensor->quant_params().front();
       weight_scale_[i] = weight_quant_arg.scale;
     }
   } else {
     for (int i = 0; i < channel; i++) {
-      auto weight_quant_arg = weight_tensor->GetQuantParams()[i];
+      auto weight_quant_arg = weight_tensor->quant_params()[i];
       weight_scale_[i] = weight_quant_arg.scale;
     }
   }
@@ -270,21 +270,11 @@ int ConvolutionDepthwiseSWInt8CPUKernel::ReinitQuantParam() {
 }
 
 int ConvolutionDepthwiseSWInt8CPUKernel::Init() {
-  sliding = new (std::nothrow) SlidingWindowParam;
-  if (sliding == nullptr) {
+  sliding_ = new (std::nothrow) SlidingWindowParam;
+  if (sliding_ == nullptr) {
     MS_LOG(ERROR) << "new sliding window param.";
     return RET_ERROR;
   }
-  if (!InferShapeDone()) {
-    return RET_OK;
-  }
-  return ReSize();
-}
-
-int ConvolutionDepthwiseSWInt8CPUKernel::ReSize() {
-  ConvolutionBaseCPUKernel::Init();
-  InitSlidingParamConvDw(sliding, conv_param_, C8NUM);
-
   auto ret = ConvolutionBaseCPUKernel::SetQuantParam();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Set quant param failed.";
@@ -295,18 +285,26 @@ int ConvolutionDepthwiseSWInt8CPUKernel::ReSize() {
     MS_LOG(ERROR) << "reinit quant param failed.";
     return ret;
   }
-
   ret = InitWeightBias();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Depthwise int8 InitWeightBias error!";
     return ret;
   }
+  if (!InferShapeDone()) {
+    return RET_OK;
+  }
+  return ReSize();
+}
+
+int ConvolutionDepthwiseSWInt8CPUKernel::ReSize() {
+  ConvolutionBaseCPUKernel::Init();
+  InitSlidingParamConvDw(sliding_, conv_param_, C8NUM);
   return RET_OK;
 }
 
 int ConvolutionDepthwiseSWInt8CPUKernel::Execute(int task_id) {
-  ConvDwSWInt8(packed_output_, packed_input_, packed_weight_, reinterpret_cast<int32_t *>(bias_data_), input_zp_,
-               output_zp_, conv_param_, sliding, task_id);
+  ConvDwInt8SW(packed_output_, packed_input_, packed_weight_, reinterpret_cast<int32_t *>(bias_data_), input_zp_,
+               output_zp_, conv_param_, sliding_, task_id);
   return RET_OK;
 }
 
@@ -321,19 +319,10 @@ int ConvDwSWInt8Run(void *cdata, int task_id) {
 }
 
 int ConvolutionDepthwiseSWInt8CPUKernel::Run() {
-  if (conv_param_->input_channel_ != conv_param_->output_channel_) {
-    MS_LOG(ERROR) << "Only support input channel equals output channel.";
-    return RET_ERROR;
-  }
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare failed.";
-    return RET_ERROR;
-  }
-
-  ret = InitBuffer();
+  auto ret = InitPackedInputOutput();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Depthwise int8 ReSize error!";
+    FreePackedInputOutput();
     return ret;
   }
 
@@ -354,16 +343,22 @@ int ConvolutionDepthwiseSWInt8CPUKernel::Run() {
   ret = ParallelLaunch(this->context_->thread_pool_, ConvDwSWInt8Run, this, conv_param_->thread_num_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "ConvDwSWInt8Run error: error_code[" << ret << "]";
-    return RET_ERROR;
   }
 
   if (need_align_) {
     PackNHWC8ToNHWCInt8(packed_output_, output_addr, conv_param_->output_batch_,
                         conv_param_->output_h_ * conv_param_->output_w_, conv_param_->output_channel_);
-    context_->allocator->Free(packed_input_);
-    context_->allocator->Free(packed_output_);
   }
-  return RET_OK;
+  FreePackedInputOutput();
+  return ret;
 }
 
+void ConvolutionDepthwiseSWInt8CPUKernel::FreePackedInputOutput() {
+  if (need_align_) {
+    context_->allocator->Free(packed_input_);
+    context_->allocator->Free(packed_output_);
+    packed_input_ = nullptr;
+    packed_output_ = nullptr;
+  }
+}
 }  // namespace mindspore::kernel

@@ -15,19 +15,19 @@
  */
 
 #include "src/ops/unstack.h"
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
 
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
-int Unstack::GetNum() const { return this->primitive_->value.AsUnstack()->num; }
 int Unstack::GetAxis() const { return this->primitive_->value.AsUnstack()->axis; }
 
-void Unstack::SetNum(int num) { this->primitive_->value.AsUnstack()->num = num; }
 void Unstack::SetAxis(int axis) { this->primitive_->value.AsUnstack()->axis = axis; }
 
 #else
 
-int Unstack::GetNum() const { return this->primitive_->value_as_Unstack()->num(); }
 int Unstack::GetAxis() const { return this->primitive_->value_as_Unstack()->axis(); }
 int Unstack::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) {
   MS_ASSERT(nullptr != primitive);
@@ -42,6 +42,9 @@ int Unstack::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *UnstackCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Unstack>(primitive); }
+Registry UnstackRegistry(schema::PrimitiveType_Unstack, UnstackCreator);
 #endif
 
 int Unstack::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outputs) {
@@ -57,10 +60,10 @@ int Unstack::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outp
   for (auto &out : outputs) {
     MS_ASSERT(out != nullptr);
     out->set_data_type(input->data_type());
-    out->SetFormat(input->GetFormat());
+    out->set_format(input->format());
   }
-  if (!GetInferFlag()) {
-    return RET_OK;
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   std::vector<int> output_shape;
   for (size_t i = 0; i < input_shape.size(); ++i) {

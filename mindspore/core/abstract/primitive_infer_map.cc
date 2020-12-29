@@ -37,28 +37,50 @@ PrimitiveEvalImplMap &GetPrimitiveToEvalImplMap() {
     // Maths
     {prim::kPrimMaximumGrad, {InferImplMinOrMaxGrad, true}},
     {prim::kPrimMinimumGrad, {InferImplMinOrMaxGrad, true}},
-
     {prim::kPrimMul, {InferImplMul, true}},
     {prim::kPrimTensorAdd, {InferImplTensorAdd, true}},
     {prim::kPrimSquare, {InferImplSquare, true}},
-
     {prim::kPrimSqrt, {InferImplSqrt, true}},
+    {prim::kPrimSqrtGrad, {InferImplSqrtGrad, true}},
+    {prim::kPrimSub, {InferImplSub, true}},
+    {prim::kPrimEqual, {InferImplEqual, true}},
+    {prim::kPrimReduceSum, {InferImplReduceSum, true}},
+    {prim::kPrimMinimum, {InferImplMinimum, true}},
+    {prim::kPrimDivNoNan, {InferImplDivNoNan, true}},
+    {prim::kPrimLinSpace, {InferImplLinSpace, true}},
+    {prim::kPrimAddN, {InferImplAddN, true}},
     // Array
     {prim::kPrimScalarToArray, {InferImplScalarToArray, true}},
     {prim::kPrimArrayToScalar, {InferImplArrayToScalar, true}},
     {prim::kPrimBroadcastShape, {InferImplBroadCastShape, true}},
     {prim::kPrimPack, {InferImplPack, true}},
+    {prim::kPrimPad, {InferImplPad, true}},
     {prim::kPrimUnique, {InferImplUnique, true}},
     {prim::kPrimUniqueGrad, {InferImplUniqueGrad, true}},
     {prim::kPrimGatherV2, {InferImplGatherV2, true}},
     {prim::kPrimSparseGatherV2, {InferImplGatherV2, true}},
+    {prim::kPrimEmbeddingLookup, {InferImplEmbeddingLookup, true}},
     {prim::kPrimUnsortedSegmentSum, {InferImplUnsortedSegmentSum, true}},
+    {prim::kPrimUnsortedSegmentMax, {InferImplUnsortedSegmentMax, true}},
+    {prim::kPrimUnsortedSegmentMin, {InferImplUnsortedSegmentMin, true}},
     {prim::kPrimScatterAdd, {InferImplScatterAdd, true}},
+    {prim::kPrimSubAndFilter, {InferImplSubAndFilter, true}},
     {prim::kPrimScatterUpdate, {InferImplScatterUpdate, true}},
+    {prim::kPrimMapCacheIdx, {InferImplMapCacheIdx, true}},
+    {prim::kPrimDynamicAssign, {InferImplDynamicAssign, true}},
+    {prim::kPrimCacheSwapTable, {InferImplCacheSwapTable, true}},
+    {prim::kPrimUpdateCache, {InferImplUpdateCache, true}},
+    {prim::kPrimComputeAccidentalHits, {InferImplComputeAccidentalHits, true}},
+    {prim::kPrimPadAndShift, {InferImplPadAndShift, true}},
     {prim::kPrimDiv, {InferImplDiv, true}},
     {prim::kPrimRealDiv, {InferImplRealDiv, true}},
     {prim::kPrimShape, {InferImplShape, false}},
     {prim::kPrimDynamicShape, {InferImplDynamicShape, true}},
+    {prim::kPrimTranspose, {InferImplTranspose, true}},
+    {prim::kPrimReshape, {InferImplReshape, true}},
+    {prim::kPrimMapUniform, {InferImplMapUniform, true}},
+    {prim::kPrimSplit, {InferImplSplit, true}},
+    {prim::kPrimSequenceMask, {InferImplSequenceMask, true}},
     // Structure
     {prim::kPrimMakeTuple, {InferImplMakeTuple, true}},
     {prim::kPrimMakeList, {InferImplMakeList, true}},
@@ -72,6 +94,8 @@ PrimitiveEvalImplMap &GetPrimitiveToEvalImplMap() {
     {prim::kPrimListSetItem, {InferImplListSetItem, true}},
     {prim::kPrimDictGetItem, {InferImplDictGetItem, true}},
     {prim::kPrimDictSetItem, {InferImplDictSetItem, true}},
+    {prim::kPrimDictGetKeys, {InferImplDictGetKeys, true}},
+    {prim::kPrimDictGetValues, {InferImplDictGetValues, true}},
     {prim::kPrimListAppend, {InferImplListAppend, true}},
     {prim::kPrimTupleLen, {InferImplTupleLen, true}},
     {prim::kPrimListLen, {InferImplListLen, true}},
@@ -80,6 +104,7 @@ PrimitiveEvalImplMap &GetPrimitiveToEvalImplMap() {
     {prim::kPrimPooling, {InferImplPooling, true}},
     {prim::kPrimPoolingGrad, {InferImplPoolingGrad, true}},
     {prim::kPrimFusedBatchNorm, {InferImplFusedBatchNorm, true}},
+    {prim::kPrimFusedSparseAdam, {InferImplFusedSparseAdam, true}},
     {prim::kPrimFusedBatchNormGrad, {InferImplFusedBatchNormGrad, true}},
     {prim::kPrimBatchNormGrad, {InferImplBatchNormGrad, true}},
     {prim::kPrimReluGrad, {InferImplReluGrad, true}},
@@ -94,6 +119,7 @@ PrimitiveEvalImplMap &GetPrimitiveToEvalImplMap() {
     {prim::kPrimDropoutGenMask, {InferImplDropoutGenMask, true}},
     {prim::kPrimSparseApplyFtrl, {InferImplSparseApplyFtrl, true}},
     {prim::kPrimSparseApplyProximalAdagrad, {InferImplSparseApplyProximalAdagrad, true}},
+    {prim::kPrimSGD, {InferImplSGD, true}},
     // Others
     {prim::kPrimIdentity, {InferImplIdentity, true}},
     // Set impl to null as it will use PartialEvaluator;
@@ -110,6 +136,8 @@ PrimitiveEvalImplMap &GetPrimitiveToEvalImplMap() {
     {prim::kPrimControlDepend, {InferImplControlDepend, true}},
     // Debug
     {prim::kPrimDebug, {InferImplDebug, true}},
+    // Dynamic shape testing
+    {prim::kPrimGpuConvertToDynamicShape, {InferImplGpuConvertToDynamicShape, true}},
     // SparseTensor
     {prim::kPrimMakeSparseTensor, {InferImplMakeSparseTensor, true}},
     {prim::kPrimSparseTensorGetValues, {InferImplSparseTensorGetValues, true}},
@@ -124,7 +152,11 @@ PrimitiveEvalImplMap &GetPrimitiveToEvalImplMap() {
     {prim::kPrimAllReduce, {InferImplAllReduce, true}},
     {prim::kPrimBroadcast, {InferImplBroadcast, true}},
     {prim::kPrimAllGather, {InferImplAllGather, true}},
+    {prim::kPrimAllSwap, {InferImplAllSwap, true}},
     {prim::kPrimReduceScatter, {InferImplReduceScatter, true}},
+    {prim::kPrimMemCpyAsync, {InferImplMemCpyAsync, true}},
+    {prim::kPrimCast, {InferImplCast, true}},
+    {prim::kPrimExpandDims, {InferImplExpandDims, true}},
   };
   return prim_eval_implement_map;
 }

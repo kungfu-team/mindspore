@@ -20,30 +20,25 @@
 #include <vector>
 
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
-#include "nnacl/fp32/pooling.h"
+#include "nnacl/fp32/pooling_fp32.h"
 
 namespace mindspore::kernel {
 
 class PoolingOpenCLKernel : public OpenCLKernel {
  public:
-  explicit PoolingOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                               const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs) {
-    parameter_ = reinterpret_cast<PoolingParameter *>(parameter);
-  }
-  ~PoolingOpenCLKernel() override{};
+  PoolingOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
+                      const std::vector<lite::Tensor *> &outputs)
+      : OpenCLKernel(parameter, inputs, outputs), parameter_(reinterpret_cast<PoolingParameter *>(parameter)) {}
+  ~PoolingOpenCLKernel() override = default;
 
-  int Init() override;
-  int ReSize() override;
   int Run() override;
-  int InitBuffer();
-  int GetImageSize(size_t idx, std::vector<size_t> *img_size) override;
+  int Prepare() override;
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
 
  private:
-  std::vector<size_t> InitGlobalSize() const;
   PoolingParameter *parameter_;
-  cl::Kernel kernel_;
-  bool enable_fp16_{false};
 };
 
 }  // namespace mindspore::kernel

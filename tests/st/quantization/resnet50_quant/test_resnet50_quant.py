@@ -22,7 +22,7 @@ from mindspore import context
 from mindspore import Tensor
 from mindspore.nn.optim.momentum import Momentum
 from mindspore.train.model import Model
-from mindspore.train.quant import quant
+from mindspore.compression.quant import QuantizationAwareTraining
 from mindspore import set_seed
 
 from resnet_quant_manual import resnet50_quant
@@ -43,7 +43,7 @@ config_quant = ed({
     "buffer_size": 1000,
     "image_height": 224,
     "image_width": 224,
-    "data_load_mode": "mindata",
+    "data_load_mode": "original",
     "save_checkpoint": True,
     "save_checkpoint_epochs": 1,
     "keep_checkpoint_max": 50,
@@ -89,10 +89,10 @@ def test_resnet50_quant():
     step_size = dataset.get_dataset_size()
 
     # convert fusion network to quantization aware network
-    net = quant.convert_quant_network(net,
-                                      bn_fold=True,
-                                      per_channel=[True, False],
-                                      symmetric=[True, False])
+    quantizer = QuantizationAwareTraining(bn_fold=True,
+                                          per_channel=[True, False],
+                                          symmetric=[True, False])
+    net = quantizer.quantize(net)
 
     # get learning rate
     lr = Tensor(get_lr(lr_init=config.lr_init,
@@ -120,7 +120,7 @@ def test_resnet50_quant():
                 dataset_sink_mode=False)
     print("============== End Training ==============")
 
-    expect_avg_step_loss = 2.40
+    expect_avg_step_loss = 2.60
     avg_step_loss = np.mean(np.array(monitor.losses))
 
     print("average step loss:{}".format(avg_step_loss))

@@ -14,25 +14,30 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_OPCLIB_SQUEEZE_PARAMETER_H_
-#define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_OPCLIB_SQUEEZE_PARAMETER_H_
+#ifndef MINDSPORE_LITE_NNACL_SQUEEZE_PARAMETER_H_
+#define MINDSPORE_LITE_NNACL_SQUEEZE_PARAMETER_H_
 #include "nnacl/op_base.h"
 #include "nnacl/quantization/quantize.h"
 
 #define SQUEEZE_OFFSET_MAX_SIZE 4
 
 typedef struct SqueezeParameter {
+  // primitive parameter
   OpParameter op_parameter_;
-  SqueezeQuantArg quant_arg;
-  int thread_count_;
-  int thread_id_;
+  int64_t axis_;
+
+  // shape correlative
+  const int *in_shape_;
+  const int *out_shape_;
   int offset_size_;
   int64_t offset_[SQUEEZE_OFFSET_MAX_SIZE];
   int64_t in_offset_[SQUEEZE_OFFSET_MAX_SIZE];
-  int64_t axis_;
-  const int *in_shape_;
-  const int *out_shape_;
   int input_dim_;
+
+  // other parameter
+  SqueezeQuantArg quant_arg;
+  int thread_count_;
+  int thread_id_;
 } SqueezeParameter;
 
-#endif  // MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_OPCLIB_SQUEEZE_PARAMETER_H_
+#endif  // MINDSPORE_LITE_NNACL_SQUEEZE_PARAMETER_H_

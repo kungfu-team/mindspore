@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_CORE_C_OPS_PRIMITIVE_C_H_
-#define MINDSPORE_CORE_C_OPS_PRIMITIVE_C_H_
+#ifndef MINDSPORE_LITE_SRC_OPS_PRIMITIVE_C_H_
+#define MINDSPORE_LITE_SRC_OPS_PRIMITIVE_C_H_
 #include <string>
 #include <set>
 #include <vector>
@@ -27,6 +27,7 @@
 #else
 #include "schema/model_generated.h"
 #endif
+#include "nnacl/op_base.h"
 #include "src/tensor.h"
 #include "include/errorcode.h"
 #include "src/common/log_adapter.h"
@@ -43,12 +44,20 @@ const std::set<int> kSupportDataType = {kNumberTypeBool,  kNumberTypeUInt8,   kN
 
 #ifdef PRIMITIVE_WRITEABLE
 using TensorPtr = std::shared_ptr<mindspore::tensor::Tensor>;
-constexpr int kAnfPopulaterOne = 1;
-constexpr int kAnfPopulaterTwo = 2;
-constexpr int kAnfPopulaterThree = 3;
-static std::map<std::string, schema::ActivationType> kActivationTypeMap{{"ReLU", schema::ActivationType_RELU},
-                                                                        {"ReLU6", schema::ActivationType_RELU6},
-                                                                        {"Sigmoid", schema::ActivationType_SIGMOID}};
+constexpr int kAnfPopulaterInputNumOne = 1;
+constexpr int kAnfPopulaterInputNumTwo = 2;
+constexpr int kAnfPopulaterInputNumThree = 3;
+static std::map<std::string, schema::ActivationType> kActivationTypeMap{
+  {"ReLU", schema::ActivationType_RELU},
+  {"ReLU6", schema::ActivationType_RELU6},
+  {"Sigmoid", schema::ActivationType_SIGMOID},
+  {"HSwish", schema::ActivationType_HSWISH},
+  {"HSigmoid", schema::ActivationType_HSIGMOID},
+  {"Swish", schema::ActivationType_SWISH},
+  {"LeakyRelu", schema::ActivationType_LEAKY_RELU},
+  {"Tanh", schema::ActivationType_TANH},
+  {"Logistic", schema::ActivationType_SIGMOID}};
+std::vector<int> CastToInt(const ValuePtr &value);
 class PrimitiveC : public mindspore::Primitive {
  public:
   // Argument primitive is deliverd into PrimitiveC and will be deleted in ~PrimitiveC().
@@ -59,8 +68,7 @@ class PrimitiveC : public mindspore::Primitive {
 
   // Argument primitive is deliverd into PrimitiveC and will be deleted in ~PrimitiveC().
   // Caller should not delete primitive.
-  explicit PrimitiveC(const std::string &name, schema::PrimitiveT *primitive)
-      : Primitive(name), primitive_(primitive) {}
+  PrimitiveC(const std::string &name, schema::PrimitiveT *primitive) : Primitive(name), primitive_(primitive) {}
 
   PrimitiveC() : Primitive(""), primitive_(nullptr) {}
 
@@ -70,13 +78,13 @@ class PrimitiveC : public mindspore::Primitive {
 
   int Type() const;
 
-  schema::PrimitiveT *GetPrimitiveT() const;
+  schema::PrimitiveT *primitiveT() const;
 
   void ClearPrimitiveT();
 
-  bool operator==(const Value &rhs) const {
+  bool operator==(const Value &rhs) const override {
     if (rhs.isa<PrimitiveC>()) {
-      auto other_prim = static_cast<const PrimitiveC &>(rhs);
+      auto other_prim = dynamic_cast<const PrimitiveC &>(rhs);
       auto a = this->primitive_->value.type;
       auto b = other_prim.primitive_->value.type;
       return a == b;
@@ -85,42 +93,52 @@ class PrimitiveC : public mindspore::Primitive {
     }
   }
 
-  void SetInputQuantParam(const std::vector<std::vector<schema::QuantParamT>> &input_quant_param);
+  void set_input_quant_params(const std::vector<std::vector<schema::QuantParamT>> &input_quant_param);
 
-  void SetOutputQuantParam(const std::vector<std::vector<schema::QuantParamT>> &output_quant_param);
+  void set_input_quant_param(const size_t &index, const std::vector<schema::QuantParamT> &input_quant_param);
+
+  void set_output_quant_params(const std::vector<std::vector<schema::QuantParamT>> &output_quant_param);
+
+  void set_output_quant_param(const size_t &index, const std::vector<schema::QuantParamT> &output_quant_param);
+
+  bool IsInputQuantParamsInited();
+
+  bool IsOutputQuantParamsInited();
 
   void ClearInputOutputQuantParam();
 
-  void AddInputQuantParam(std::vector<schema::QuantParamT> quant_param);
+  void AddInputQuantParam(const std::vector<schema::QuantParamT> &quant_param);
 
-  std::vector<std::vector<schema::QuantParamT>> GetInputQuantParams() const;
+  std::vector<std::vector<schema::QuantParamT>> input_quant_params() const;
 
-  void AddOutputQuantParam(std::vector<schema::QuantParamT> quant_param);
+  void AddOutputQuantParam(const std::vector<schema::QuantParamT> &quant_param);
 
-  std::vector<std::vector<schema::QuantParamT>> GetOutputQuantParams() const;
+  std::vector<std::vector<schema::QuantParamT>> output_quant_params() const;
 
-  void SetQuantType(const schema::QuantType &quant_type);
+  void set_quant_type(const schema::QuantType &quant_type);
 
-  schema::QuantType GetQuantType() const;
+  schema::QuantType quant_type() const;
 
-  virtual int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_);
+  virtual int InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Tensor *> outputs);
 
-  bool GetInferFlag() const;
+  bool infer_flag() const;
 
-  void SetInferFlag(bool flag);
+  void set_infer_flag(bool flag);
 
   static PrimitiveC *Create(mindspore::schema::Primitive *primitive) { return Create(primitive->UnPack()); }
 
   static PrimitiveC *Create(mindspore::schema::PrimitiveT *primitive);
 
-  void GetAttrDataFromInput(const AnfNodePtr inputNode, std::vector<int> *data);
+  static void GetAttrDataFromInput(const AnfNodePtr &inputNode, std::vector<int> *data);
 
   static std::shared_ptr<PrimitiveC> Create(const Primitive &prim, const std::vector<AnfNodePtr> &inputs,
                                             const schema::QuantType &quantType);
-  void PopulaterQuantParam(const Primitive &prim, std::vector<std::vector<schema::QuantParamT>> *vecInputQuantParam,
-                           std::vector<std::vector<schema::QuantParamT>> *vecOutputQuantParam,
-                           const std::vector<AnfNodePtr> &inputs);
-  void CalQuantParam(const double &mean, const double &stdDev, float *mMin, float *mMax);
+  void PopulaterQuantParam(const Primitive &prim, const std::vector<AnfNodePtr> &inputs);
+  void FillDefaultInputQuantParamIfNeed(const size_t &inputSize);
+  void PopulaterInputQuantParam(const Primitive &prim, const std::vector<AnfNodePtr> &inputs,
+                                bool narrowRangeQuantParam, int32_t numbitsRangeQuantParam);
+  void PopulaterOutputQuantParam(const Primitive &prim, bool narrowRangeQuantParam, int32_t numbitsRangeQuantParam);
+  static void CalFloatScopeByMeanAndStddev(const double &mean, const double &stdDev, float *mMin, float *mMax);
 
  protected:
   virtual int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) { return RET_ERROR; }
@@ -147,21 +165,20 @@ class PrimitiveC {
 
   static PrimitiveC *Create(const schema::Primitive *primitive);
 
-  bool GetInferFlag() const;
+  bool infer_flag() const;
 
-  void SetInferFlag(bool flag);
+  void set_infer_flag(bool flag);
 
   virtual int InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Tensor *> outputs);
 
   int Type() const;
 
-  void SetQuantType(schema::QuantType quant_type);
-  schema::QuantType GetQuantType() const;
+  void set_quant_type(schema::QuantType quant_type);
+  schema::QuantType quant_type() const;
 
- protected:
   template <typename T, typename = std::enable_if<std::is_base_of<PrimitiveC, T>::value>>
   static PrimitiveC *NewPrimitiveC(const schema::Primitive *primitive) {
-    auto primc = new T();
+    auto primc = new (std::nothrow) T();
     if (primc == nullptr) {
       MS_LOG(ERROR) << "new PrimitiveC failed";
       return nullptr;
@@ -175,6 +192,7 @@ class PrimitiveC {
     return primc;
   }
 
+ protected:
   int UnPackSchemaPrimitive(const schema::Primitive *primitive) {
     flatbuffers::FlatBufferBuilder fbb(1024);
     if (UnPackToFlatBuilder(primitive, &fbb) != RET_OK) {
@@ -210,7 +228,11 @@ class PrimitiveC {
   bool infer_flag_ = true;
   schema::QuantType quant_type_{schema::QuantType_QUANT_NONE};
 };
+using PrimitiveCPtr = std::shared_ptr<PrimitiveC>;
+typedef PrimitiveC *(*PrimitiveCCreator)(const schema::Primitive *primitive);
 #endif
+typedef OpParameter *(*ParameterCreator)(const PrimitiveC *primitive);
+
 }  // namespace lite
 }  // namespace mindspore
-#endif  // MINDSPORE_CORE_C_OPS_PRIMITIVE_C_H_
+#endif  // MINDSPORE_LITE_SRC_OPS_PRIMITIVE_C_H_

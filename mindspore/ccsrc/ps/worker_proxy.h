@@ -39,12 +39,13 @@ class WorkerProxy : public ::ps::KVWorker<T> {
   using Worker = ::ps::KVWorker<T>;
   using Callback = std::function<void()>;
   using SlicedKVs = std::vector<std::pair<bool, ::ps::KVPairs<T>>>;
-  using Slicer = std::function<void(int ts, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &ranges,
-                                    SlicedKVs *sliced, const std::map<int, int> &attrs)>;
+  using Slicer = std::function<void(int64_t ts, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &ranges,
+                                    SlicedKVs *sliced, const std::map<int64_t, int64_t> &attrs)>;
   using ::ps::SimpleApp::obj_;
-  explicit WorkerProxy(int app_id, int customer_id, int lookup_customer_id, int general_customer_id)
+  explicit WorkerProxy(int64_t app_id, int64_t customer_id, int64_t lookup_customer_id, int64_t general_customer_id)
       : Worker(app_id, customer_id) {
     server_num_ = ::ps::NumServers();
+    MS_LOG(INFO) << "Server num:" << server_num_;
     PSContext::instance()->SetPSRankId(::ps::MyRank());
     using std::placeholders::_1;
     using std::placeholders::_2;
@@ -60,47 +61,54 @@ class WorkerProxy : public ::ps::KVWorker<T> {
     broadcast_slicer_ = std::bind(&WorkerProxy<T>::BroadcastSlicer, this, _1, _2, _3, _4, _5);
     round_robin_slicer_ = std::bind(&WorkerProxy<T>::RoundRobinSlicer, this, _1, _2, _3, _4, _5);
     worker_init_embedding_slicer_ = std::bind(&WorkerProxy<T>::WorkerInitEmbeddingSlicer, this, _1, _2, _3, _4, _5);
+    update_embedding_slicer_ = std::bind(&WorkerProxy<T>::UpdateEmbeddingSlicer, this, _1, _2, _3, _4, _5);
   }
   ~WorkerProxy() override = default;
 
   void AddEmbeddingTable(const ::ps::Key &key, const size_t &row_count);
   void AddKeyToServerId(const ::ps::Key &key);
   void EmbeddingLookup(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<int> &lookup_ids,
-                       const ::ps::SArray<int> &lens, ::ps::SArray<T> *outs, int cmd = 0, const Callback &cb = nullptr,
-                       int priority = 0);
-  int InitEmbeddingTable(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<T> &vals,
-                         const ::ps::SArray<int> &lens = {}, const Callback &cb = nullptr, int priority = 0);
+                       const ::ps::SArray<int> &lens, ::ps::SArray<T> *outs, int64_t cmd = 0,
+                       const Callback &cb = nullptr, int64_t priority = 0);
+  int64_t InitEmbeddingTable(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<T> &vals,
+                             const ::ps::SArray<int> &lens = {}, const Callback &cb = nullptr, int64_t priority = 0);
+  void UpdateEmbeddingTable(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<int> &lookup_ids,
+                            const ::ps::SArray<T> &vals, const Callback &cb = nullptr, int64_t priority = 0);
   bool IsReadyForPush(const Key &key);
   bool IsReadyForPull(const Key &key);
   void PushData(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<T> &vals, const ::ps::SArray<int> &lens = {},
-                int cmd = 0, int priority = 0);
+                int64_t cmd = 0, int64_t priority = 0);
   void PushSparseData(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<T> &vals, const ::ps::SArray<int> &lens,
                       size_t grad_index, size_t indice_index, size_t first_dim_size, size_t outer_dim_size);
   void PullData(const ::ps::SArray<::ps::Key> &keys, ::ps::SArray<T> *vals, ::ps::SArray<int> *lens = nullptr,
-                int cmd = 0, int priority = 0);
+                int64_t cmd = 0, int64_t priority = 0);
   void Finalize();
 
  private:
   template <typename C>
-  int AddLookupCB(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<int> &lookup_ids, C *vals, int cmd,
-                  const Callback &cb);
-  int AddGeneralRspCB(const ::ps::SArray<::ps::Key> &keys, ::ps::SArray<T> *vals, ::ps::SArray<int> *lens, int cmd,
+  int64_t AddLookupCB(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<int> &lookup_ids, C *vals, int64_t cmd,
                       const Callback &cb);
-  void LookupIdSlicer(int timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
-                      std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced, const std::map<int, int> &attrs);
-  void SparseSlicer(int timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
-                    std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced, const std::map<int, int> &attrs);
-  void BroadcastSlicer(int timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
-                       std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced, const std::map<int, int> &attrs);
-  void RoundRobinSlicer(int timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
-                        std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced, const std::map<int, int> &attrs);
-  void WorkerInitEmbeddingSlicer(int timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
+  int64_t AddGeneralRspCB(const ::ps::SArray<::ps::Key> &keys, ::ps::SArray<T> *vals, ::ps::SArray<int> *lens,
+                          int64_t cmd, const Callback &cb);
+  void LookupIdSlicer(int64_t timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
+                      std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced, const std::map<int64_t, int64_t> &attrs);
+  void SparseSlicer(int64_t timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
+                    std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced, const std::map<int64_t, int64_t> &attrs);
+  void BroadcastSlicer(int64_t timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
+                       std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced, const std::map<int64_t, int64_t> &attrs);
+  void RoundRobinSlicer(int64_t timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
+                        std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced,
+                        const std::map<int64_t, int64_t> &attrs);
+  void WorkerInitEmbeddingSlicer(int64_t timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
                                  std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced,
-                                 const std::map<int, int> &attrs);
+                                 const std::map<int64_t, int64_t> &attrs);
+  void UpdateEmbeddingSlicer(int timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
+                             std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced,
+                             const std::map<int64_t, int64_t> &attrs);
   void ProcessLookupResult(const ::ps::Message &msg);
   void ProcessResponse(const ::ps::Message &msg);
-  void Send(::ps::Customer *customer, int timestamp, bool push, bool pull, int cmd, const ::ps::KVPairs<T> &kvs,
-            const Slicer &slicer, std::map<int, int> attrs = {});
+  void Send(::ps::Customer *customer, int64_t timestamp, bool push, bool pull, int64_t cmd, const ::ps::KVPairs<T> &kvs,
+            const Slicer &slicer, std::map<int64_t, int64_t> attrs = {});
   void AddKeyByHashMod(const ::ps::Key &key);
 
   void PrepareSparseGradient(const size_t begin, const size_t end, const std::unordered_set<int> &distinct_ids,
@@ -109,22 +117,23 @@ class WorkerProxy : public ::ps::KVWorker<T> {
   void BuildSparseValue(const ::ps::SArray<int> &lengths, const size_t grad_index, const size_t indice_index,
                         const T *original_data, const T *grads, int *indices, ::ps::SArray<T> *reduced_data);
 
-  int server_num_;
+  int64_t server_num_;
   std::unique_ptr<::ps::Customer> lookup_customer_;
   std::unique_ptr<::ps::Customer> general_customer_;
   std::unordered_map<::ps::Key, std::shared_ptr<std::vector<::ps::Range>>> embedding_table_ranges_;
-  std::unordered_map<int, std::vector<::ps::KVPairs<T>>> lookup_results_;
-  std::unordered_map<int, std::map<int, ::ps::KVPairs<T>>> gathered_response_;
+  std::unordered_map<int64_t, std::vector<::ps::KVPairs<T>>> lookup_results_;
+  std::unordered_map<int64_t, std::map<int64_t, ::ps::KVPairs<T>>> gathered_response_;
   std::mutex mutex_;
   Slicer lookup_slicer_;
   Slicer sparse_slicer_;
   Slicer broadcast_slicer_;
   Slicer round_robin_slicer_;
   Slicer worker_init_embedding_slicer_;
-  std::unordered_map<int, Callback> lookup_callbacks_;
-  std::unordered_map<int, Callback> general_callbacks_;
-  std::unordered_map<int, int> expected_result_count_;
-  std::unordered_map<::ps::Key, int> key_to_server_id_;
+  Slicer update_embedding_slicer_;
+  std::unordered_map<int64_t, Callback> lookup_callbacks_;
+  std::unordered_map<int64_t, Callback> general_callbacks_;
+  std::unordered_map<int64_t, int64_t> expected_result_count_;
+  std::unordered_map<::ps::Key, int64_t> key_to_server_id_;
   std::unordered_map<::ps::Key, size_t> embedding_row_cnt_;
 };
 
@@ -132,8 +141,8 @@ template <typename T>
 void WorkerProxy<T>::AddEmbeddingTable(const ::ps::Key &key, const size_t &row_count) {
   uint64_t begin = 0;
   uint64_t end = 0;
-  for (int i = 0; i < server_num_; i++) {
-    int local_row_cnt = Util::LocalShard(row_count, i, server_num_);
+  for (int64_t i = 0; i < server_num_; i++) {
+    int64_t local_row_cnt = Util::LocalShard(row_count, i, server_num_);
     if (i == 0) {
       end = local_row_cnt - 1;
     } else {
@@ -155,7 +164,7 @@ void WorkerProxy<T>::AddKeyByHashMod(const ::ps::Key &key) {
   if (server_num_ == 0) {
     MS_LOG(EXCEPTION) << "Server number is invalid:0";
   }
-  key_to_server_id_[key] = static_cast<int>(key % server_num_);
+  key_to_server_id_[key] = static_cast<int64_t>(key % server_num_);
   MS_LOG(INFO) << "The server id of key " << key << " is " << key_to_server_id_[key];
 }
 
@@ -166,26 +175,25 @@ void WorkerProxy<T>::AddKeyToServerId(const ::ps::Key &key) {
 
 template <typename T>
 void WorkerProxy<T>::EmbeddingLookup(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<int> &lookup_ids,
-                                     const ::ps::SArray<int> &lens, ::ps::SArray<T> *outs, int cmd, const Callback &cb,
-                                     int priority) {
-  MS_EXCEPTION_IF_NULL(outs);
-  int ts = AddLookupCB(keys, lookup_ids, outs, cmd, cb);
+                                     const ::ps::SArray<int> &lens, ::ps::SArray<T> *outs, int64_t cmd,
+                                     const Callback &cb, int64_t priority) {
+  int64_t ts = AddLookupCB(keys, lookup_ids, outs, cmd, cb);
   ::ps::KVPairs<T> kvs;
   kvs.keys = keys;
   kvs.lens = lookup_ids;
   kvs.priority = priority;
   expected_result_count_[ts] = 0;
   Send(lookup_customer_.get(), ts, true, true, cmd, kvs, lookup_slicer_);
-  int expect_rt_count = expected_result_count_[ts];
+  int64_t expect_rt_count = expected_result_count_[ts];
   lookup_customer_->AddResponse(ts, server_num_ - expect_rt_count);
   lookup_customer_->WaitRequest(ts);
   expected_result_count_.erase(ts);
 }
 
 template <typename T>
-int WorkerProxy<T>::InitEmbeddingTable(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<T> &vals,
-                                       const ::ps::SArray<int> &lens, const Callback &cb, int priority) {
-  int ts = obj_->NewRequest(::ps::kServerGroup);
+int64_t WorkerProxy<T>::InitEmbeddingTable(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<T> &vals,
+                                           const ::ps::SArray<int> &lens, const Callback &cb, int64_t priority) {
+  int64_t ts = obj_->NewRequest(::ps::kServerGroup);
   ::ps::KVPairs<T> kvs;
   kvs.keys = keys;
   kvs.vals = vals;
@@ -193,6 +201,24 @@ int WorkerProxy<T>::InitEmbeddingTable(const ::ps::SArray<::ps::Key> &keys, cons
   kvs.priority = priority;
   Send(obj_, ts, true, false, kInitEmbeddingsCmd, kvs, broadcast_slicer_);
   return ts;
+}
+
+template <typename T>
+void WorkerProxy<T>::UpdateEmbeddingTable(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<int> &lookup_ids,
+                                          const ::ps::SArray<T> &vals, const Callback &cb, int64_t priority) {
+  int ts = AddGeneralRspCB(keys, nullptr, nullptr, 0, nullptr);
+  ::ps::KVPairs<T> kvs;
+  kvs.keys = keys;
+  kvs.lens = lookup_ids;
+  kvs.vals = vals;
+  kvs.priority = priority;
+  expected_result_count_[ts] = 0;
+  Send(general_customer_.get(), ts, true, false, kUpdateEmbeddingsCmd, kvs, update_embedding_slicer_);
+  if (expected_result_count_[ts] < server_num_) {
+    general_customer_->AddResponse(ts, server_num_ - expected_result_count_[ts]);
+  }
+  general_customer_->WaitRequest(ts);
+  expected_result_count_.erase(ts);
 }
 
 template <typename T>
@@ -219,8 +245,8 @@ bool WorkerProxy<T>::IsReadyForPull(const Key &key) {
 
 template <typename T>
 void WorkerProxy<T>::PushData(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<T> &vals,
-                              const ::ps::SArray<int> &lens, int cmd, int priority) {
-  int ts = AddGeneralRspCB(keys, nullptr, nullptr, cmd, nullptr);
+                              const ::ps::SArray<int> &lens, int64_t cmd, int64_t priority) {
+  int64_t ts = AddGeneralRspCB(keys, nullptr, nullptr, cmd, nullptr);
   ::ps::KVPairs<T> kvs;
   kvs.keys = keys;
   kvs.vals = vals;
@@ -245,14 +271,14 @@ template <typename T>
 void WorkerProxy<T>::PushSparseData(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<T> &vals,
                                     const ::ps::SArray<int> &lens, size_t grad_index, size_t indice_index,
                                     size_t first_dim_size, size_t outer_dim_size) {
-  int ts = AddGeneralRspCB(keys, nullptr, nullptr, 0, nullptr);
+  int64_t ts = AddGeneralRspCB(keys, nullptr, nullptr, 0, nullptr);
   ::ps::KVPairs<T> kvs;
   kvs.keys = keys;
   kvs.vals = vals;
   kvs.lens = lens;
-  const int cmd = 0;
+  const int64_t cmd = 0;
   if (embedding_table_ranges_.count(keys[0])) {
-    std::map<int, int> attrs{{0, grad_index}, {1, indice_index}, {2, first_dim_size}, {3, outer_dim_size}};
+    std::map<int64_t, int64_t> attrs{{0, grad_index}, {1, indice_index}, {2, first_dim_size}, {3, outer_dim_size}};
     Send(general_customer_.get(), ts, true, false, cmd, kvs, sparse_slicer_, attrs);
   } else {
     Send(general_customer_.get(), ts, true, false, cmd, kvs, round_robin_slicer_);
@@ -265,9 +291,9 @@ void WorkerProxy<T>::PushSparseData(const ::ps::SArray<::ps::Key> &keys, const :
 
 template <typename T>
 void WorkerProxy<T>::PullData(const ::ps::SArray<::ps::Key> &keys, ::ps::SArray<T> *vals, ::ps::SArray<int> *lens,
-                              int cmd, int priority) {
+                              int64_t cmd, int64_t priority) {
   MS_EXCEPTION_IF_NULL(vals);
-  int ts = AddGeneralRspCB(keys, vals, lens, cmd, nullptr);
+  int64_t ts = AddGeneralRspCB(keys, vals, lens, cmd, nullptr);
   ::ps::KVPairs<T> kvs;
   kvs.keys = keys;
   kvs.priority = priority;
@@ -284,7 +310,7 @@ void WorkerProxy<T>::PullData(const ::ps::SArray<::ps::Key> &keys, ::ps::SArray<
 
 template <typename T>
 void WorkerProxy<T>::Finalize() {
-  int ts = obj_->NewRequest(::ps::kServerGroup);
+  int64_t ts = obj_->NewRequest(::ps::kServerGroup);
   ::ps::KVPairs<T> kvs;
   kvs.keys.push_back(0);
   kvs.vals.push_back(0.0f);
@@ -295,38 +321,45 @@ void WorkerProxy<T>::Finalize() {
 
 template <typename T>
 template <typename C>
-int WorkerProxy<T>::AddLookupCB(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<int> &lookup_ids,
-                                C *lookup_result, int cmd, const Callback &cb) {
+int64_t WorkerProxy<T>::AddLookupCB(const ::ps::SArray<::ps::Key> &keys, const ::ps::SArray<int> &lookup_ids,
+                                    C *lookup_result, int64_t cmd, const Callback &cb) {
   MS_EXCEPTION_IF_NULL(lookup_result);
-  int ts = lookup_customer_->NewRequest(::ps::kServerGroup);
+  int64_t ts = lookup_customer_->NewRequest(::ps::kServerGroup);
   const auto &callback = [this, ts, keys, lookup_ids, lookup_result, cb]() mutable {
     mutex_.lock();
     auto &kvs = lookup_results_[ts];
     mutex_.unlock();
 
-    std::unordered_map<Key, std::shared_ptr<std::pair<T *, int>>> id_addr_map;
+    if (lookup_ids.empty()) {
+      MS_LOG(EXCEPTION) << "Lookup id is empty.";
+    }
+    int64_t single_id_len = SizeToLong(lookup_result->size() / lookup_ids.size());
+    std::unordered_map<Key, std::shared_ptr<std::pair<T *, int64_t>>> id_addr_map;
     for (const auto &s : kvs) {
-      int offset = 0;
-      int len = s.vals.size() / s.keys.size();
+      int64_t offset = 0;
       for (size_t i = 0; i < s.keys.size(); i++) {
         const Key &key = s.keys[i];
         T *addr = s.vals.data() + offset;
-        offset += len;
-        id_addr_map[key] = std::make_shared<std::pair<T *, int>>(std::make_pair(addr, len));
+        offset += single_id_len;
+        id_addr_map[key] = std::make_shared<std::pair<T *, int64_t>>(std::make_pair(addr, single_id_len));
         MS_EXCEPTION_IF_NULL(id_addr_map[key]);
       }
     }
 
     T *result_addr = lookup_result->data();
     MS_EXCEPTION_IF_NULL(result_addr);
-    int offset = 0;
+    int64_t offset = 0;
     size_t dst_size = 0;
     size_t src_size = 0;
     void *dst_data = nullptr;
     void *src_data = nullptr;
     for (size_t i = 0; i < lookup_ids.size(); i++) {
+      if (id_addr_map.count(lookup_ids[i]) == 0) {
+        offset += single_id_len;
+        continue;
+      }
       auto &pair = id_addr_map[static_cast<Key>(lookup_ids[i])];
-      int size = pair->second * sizeof(T);
+      int64_t size = single_id_len * sizeof(T);
       dst_size = size;
       src_size = size;
       dst_data = result_addr + offset;
@@ -338,7 +371,7 @@ int WorkerProxy<T>::AddLookupCB(const ::ps::SArray<::ps::Key> &keys, const ::ps:
         MS_LOG(EXCEPTION) << "memcpy_s error, errorno(" << ret << ")";
         return;
       }
-      offset += pair->second;
+      offset += single_id_len;
     }
 
     mutex_.lock();
@@ -351,12 +384,12 @@ int WorkerProxy<T>::AddLookupCB(const ::ps::SArray<::ps::Key> &keys, const ::ps:
 }
 
 template <typename T>
-int WorkerProxy<T>::AddGeneralRspCB(const ::ps::SArray<::ps::Key> &keys, ::ps::SArray<T> *vals, ::ps::SArray<int> *lens,
-                                    int cmd, const Callback &cb) {
-  int ts = general_customer_->NewRequest(::ps::kServerGroup);
+int64_t WorkerProxy<T>::AddGeneralRspCB(const ::ps::SArray<::ps::Key> &keys, ::ps::SArray<T> *vals,
+                                        ::ps::SArray<int> *lens, int64_t cmd, const Callback &cb) {
+  int64_t ts = general_customer_->NewRequest(::ps::kServerGroup);
   const auto &callback = [this, ts, keys, vals, lens, cb]() mutable {
     mutex_.lock();
-    std::map<int, ::ps::KVPairs<T>> server_kvs = gathered_response_[ts];
+    std::map<int64_t, ::ps::KVPairs<T>> server_kvs = gathered_response_[ts];
     mutex_.unlock();
 
     vals->clear();
@@ -383,11 +416,11 @@ int WorkerProxy<T>::AddGeneralRspCB(const ::ps::SArray<::ps::Key> &keys, ::ps::S
 }
 
 template <typename T>
-void WorkerProxy<T>::LookupIdSlicer(int timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
+void WorkerProxy<T>::LookupIdSlicer(int64_t timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
                                     std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced,
-                                    const std::map<int, int> &attrs) {
+                                    const std::map<int64_t, int64_t> &attrs) {
   MS_EXCEPTION_IF_NULL(sliced);
-  int *lookup_ids = send.lens.data();
+  int32_t *lookup_ids = send.lens.data();
   size_t id_size = send.lens.size();
 
   const Key &key = send.keys[0];
@@ -398,7 +431,7 @@ void WorkerProxy<T>::LookupIdSlicer(int timestamp, const ::ps::KVPairs<T> &send,
     const ::ps::Range &range = ranges[i];
     const auto &begin = range.begin();
     const auto &end = range.end();
-    std::unordered_set<int> unique_ids;
+    std::unordered_set<int64_t> unique_ids;
     auto &kvs = sliced->at(i).second;
 
     kvs.keys.push_back(key);
@@ -406,6 +439,8 @@ void WorkerProxy<T>::LookupIdSlicer(int timestamp, const ::ps::KVPairs<T> &send,
 
     for (size_t j = 0; j < id_size; j++) {
       auto lookup_id = static_cast<uint64_t>(lookup_ids[j]);
+      // If lookup_id is out of range, like negative number, unique_ids will not contain it.
+      // Servers always get lookup_ids in its embedding table range.
       if (lookup_id >= begin && lookup_id <= end) {
         unique_ids.insert(lookup_id);
       }
@@ -425,9 +460,9 @@ void WorkerProxy<T>::LookupIdSlicer(int timestamp, const ::ps::KVPairs<T> &send,
 }
 
 template <typename T>
-void WorkerProxy<T>::SparseSlicer(int timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
+void WorkerProxy<T>::SparseSlicer(int64_t timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
                                   std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced,
-                                  const std::map<int, int> &attrs) {
+                                  const std::map<int64_t, int64_t> &attrs) {
   MS_EXCEPTION_IF_NULL(sliced);
   // Init variables
   T *data = send.vals.data();
@@ -448,8 +483,8 @@ void WorkerProxy<T>::SparseSlicer(int timestamp, const ::ps::KVPairs<T> &send, c
   int indice_size = send.lens[indice_index];
   int segment_size = grad_size / indice_size;
 
-  int grad_offset = 0;
-  int indice_offset = 0;
+  int64_t grad_offset = 0;
+  int64_t indice_offset = 0;
   for (size_t i = 0; i < grad_index; i++) {
     grad_offset += send.lens[i];
   }
@@ -545,8 +580,8 @@ void WorkerProxy<T>::PrepareSparseGradient(const size_t begin, const size_t end,
   MS_EXCEPTION_IF_NULL(all_indice);
   MS_EXCEPTION_IF_NULL(gradient);
   MS_EXCEPTION_IF_NULL(indices);
-  int offset = 0;
-  int index = 0;
+  int64_t offset = 0;
+  int64_t index = 0;
   size_t segment_data_size = segment_size * sizeof(T);
   size_t dst_size;
   size_t src_size;
@@ -581,7 +616,7 @@ void WorkerProxy<T>::BuildSparseValue(const ::ps::SArray<int> &lengths, const si
   MS_EXCEPTION_IF_NULL(grads);
   MS_EXCEPTION_IF_NULL(indices);
   MS_EXCEPTION_IF_NULL(reduced_data);
-  int offset = 0;
+  int64_t offset = 0;
   size_t dst_size = 0;
   size_t src_size = 0;
   void *dst_data = nullptr;
@@ -605,11 +640,11 @@ void WorkerProxy<T>::BuildSparseValue(const ::ps::SArray<int> &lengths, const si
   }
 
   // Fill the reduced gradient
-  int grad_offset = 0;
+  int64_t grad_offset = 0;
   for (size_t i = 0; i < grad_index; i++) {
     grad_offset += lengths[i];
   }
-  int data_size = lengths[grad_index] * sizeof(T);
+  int64_t data_size = lengths[grad_index] * sizeof(T);
   dst_size = data_size;
   src_size = data_size;
   dst_data = reduced_data->data() + grad_offset;
@@ -623,7 +658,7 @@ void WorkerProxy<T>::BuildSparseValue(const ::ps::SArray<int> &lengths, const si
   }
 
   // Fill the reduced indice
-  int indice_offset = grad_offset + lengths[grad_index];
+  int64_t indice_offset = grad_offset + lengths[grad_index];
   data_size = lengths[indice_index] * sizeof(T);
   T *indice_data = reduced_data->data() + indice_offset;
   dst_size = data_size;
@@ -640,12 +675,12 @@ void WorkerProxy<T>::BuildSparseValue(const ::ps::SArray<int> &lengths, const si
 }
 
 template <typename T>
-void WorkerProxy<T>::BroadcastSlicer(int timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
+void WorkerProxy<T>::BroadcastSlicer(int64_t timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
                                      std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced,
-                                     const std::map<int, int> &attr) {
+                                     const std::map<int64_t, int64_t> &attr) {
   MS_EXCEPTION_IF_NULL(sliced);
   sliced->resize(server_num_);
-  for (int i = 0; i < server_num_; i++) {
+  for (int64_t i = 0; i < server_num_; i++) {
     sliced->at(i).first = true;
     sliced->at(i).second = send;
     expected_result_count_[timestamp] += 1;
@@ -653,16 +688,16 @@ void WorkerProxy<T>::BroadcastSlicer(int timestamp, const ::ps::KVPairs<T> &send
 }
 
 template <typename T>
-void WorkerProxy<T>::RoundRobinSlicer(int timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
+void WorkerProxy<T>::RoundRobinSlicer(int64_t timestamp, const ::ps::KVPairs<T> &send, const std::vector<::ps::Range> &,
                                       std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced,
-                                      const std::map<int, int> &attr) {
+                                      const std::map<int64_t, int64_t> &attr) {
   MS_EXCEPTION_IF_NULL(sliced);
   sliced->resize(server_num_);
   auto keys = send.keys;
   auto vals = send.vals;
   auto lens = send.lens;
 
-  int server_id, len;
+  int64_t server_id, len;
   ::ps::Key param_key;
   for (size_t i = 0; i < keys.size(); i++) {
     param_key = keys[i];
@@ -679,7 +714,7 @@ void WorkerProxy<T>::RoundRobinSlicer(int timestamp, const ::ps::KVPairs<T> &sen
     }
 
     len = lens[i];
-    int offset = std::accumulate(lens.begin(), lens.begin() + i, 0);
+    int64_t offset = std::accumulate(lens.begin(), lens.begin() + i, 0);
     auto val_begin = vals.begin() + offset;
     auto val_end = val_begin + len;
 
@@ -691,10 +726,10 @@ void WorkerProxy<T>::RoundRobinSlicer(int timestamp, const ::ps::KVPairs<T> &sen
 }
 
 template <typename T>
-void WorkerProxy<T>::WorkerInitEmbeddingSlicer(int timestamp, const ::ps::KVPairs<T> &send,
+void WorkerProxy<T>::WorkerInitEmbeddingSlicer(int64_t timestamp, const ::ps::KVPairs<T> &send,
                                                const std::vector<::ps::Range> &,
                                                std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced,
-                                               const std::map<int, int> &attrs) {
+                                               const std::map<int64_t, int64_t> &attrs) {
   MS_EXCEPTION_IF_NULL(sliced);
   sliced->resize(server_num_);
   auto keys = send.keys;
@@ -716,8 +751,49 @@ void WorkerProxy<T>::WorkerInitEmbeddingSlicer(int timestamp, const ::ps::KVPair
 }
 
 template <typename T>
+void WorkerProxy<T>::UpdateEmbeddingSlicer(int timestamp, const ::ps::KVPairs<T> &send,
+                                           const std::vector<::ps::Range> &,
+                                           std::vector<std::pair<bool, ::ps::KVPairs<T>>> *sliced,
+                                           const std::map<int64_t, int64_t> &attrs) {
+  MS_EXCEPTION_IF_NULL(sliced);
+  T *embedding_vals = send.vals.data();
+  int *lookup_ids = send.lens.data();
+  size_t val_size = send.vals.size();
+  size_t id_size = send.lens.size();
+  size_t embedding_dim = val_size / id_size;
+
+  const Key &key = send.keys[0];
+  const std::vector<::ps::Range> &ranges = *(embedding_table_ranges_[key]);
+  sliced->resize(ranges.size());
+
+  for (size_t i = 0; i < ranges.size(); i++) {
+    const ::ps::Range &range = ranges[i];
+    const auto &begin = range.begin();
+    const auto &end = range.end();
+    auto &kvs = sliced->at(i).second;
+    kvs.keys.push_back(key);
+    for (size_t j = 0; j < id_size; j++) {
+      auto lookup_id = static_cast<uint64_t>(lookup_ids[j]);
+      if (lookup_id >= begin && lookup_id <= end) {
+        kvs.keys.push_back(lookup_id);
+        for (size_t k = 0; k < embedding_dim; k++) {
+          kvs.vals.push_back(embedding_vals[j * embedding_dim + k]);
+        }
+      }
+    }
+
+    if (kvs.keys.size() <= 1) {
+      sliced->at(i).first = false;
+    } else {
+      sliced->at(i).first = true;
+      expected_result_count_[timestamp] += 1;
+    }
+  }
+}
+
+template <typename T>
 void WorkerProxy<T>::ProcessLookupResult(const ::ps::Message &msg) {
-  int ts = msg.meta.timestamp;
+  int64_t ts = msg.meta.timestamp;
   if (msg.meta.pull) {
     CHECK_GE(msg.data.size(), (size_t)2);
     ::ps::KVPairs<T> kvs;
@@ -739,7 +815,7 @@ void WorkerProxy<T>::ProcessLookupResult(const ::ps::Message &msg) {
 
 template <typename T>
 void WorkerProxy<T>::ProcessResponse(const ::ps::Message &msg) {
-  int ts = msg.meta.timestamp;
+  int64_t ts = msg.meta.timestamp;
 
   if (msg.meta.pull) {
     CHECK_GE(msg.data.size(), (size_t)2);
@@ -762,8 +838,8 @@ void WorkerProxy<T>::ProcessResponse(const ::ps::Message &msg) {
 }
 
 template <typename T>
-void WorkerProxy<T>::Send(::ps::Customer *customer, int timestamp, bool push, bool pull, int cmd,
-                          const ::ps::KVPairs<T> &kvs, const Slicer &slicer, std::map<int, int> attrs) {
+void WorkerProxy<T>::Send(::ps::Customer *customer, int64_t timestamp, bool push, bool pull, int64_t cmd,
+                          const ::ps::KVPairs<T> &kvs, const Slicer &slicer, std::map<int64_t, int64_t> attrs) {
   MS_EXCEPTION_IF_NULL(customer);
   SlicedKVs sliced;
   slicer(timestamp, kvs, ::ps::Postoffice::Get()->GetServerKeyRanges(), &sliced, attrs);

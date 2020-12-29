@@ -19,35 +19,18 @@
 
 namespace mindspore {
 namespace lite {
-STATUS OnnxTransposeParser::Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node,
-                                  schema::CNodeT *op) {
+lite::PrimitiveC *OnnxTransposeParser::ParseLitePrimitive(const onnx::GraphProto &onnx_graph,
+                                                          const onnx::NodeProto &onnx_node) {
   MS_LOG(DEBUG) << "onnx TransposeParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
-  std::unique_ptr<schema::TransposeT> attr = std::make_unique<schema::TransposeT>();
+  auto attr = std::make_unique<schema::TransposeT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
-  attr->conjugate = false;
   for (const auto &onnx_node_attr : onnx_node.attribute()) {
     const auto &attribute_name = onnx_node_attr.name();
-    if (attribute_name == "axes") {
-      attr->perm.resize(onnx_node_attr.ints_size());
-      for (int i = 0; i < onnx_node_attr.ints_size(); ++i) {
-        attr->perm[i] = onnx_node_attr.ints(i);
-      }
-    }
-    if (attribute_name == "perm") {
+    if (attribute_name == "axes" || attribute_name == "perm") {
       attr->perm.resize(onnx_node_attr.ints_size());
       for (int i = 0; i < onnx_node_attr.ints_size(); ++i) {
         attr->perm[i] = onnx_node_attr.ints(i);
@@ -55,11 +38,17 @@ STATUS OnnxTransposeParser::Parse(const onnx::GraphProto &onnx_graph, const onnx
     }
   }
 
-  op->primitive->value.type = schema::PrimitiveType_Transpose;
-  op->primitive->value.value = attr.release();
-  return RET_OK;
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "new primitive failed";
+    return nullptr;
+  }
+  primitive->value.type = schema::PrimitiveType_Transpose;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
 OnnxNodeRegistrar g_onnxTransposeParser("Transpose", new OnnxTransposeParser());
+OnnxNodeRegistrar g_onnxInt8TransposeParser("Int8Transpose", new OnnxTransposeParser());
 }  // namespace lite
 }  // namespace mindspore

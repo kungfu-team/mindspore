@@ -23,6 +23,7 @@
 #include <unordered_map>
 #include <cstdlib>
 #include <algorithm>
+#include <iomanip>
 
 #include "ir/param_info.h"
 #include "pipeline/jit/pass.h"
@@ -46,10 +47,13 @@
 #include "frontend/optimizer/py_pass_manager.h"
 #include "pybind_api/pybind_patch.h"
 #include "utils/shape_utils.h"
+#include "utils/info.h"
 #if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))
 #include "ps/common.h"
 #include "ps/util.h"
 #include "ps/worker.h"
+#include "ps/ps_cache/ps_data/ps_data_prefetch.h"
+#include "ps/ps_cache/ps_cache_manager.h"
 #endif
 
 #if (ENABLE_GE || ENABLE_D)
@@ -78,23 +82,26 @@ ExecutorPyPtr ExecutorPy::executor_ = nullptr;
 std::mutex ExecutorPy::instance_lock_;
 bool ExecutorPy::debugger_terminate_ = false;
 
-std::unordered_map<abstract::AbstractBasePtrList, int, abstract::AbstractBasePtrListHasher,
+std::unordered_map<abstract::AbstractBasePtrList, int64_t, abstract::AbstractBasePtrListHasher,
                    abstract::AbstractBasePtrListEqual>
   g_args_cache;
 
 namespace {
-std::string GetBaseNameForIR(int stage_idx, const std::string &action_name) {
+std::string GetBaseNameForIR(int64_t stage_idx, const std::string &action_name) {
   std::ostringstream oss;
-  auto ms_context = MsContext::GetInstance();
-  if (ms_context == nullptr) {
-    MS_LOG(EXCEPTION) << "ms_context is nullptr";
-  }
-  auto save_graphs_path = ms_context->get_param<std::string>(MS_CTX_SAVE_GRAPHS_PATH);
-  if (save_graphs_path.empty()) {
-    save_graphs_path = ".";
-  }
-  oss << save_graphs_path << "/" << stage_idx << "_" << action_name;
+  oss << std::setfill('0') << std::setw(2) << stage_idx << "_" << action_name;
   return oss.str();
+}
+
+void CheckArgIsTensor(const ValuePtr &arg, std::size_t idx) {
+  MS_EXCEPTION_IF_NULL(arg);
+  auto tensor_arg = arg->cast<TensorPtr>();
+  if (tensor_arg == nullptr) {
+    MS_EXCEPTION(TypeError) << "For 'graph mode', the " << idx << "th arg: " << arg->ToString() << " is not a tensor.";
+  }
+  if (tensor_arg->is_parameter()) {
+    MS_EXCEPTION(TypeError) << "The inputs could not be Parameter.";
+  }
 }
 }  // namespace
 
@@ -110,10 +117,11 @@ py::tuple GenerateKey(const std::string &name, const std::unordered_map<std::str
     if (!parse::ConvertData(arg.second, &converted)) {
       MS_LOG(EXCEPTION) << "GenerateKey convert arg failed";
     }
-    args_spec.push_back(abstract::FromValue(converted, true));
+    bool broaden = converted->isa<Tensor>() || converted->isa<MetaTensor>();
+    args_spec.push_back(abstract::FromValue(converted, broaden));
   }
   if (g_args_cache.count(args_spec) == 0) {
-    static int key = 0;
+    static int64_t key = 0;
     MS_LOG(INFO) << "Start new args and compile key:" << key;
     g_args_cache[args_spec] = key++;
   }
@@ -178,13 +186,6 @@ FuncGraphPtr ExecutorPy::GetFuncGraph(const std::string &phase) {
   return info_[phase]->func_graph;
 }
 
-std::size_t ExecutorPy::ArgListSize(const std::string &phase) {
-  if (info_.count(phase) == 0) {
-    MS_LOG(EXCEPTION) << "No phase in executor:" << GetPhasePrefix(phase);
-  }
-  return info_[phase]->arg_list_size;
-}
-
 compile::VmEvalFuncPtr ExecutorPy::GetVmEvalFunc(const std::string &phase) {
   ResourcePtr res = GetResource(phase);
   MS_EXCEPTION_IF_NULL(res);
@@ -247,9 +248,22 @@ py::dict ExecutorPy::GetParameterLayout(const std::string &phase) {
 
 py::dict ExecutorPy::GetCNodeStrategy(const std::string &phase) {
   MS_LOG(DEBUG) << "GetCNodeStrategy!";
-  std::string layout_graph = phase + kStepParallelGraph;
-  auto graph = GetFuncGraph(layout_graph);
-  return mindspore::parallel::GetCNodeStrategy(graph);
+  return stra_dict_[phase];
+}
+
+void ExecutorPy::SetCNodeStrategy(const std::string &name, const parallel::Strategys &strategy) {
+  MS_LOG(DEBUG) << "SetCNodeStrategy!";
+  stra_dict_[phase_][py::str(name)] = strategy;
+}
+
+size_t ExecutorPy::GetNumOpsInfo(const std::string &phase) {
+  MS_LOG(DEBUG) << "GetNumOpsInfo!";
+  return phase_to_num_op_info_[phase];
+}
+
+void ExecutorPy::SetNumOpsInfo(size_t num_ops) {
+  MS_LOG(DEBUG) << "SetNumOpsInfo!";
+  phase_to_num_op_info_[phase_] = num_ops;
 }
 
 py::dict ExecutorPy::GetAllreduceFusion(const std::string &phase) {
@@ -290,6 +304,7 @@ void ExecutorPy::DelNetRes(const std::string &id) {
 
 void ExecutorPy::ClearRes() {
   MS_LOG(INFO) << "Clean executor resource!";
+  Resource::mem_cleaner().ClearPrimitivePyPythonObj();
   executor_ = nullptr;
 }
 
@@ -331,8 +346,8 @@ std::map<std::string, std::pair<PrimitivePyPtr, std::string>> ExecutorPy::FetchI
     }
     auto weight_name = weight_node->cast<ParameterPtr>()->name();
     // find the fakequant from input
-    int count = 0;
-    const int max_depth = 5;
+    int64_t count = 0;
+    const int64_t max_depth = 5;
     while (!is_quant_cnode(x)) {
       if (count >= max_depth) {
         break;
@@ -453,6 +468,7 @@ bool ExecutorPy::CompileInner(const py::object &obj, const py::tuple &args, cons
 #endif
   ExecutorInfoPtr executor_info = std::make_shared<ExecutorInfo>();
   auto phase_s = py::cast<std::string>(phase);
+  phase_ = phase_s;
   MS_LOG(INFO) << "ExecutorPy compile phase:" << phase_s << "!";
   ResourcePtr resource = std::make_shared<Resource>(obj);
 
@@ -467,6 +483,9 @@ bool ExecutorPy::CompileInner(const py::object &obj, const py::tuple &args, cons
     bool succ = parse::ConvertData(args[i], &converted);
     if (!succ) {
       MS_LOG(EXCEPTION) << "Args convert error";
+    }
+    if (MsContext::GetInstance()->get_param<int>(MS_CTX_EXECUTION_MODE) == kGraphMode) {
+      CheckArgIsTensor(converted, i);
     }
     bool broaden = true;
     args_spec.push_back(abstract::FromValue(converted, broaden));
@@ -522,7 +541,6 @@ static std::string PrintArgs(const py::tuple &args) {
 
 bool ExecutorPy::Compile(const py::object &obj, const py::tuple &args, const py::object &phase, bool use_vm) {
   bool ret_value = false;
-
   try {
     MS_LOG(DEBUG) << PrintArgs(args);
     ret_value = CompileInner(obj, args, phase, use_vm);
@@ -563,7 +581,6 @@ bool ExecutorPy::Compile(const py::object &obj, const py::tuple &args, const py:
     std::string exName(abi::__cxa_current_exception_type()->name());
     MS_LOG(EXCEPTION) << "Error occurred when compile graph. Exception name: " << exName;
   }
-
   return ret_value;
 }
 
@@ -628,7 +645,7 @@ void Pipeline::Run() {
   FuncGraphPtr user_graph = nullptr;
 
   WITH(MsProfile::GetProfile())[&user_graph, this]() {
-    int i = 0;
+    size_t i = 0;
     for (auto &action : actions_) {
 #ifdef ENABLE_TIMELINE
       DumpTime &dump_time = DumpTime::GetInstance();
@@ -644,6 +661,21 @@ void Pipeline::Run() {
 #endif
         MS_LOG(DEBUG) << "Action " << action.first << " end.";
       };
+      if (action.first == "task_emit") {
+        auto func_graph = resource_->func_graph();
+        if (func_graph != nullptr && func_graph->manager() != nullptr) {
+          auto manager = func_graph->manager();
+          size_t graph_nums = manager->func_graphs().size();
+          int64_t sinksize = ConfigManager::GetInstance().iter_num();
+          if (graph_nums == 1) {
+            resource_->set_gpu_loopsink(true, sinksize);
+          } else {
+            resource_->set_gpu_loopsink(false, sinksize);
+          }
+          MS_LOG(INFO) << "Change gpu_loopsink_flag_ to " << resource_->gpu_loopsink_flag() << ", set loopsink size to "
+                       << sinksize;
+        }
+      }
       if (!result) {
         MS_LOG(EXCEPTION) << "Pipeline running to end, failed in step:" << action.first;
       }
@@ -656,7 +688,11 @@ void Pipeline::Run() {
           // generate IR file in dot format, which can be converted to svg file using graphviz dot command
           draw::Draw(base_name + ".dot", graph);
           // generate IR file in human readable format
-          DumpIR(base_name + ".ir", graph);
+          if (i == actions_.size() - 1) {
+            DumpIR(base_name + ".ir", graph, false, kWholeStack);
+          } else {
+            DumpIR(base_name + ".ir", graph, false, kTopStack);
+          }
           // generate IR file in a heavily commented format, which can also be reloaded
           ExportIR(base_name + ".dat", std::to_string(i), graph);
         }
@@ -690,16 +726,15 @@ void Pipeline::Run() {
 #endif
 
   if (MsContext::GetInstance()->get_param<bool>(MS_CTX_SAVE_GRAPHS_FLAG) && (user_graph != nullptr)) {
-    std::string user_graph_file = GetFilePathName("ModelDigraph.dot");
-    MS_LOG(DEBUG) << "Save user graph to: " << user_graph_file;
-    draw::DrawUserFuncGraph(user_graph_file, user_graph);
+    draw::DrawUserFuncGraph("ModelDigraph.dot", user_graph);
   }
   MS_LOG(INFO) << "End";
 }
 
 void ProcessVmArgInner(const py::tuple &args, const ResourcePtr &res, VectorRef *const arg_list) {
+  MS_EXCEPTION_IF_NULL(arg_list);
   std::size_t size = args.size();
-
+  bool arg_list_inited = !arg_list->empty();
   for (std::size_t i = 0; i < size; i++) {
     py::object arg = args[i];
     auto ms_context = MsContext::GetInstance();
@@ -711,16 +746,14 @@ void ProcessVmArgInner(const py::tuple &args, const ResourcePtr &res, VectorRef 
     if (!succ) {
       MS_LOG(EXCEPTION) << "The " << i << "th arg convert failed.";
     }
-    if (MsContext::GetInstance()->get_param<int>(MS_CTX_EXECUTION_MODE) == 0) {
-      if (!converted->isa<tensor::Tensor>()) {
-        MS_EXCEPTION(TypeError) << "For 'graph mode', the " << i << "th arg: " << converted->ToString()
-                                << " is not tensor.";
-      }
-      if (converted->cast<TensorPtr>()->is_parameter()) {
-        MS_EXCEPTION(TypeError) << "The inputs could not be Parameter.";
-      }
+    if (!arg_list_inited) {
+      arg_list->push_back(converted);
+      continue;
     }
-    arg_list->push_back(converted);
+    if (i >= arg_list->size()) {
+      MS_LOG(EXCEPTION) << "i:" << i << " output of range:" << arg_list->size();
+    }
+    (*arg_list)[i] = converted;
   }
 
   MS_EXCEPTION_IF_NULL(res);
@@ -797,22 +830,37 @@ py::object ExecutorPy::Run(const py::tuple &args, const py::object &phase) {
     return args;
   }
 #endif
-  std::size_t full_arg_size = ArgListSize(phase_s);
-  if (size > full_arg_size) {
-    MS_LOG(WARNING) << "The arg num : size = " << size << ". full_arg_size = " << full_arg_size;
+  auto iter = info_.find(phase_s);
+  if (iter == info_.end()) {
+    MS_LOG(EXCEPTION) << "No phase in executor:" << GetPhasePrefix(phase_s);
   }
-  VectorRef arg_list;
-  ProcessVmArg(args, phase_s, &arg_list);
-
+  auto &execute_info = iter->second;
+  MS_EXCEPTION_IF_NULL(execute_info);
+  if (size > execute_info->arg_list_size) {
+    MS_LOG(WARNING) << "The arg num : size = " << size << ". full_arg_size = " << execute_info->arg_list_size;
+  }
+  ProcessVmArg(args, phase_s, &execute_info->arg_list);
+  // Start to run phase.
   compile::VmEvalFuncPtr run = GetVmEvalFunc(phase_s);
   if (run == nullptr) {
     MS_LOG(EXCEPTION) << "Can't find run graph func for " << phase_s;
   }
-
+  // Set loopsink size for each phase.
+  bool is_loopsink = info_[phase_s]->resource->gpu_loopsink_flag();
+  int64_t sinksize = info_[phase_s]->resource->gpu_loopsink_size();
+  ConfigManager::GetInstance().set_gpu_loopsink_size(is_loopsink ? sinksize : 1);
+  // If target is not gpu or is loopsink, keep vmloop 1.
+  bool g = (MsContext::GetInstance()->get_param<std::string>(MS_CTX_DEVICE_TARGET) == kGPUDevice);
+  int64_t vm_loop = (!g || is_loopsink) ? 1 : sinksize;
+  MS_LOG(INFO) << "VM loop size " << vm_loop << ", loopsink size " << (is_loopsink ? sinksize : 1);
+  py::object ret;
   MS_LOG(DEBUG) << "Eval run" << backend;
-  BaseRef value = (*run)(arg_list);
+  for (int64_t i = 0; i < vm_loop; i++) {
+    BaseRef value = (*run)(execute_info->arg_list);
+    ret = BaseRefToPyData(value);
+  }
   MS_LOG(DEBUG) << "Run end";
-  return BaseRefToPyData(value);
+  return ret;
 }
 
 FuncGraphPtr ExecutorPy::BuildGraph(const py::dict &init_params, const std::string &phase,
@@ -848,6 +896,15 @@ void ExecutorPy::RunInitGraph(const py::dict &init_params, const std::string &ph
 #endif
 }
 
+void ExecutorPy::PyExePath(const py::object &py_exe_path) {
+  if (!py::isinstance<py::str>(py_exe_path)) {
+    MS_LOG(EXCEPTION) << "Failed, phase input is not a str";
+  }
+  auto py_exe_path_s = py::cast<std::string>(py_exe_path);
+  auto ms_context = MsContext::GetInstance();
+  ms_context->set_param<std::string>(MS_CTX_PYTHON_EXE_PATH, py_exe_path_s);
+}
+
 bool InitExecDataset(const std::string &queue_name, int64_t iter_num, int64_t batch_size,
                      const std::vector<TypePtr> &types, const std::vector<std::vector<int64_t>> &shapes,
                      const std::vector<int64_t> &input_indexes, const std::string &phase, bool need_run) {
@@ -856,7 +913,7 @@ bool InitExecDataset(const std::string &queue_name, int64_t iter_num, int64_t ba
   auto ms_context = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(ms_context);
   if (!context::IsTsdOpened(ms_context) || !context::IsGeInited(ms_context)) {
-    (void)InitBackend();
+    (void)InitPipeline();
   }
 #endif
   if (iter_num == -1) {
@@ -879,22 +936,27 @@ bool InitExecDataset(const std::string &queue_name, int64_t iter_num, int64_t ba
 bool InitExecDatasetVm(const std::string &queue_name, int64_t size, int64_t batch_size,
                        const std::vector<TypePtr> &types, const std::vector<std::vector<int64_t>> &shapes,
                        const std::vector<int64_t> &input_indexes, bool need_run) {
+#if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))
+  if ((ps::Util::IsParamServerMode()) && (!ps::Util::IsRoleOfWorker())) {
+    return true;
+  }
+#endif
   MS_LOG(INFO) << "Start InitDataSet Entry";
   ShapeVector int_input_indexes;
   (void)std::transform(input_indexes.begin(), input_indexes.end(), std::back_inserter(int_input_indexes),
-                       [](int64_t item) { return static_cast<int>(item); });
+                       [](int64_t item) { return static_cast<int64_t>(item); });
   std::vector<ShapeVector> int_shapes;
   (void)std::transform(shapes.begin(), shapes.end(), std::back_inserter(int_shapes),
                        [](const std::vector<int64_t> &item) {
                          ShapeVector vector_item;
                          (void)std::transform(item.begin(), item.end(), std::back_inserter(vector_item),
-                                              [](int64_t inner_item) { return static_cast<int>(inner_item); });
+                                              [](int64_t inner_item) { return static_cast<int64_t>(inner_item); });
                          return vector_item;
                        });
   auto p_init = std::make_shared<Primitive>("InitDataSetQueue");
   p_init->set_attr("queue_name", MakeValue(queue_name));
-  p_init->set_attr("size", MakeValue(static_cast<int>(size)));
-  p_init->set_attr("batch_size", MakeValue(static_cast<int>(batch_size)));
+  p_init->set_attr("size", MakeValue(static_cast<int64_t>(size)));
+  p_init->set_attr("batch_size", MakeValue(static_cast<int64_t>(batch_size)));
   p_init->set_attr("types", MakeValue(types));
   p_init->set_attr("shapes", MakeValue(int_shapes));
   p_init->set_attr("input_indexes", MakeValue(int_input_indexes));
@@ -919,11 +981,19 @@ bool InitExecDatasetVm(const std::string &queue_name, int64_t size, int64_t batc
   MS_EXCEPTION_IF_NULL(convert_fn);
   // Convert CNodeList to LinConvertResult.
   ConfigManager::GetInstance().set_iter_num(1);
-  auto runner = convert_fn({app_init}, "");
+  auto segment = std::make_shared<GraphSegment>(std::vector<AnfNodePtr>{app_init}, false);
+  auto runner = convert_fn(segment, "");
   if (MsContext::GetInstance()->get_param<int>(MS_CTX_EXECUTION_MODE) != kPynativeMode) {
     backend->Link(runner.graph_id);
   }
   ConfigManager::GetInstance().set_iter_num(size);
+  // PS cache does not support loop sink.
+#if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))
+  if (ps::Util::IsRoleOfWorker() && ps::PsDataPrefetch::GetInstance().cache_enable()) {
+    ps::PsDataPrefetch::GetInstance().CreateDataChannel(queue_name, LongToSize(size));
+    ConfigManager::GetInstance().set_iter_num(1);
+  }
+#endif
 
   if (!(*runner.run)) {
     // empty function
@@ -938,18 +1008,17 @@ bool InitExecDatasetVm(const std::string &queue_name, int64_t size, int64_t batc
   }
   MS_LOG(DEBUG) << "InitDataSetVm End.";
   return true;
-}
+}  // namespace pipeline
 
 void ResetOpId() { mindspore::id_generator::reset_id(); }
 
 void InitHccl() {
 #ifdef ENABLE_GE
-  (void)InitBackend();
+  (void)InitPipeline();
 #else
   mindspore::parse::python_adapter::set_python_env_flag(true);
   auto ms_context = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(ms_context);
-  (void)context::OpenTsd(ms_context);
   uint32_t device_id = ms_context->get_param<uint32_t>(MS_CTX_DEVICE_ID);
   std::string device_name = ms_context->get_param<std::string>(MS_CTX_DEVICE_TARGET);
   ms_context->set_param<bool>(MS_CTX_ENABLE_HCCL, true);
@@ -957,10 +1026,14 @@ void InitHccl() {
       ms_context->get_param<std::string>(MS_CTX_DEVICE_TARGET) == kAscendDevice) {
     auto runtime_instance = device::KernelRuntimeManager::Instance().GetKernelRuntime(device_name, device_id);
     MS_EXCEPTION_IF_NULL(runtime_instance);
+    runtime_instance->PreInit();
+    (void)context::OpenTsd(ms_context);
     if (!runtime_instance->Init()) {
       MS_LOG(ERROR) << "Kernel runtime init error.";
       return;
     }
+  } else {
+    (void)context::OpenTsd(ms_context);
   }
 #endif
 }
@@ -969,6 +1042,7 @@ void FinalizeHccl() {
 #ifdef ENABLE_GE
   (void)FinalizeBackend();
 #else
+  session::ExecutorManager::Instance().Clear();
   device::KernelRuntimeManager::Instance().ClearRuntimeResource();
 #endif
 }
@@ -977,7 +1051,7 @@ void ExportGraph(const std::string &file_name, const std::string &, const std::s
 #if (ENABLE_GE || ENABLE_D)
   ExportDFGraph(file_name, phase);
 #else
-  MS_EXCEPTION(ValueError) << "Only MindSpore with Ascend backend support exporting file in 'AIR' format.";
+  MS_EXCEPTION(ValueError) << "Only support export file in 'AIR' format with Ascend backend.";
 #endif
 }
 
@@ -989,9 +1063,32 @@ void ReleaseGeTsd() {
   }
 }
 
-void InitBackend() {
+void StartUpProfiling() {
+  auto ms_context = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(ms_context);
+  if (!ms_context->get_param<bool>(MS_CTX_ENABLE_PROFILING)) {
+    return;
+  }
+  MS_LOG(INFO) << "Startup profiling";
+  // Start up profiling before OpenTsd
+  uint32_t device_id = ms_context->get_param<uint32_t>(MS_CTX_DEVICE_ID);
+  std::string device_name = ms_context->get_param<std::string>(MS_CTX_DEVICE_TARGET);
+  if (ms_context->backend_policy() == "ms" &&
+      ms_context->get_param<std::string>(MS_CTX_DEVICE_TARGET) == kAscendDevice) {
+    auto runtime_instance = device::KernelRuntimeManager::Instance().GetKernelRuntime(device_name, device_id);
+    MS_EXCEPTION_IF_NULL(runtime_instance);
+    runtime_instance->PreInit();
+  }
+}
+
+void InitPipeline() {
+  // If previous pipeline exit with exception, memory cleaner's flags maybe unpredictable, so init when a new pipeline
+  // start.
+  pipeline::Resource::mem_cleaner().Init();
   // set python env flag
   mindspore::parse::python_adapter::set_python_env_flag(true);
+  // Startup profiling before open tsd
+  StartUpProfiling();
   // open tsd before ge initialize
   auto ms_context = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(ms_context);
@@ -1013,10 +1110,11 @@ void ClearResAtexit() {
   pynative::ClearPyNativeSession();
   session::ClearPythonParasMap();
 #if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))
-  if (ps::Util::IsParamServerMode()) {
-    if (ps::Util::IsRoleOfWorker()) {
-      ps::worker.Finalize();
+  if (ps::Util::IsParamServerMode() && ps::Util::IsRoleOfWorker()) {
+    if (ps::PsDataPrefetch::GetInstance().cache_enable()) {
+      ps::ps_cache_instance.Finalize();
     }
+    ps::worker.Finalize();
   }
 #endif
   ad::g_k_prims.clear();

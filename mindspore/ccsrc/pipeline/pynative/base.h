@@ -28,6 +28,7 @@
 #include "pybind11/pybind11.h"
 #include "ir/anf.h"
 #include "pybind_api/ir/primitive_py.h"
+#include "pipeline/jit/parse/parse.h"
 #include "abstract/abstract_value.h"
 
 namespace mindspore {
@@ -50,19 +51,31 @@ enum RunOpArgsEnum { PY_PRIM = 0, PY_NAME, PY_INPUTS, PY_ARGS_NUM };
 
 struct OpExecInfo {
   std::string op_name;
+  std::string op_index;
   std::string prim_id;
   PrimitivePyPtr py_primitive;
   AbstractBasePtr abstract;
-  ValuePtr value = nullptr;
 
   py::list op_inputs;
   py::dict op_attrs;
   std::vector<bool> inputs_mask;
+  bool is_dynamic_shape = false;
+  std::string next_op_name = "";
+  bool is_mixed_precision_cast = false;
+  size_t next_input_index = 0;
 };
 using OpExecInfoPtr = std::shared_ptr<OpExecInfo>;
-OpExecInfoPtr GenerateOpExecInfo(const py::args &args);
 
-const std::set<std::string> ignore_infer_prim = {"make_ref", "mixed_precision_cast"};
+const std::set<std::string> ignore_infer_prim = {"mixed_precision_cast"};
+const std::set<std::string> force_infer_prim = {"TopK", "DropoutGenMask"};
+const std::set<std::string> ignore_judge_dynamic_cell = {
+  "Cell mindspore.nn.layer.basic.Dense", "Cell mindspore.nn.probability.distribution.normal.Normal",
+  "Cell src.transformer.create_attn_mask.CreateAttentionMaskFromInputMask", "Cell mindspore.nn.layer.math.MatMul"};
+const std::set<std::string> unchanged_named_primitive = {parse::NAMED_PRIMITIVE_ATTRIBUTE,
+                                                         parse::NAMED_PRIMITIVE_NAMECONSTANT,
+                                                         parse::NAMED_PRIMITIVE_NUM, parse::NAMED_PRIMITIVE_STR};
+const std::set<std::string> dynamic_shape_const_input_to_attr = {"Cast", "ExpandDims", "Reshape", "EmbeddingLookup",
+                                                                 "Transpose"};
 }  // namespace pynative
 }  // namespace mindspore
 

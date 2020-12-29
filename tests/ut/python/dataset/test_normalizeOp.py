@@ -242,7 +242,25 @@ def test_normalize_exception_unequal_size_c():
         _ = c_vision.Normalize([100, 250, 125], [50, 50, 75, 75])
     except ValueError as e:
         logger.info("Got an exception in DE: {}".format(str(e)))
-        assert str(e) == "Length of mean and std must be equal"
+        assert str(e) == "Length of mean and std must be equal."
+
+
+def test_normalize_exception_out_of_range_c():
+    """
+    Test Normalize in c transformation: mean, std out of range
+    expected to raise ValueError
+    """
+    logger.info("test_normalize_exception_out_of_range_c")
+    try:
+        _ = c_vision.Normalize([256, 250, 125], [50, 75, 75])
+    except ValueError as e:
+        logger.info("Got an exception in DE: {}".format(str(e)))
+        assert "not within the required interval" in str(e)
+    try:
+        _ = c_vision.Normalize([255, 250, 125], [0, 75, 75])
+    except ValueError as e:
+        logger.info("Got an exception in DE: {}".format(str(e)))
+        assert "not within the required interval" in str(e)
 
 
 def test_normalize_exception_unequal_size_py():
@@ -255,7 +273,7 @@ def test_normalize_exception_unequal_size_py():
         _ = py_vision.Normalize([0.50, 0.30, 0.75], [0.18, 0.32, 0.71, 0.72])
     except ValueError as e:
         logger.info("Got an exception in DE: {}".format(str(e)))
-        assert str(e) == "Length of mean and std must be equal"
+        assert str(e) == "Length of mean and std must be equal."
 
 
 def test_normalize_exception_invalid_size_py():
@@ -266,7 +284,7 @@ def test_normalize_exception_invalid_size_py():
     logger.info("test_normalize_exception_invalid_size_py")
     data = util_test_normalize([0.75, 0.25], [0.18, 0.32], "python")
     try:
-        _ = data.create_dict_iterator(num_epochs=1).get_next()
+        _ = data.create_dict_iterator(num_epochs=1).__next__()
     except RuntimeError as e:
         logger.info("Got an exception in DE: {}".format(str(e)))
         assert "Length of mean and std must both be 1 or" in str(e)

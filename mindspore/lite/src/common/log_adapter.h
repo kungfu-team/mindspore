@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_LITE_COMMON_LOG_ADAPTER_H_
-#define MINDSPORE_LITE_COMMON_LOG_ADAPTER_H_
+#ifndef MINDSPORE_LITE_SRC_COMMON_LOG_ADAPTER_H_
+#define MINDSPORE_LITE_SRC_COMMON_LOG_ADAPTER_H_
 #ifdef USE_GLOG
 #include "utils/log_adapter.h"
 #else
@@ -81,7 +81,11 @@ class LogWriter {
 
   ~LogWriter() = default;
 
+#ifdef _WIN32
+  void operator<(const LogStream &stream) const noexcept __declspec(dllexport);
+#else
   void operator<(const LogStream &stream) const noexcept __attribute__((visibility("default")));
+#endif
 
  private:
   void OutputLog(const std::ostringstream &msg) const;
@@ -102,11 +106,11 @@ class LogWriter {
 
 }  // namespace mindspore
 
-#ifdef DEBUG
+#ifdef Debug
 #include <cassert>
 #define MS_ASSERT(f) assert(f)
 #else
 #define MS_ASSERT(f) ((void)0)
 #endif
 #endif
-#endif  // MINDSPORE_LITE_COMMON_LOG_ADAPTER_H_
+#endif  // MINDSPORE_LITE_SRC_COMMON_LOG_ADAPTER_H_

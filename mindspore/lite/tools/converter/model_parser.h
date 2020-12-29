@@ -28,13 +28,13 @@ namespace mindspore::lite {
 using namespace schema;
 class ModelParser {
  public:
-  ModelParser() {}
+  ModelParser() = default;
 
-  virtual ~ModelParser() {}
+  virtual ~ModelParser() = default;
 
-  FuncGraphPtr Parse(const std::string &modelFile, const std::string &weightFile,
-                     const QuantType &quantType = QuantType_QUANT_NONE) {
-    auto *meta_graph = ParseToFb(modelFile, weightFile, quantType);
+  virtual FuncGraphPtr Parse(const std::string &model_file, const std::string &weight_file,
+                             const QuantType &quant_type) {
+    auto *meta_graph = ParseToFb(model_file, weight_file, quant_type);
     if (meta_graph == nullptr) {
       MS_LOG(ERROR) << "parse model to fb failed";
       return nullptr;
@@ -44,8 +44,9 @@ class ModelParser {
     return func_graph;
   }
 
-  virtual schema::MetaGraphT *ParseToFb(const std::string &modelFile, const std::string &weightFile,
-                                        const QuantType &quantType = QuantType_QUANT_NONE) = 0;
+ protected:
+  virtual schema::MetaGraphT *ParseToFb(const std::string &model_file, const std::string &weight_file,
+                                        const QuantType &quant_type = QuantType_QUANT_NONE) = 0;
 
  public:
   static FuncGraphPtr Fb2Anf(schema::MetaGraphT *meta_graph) {

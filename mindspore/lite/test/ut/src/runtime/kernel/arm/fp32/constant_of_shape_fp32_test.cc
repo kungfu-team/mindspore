@@ -15,7 +15,7 @@
  */
 #include "src/common/log_adapter.h"
 #include "common/common_test.h"
-#include "mindspore/lite/src/runtime/kernel/arm/fp32/constant_of_shape.h"
+#include "mindspore/lite/src/runtime/kernel/arm/base/constant_of_shape.h"
 #include "src/kernel_registry.h"
 #include "src/lite_kernel.h"
 
@@ -27,16 +27,16 @@ class TestConstantOfShapeFp32 : public mindspore::CommonTest {
 
 int ConstantOfShapeTestInit(std::vector<lite::Tensor *> *inputs_, std::vector<lite::Tensor *> *outputs_, float *a_ptr,
                             std::vector<int> a_shape) {
-  auto in_t = new lite::Tensor(kNumberTypeInt32, a_shape, schema::Format_NHWC, lite::Tensor::Category::CONST);
+  auto in_t = new lite::Tensor(kNumberTypeInt32, a_shape, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   in_t->MallocData();
   memcpy(in_t->MutableData(), a_ptr, sizeof(float) * in_t->ElementsNum());
   inputs_->push_back(in_t);
 
   std::vector<int> c_shape(in_t->ElementsNum());
-  for (int i = 0; i < c_shape.size(); ++i) {
+  for (unsigned int i = 0; i < c_shape.size(); ++i) {
     c_shape[i] = a_ptr[i];
   }
-  auto out_t = new lite::Tensor(kNumberTypeFloat, c_shape, schema::Format_NHWC, lite::Tensor::Category::CONST);
+  auto out_t = new lite::Tensor(kNumberTypeFloat, c_shape, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   out_t->MallocData();
   outputs_->push_back(out_t);
 
@@ -47,7 +47,8 @@ TEST_F(TestConstantOfShapeFp32, Simple) {
   std::vector<lite::Tensor *> inputs_;
   std::vector<lite::Tensor *> outputs_;
   auto param = new ConstantOfShapeParameter();
-  param->value_ = 1;
+  param->value_.f32_value_ = 1;
+  param->data_type_ = kNumberTypeFloat32;
   float a[] = {1, 2, 3, 4};
   std::vector<int> a_shape = {4, 1, 1, 1};
   // std::vector<int> c_shape = {2, 2, 2, 1};
@@ -63,7 +64,7 @@ TEST_F(TestConstantOfShapeFp32, Simple) {
   float *output = reinterpret_cast<float *>(outputs_[0]->MutableData());
   for (int i = 0; i < 8; ++i) printf("%f ", output[i]);
   printf("\n");
-  CompareOutputData(reinterpret_cast<float *>(outputs_[0]->MutableData()), correct, total_size, 0.0001);
+  ASSERT_EQ(0, CompareOutputData(reinterpret_cast<float *>(outputs_[0]->MutableData()), correct, total_size, 0.0001));
   delete op;
   for (auto t : inputs_) delete t;
   for (auto t : outputs_) delete t;

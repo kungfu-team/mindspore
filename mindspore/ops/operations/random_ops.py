@@ -34,10 +34,16 @@ class StandardNormal(PrimitiveWithInfer):
     Outputs:
         Tensor. The shape is the same as the input `shape`. The dtype is float32.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> shape = (4, 16)
-        >>> stdnormal = P.StandardNormal(seed=2)
+        >>> stdnormal = ops.StandardNormal(seed=2)
         >>> output = stdnormal(shape)
+        >>> result = output.shape
+        >>> print(result)
+        (4, 16)
     """
 
     @prim_attr_register
@@ -79,10 +85,16 @@ class StandardLaplace(PrimitiveWithInfer):
     Outputs:
         Tensor. The shape that the input 'shape' denotes. The dtype is float32.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> shape = (4, 16)
-        >>> stdlaplace = P.StandardLaplace(seed=2)
+        >>> stdlaplace = ops.StandardLaplace(seed=2)
         >>> output = stdlaplace(shape)
+        >>> result = output.shape
+        >>> print(result)
+        (4, 16)
     """
 
     @prim_attr_register
@@ -104,7 +116,6 @@ class StandardLaplace(PrimitiveWithInfer):
             'dtype': mstype.float32,
             'value': None}
         return out
-
 
 
 class Gamma(PrimitiveWithInfer):
@@ -129,12 +140,18 @@ class Gamma(PrimitiveWithInfer):
         Tensor. The shape must be the broadcasted shape of Input "shape" and shapes of alpha and beta.
         The dtype is float32.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> shape = (4, 16)
-        >>> alpha = Tensor(1.0, mstype.float32)
-        >>> beta = Tensor(1.0, mstype.float32)
-        >>> gamma = P.Gamma(seed=3)
-        >>> output = Gamma(shape, alpha, beta)
+        >>> shape = (3, 1, 2)
+        >>> alpha = Tensor(np.array([[3, 4], [5, 6]]), mstype.float32)
+        >>> beta = Tensor(np.array([1.0]), mstype.float32)
+        >>> gamma = ops.Gamma(seed=3)
+        >>> output = gamma(shape, alpha, beta)
+        >>> result = output.shape
+        >>> print(result)
+        (3, 2, 2)
     """
 
     @prim_attr_register
@@ -151,8 +168,8 @@ class Gamma(PrimitiveWithInfer):
         Validator.check_value_type("shape", shape_v, [tuple], self.name)
         for i, shape_i in enumerate(shape_v):
             Validator.check_positive_int(shape_i, f'shape[{i}]', self.name)
-        Validator.check_tensor_type_same({"alpha": alpha["dtype"]}, [mstype.float32], self.name)
-        Validator.check_tensor_type_same({"beta": beta["dtype"]}, [mstype.float32], self.name)
+        Validator.check_tensor_dtype_valid("alpha", alpha["dtype"], [mstype.float32], self.name)
+        Validator.check_tensor_dtype_valid("beta", beta["dtype"], [mstype.float32], self.name)
         broadcast_shape = get_broadcast_shape(alpha['shape'], beta['shape'], self.name)
         broadcast_shape = get_broadcast_shape(broadcast_shape, shape_v, self.name)
         out = {
@@ -182,11 +199,17 @@ class Poisson(PrimitiveWithInfer):
         Tensor. Its shape must be the broadcasted shape of `shape` and the shape of `mean`.
         The dtype is int32.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> shape = (4, 16)
-        >>> mean = Tensor(5.0, mstype.float32)
-        >>> poisson = P.Poisson(seed=5)
+        >>> shape = (4, 1)
+        >>> mean = Tensor(np.array([5.0, 10.0]), mstype.float32)
+        >>> poisson = ops.Poisson(seed=5)
         >>> output = poisson(shape, mean)
+        >>> result = output.shape
+        >>> print(result)
+        (4, 2)
     """
 
     @prim_attr_register
@@ -203,7 +226,7 @@ class Poisson(PrimitiveWithInfer):
         Validator.check_value_type("shape", shape_v, [tuple], self.name)
         for i, shape_i in enumerate(shape_v):
             Validator.check_positive_int(shape_i, f'shape[{i}]', self.name)
-        Validator.check_tensor_type_same({"mean": mean["dtype"]}, [mstype.float32], self.name)
+        Validator.check_tensor_dtype_valid("mean", mean["dtype"], [mstype.float32], self.name)
         broadcast_shape = get_broadcast_shape(mean['shape'], shape_v, self.name)
         out = {
             'shape': broadcast_shape,
@@ -237,12 +260,18 @@ class UniformInt(PrimitiveWithInfer):
     Outputs:
         Tensor. The shape is the same as the input 'shape', and the data type is int32.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> shape = (4, 16)
+        >>> shape = (2, 4)
         >>> minval = Tensor(1, mstype.int32)
         >>> maxval = Tensor(5, mstype.int32)
-        >>> uniform_int = P.UniformInt(seed=10)
+        >>> uniform_int = ops.UniformInt(seed=10)
         >>> output = uniform_int(shape, minval, maxval)
+        >>> result = output.shape
+        >>> print(result)
+        (2, 4)
     """
 
     @prim_attr_register
@@ -259,8 +288,8 @@ class UniformInt(PrimitiveWithInfer):
         Validator.check_value_type("shape", shape_v, [tuple], self.name)
         for i, shape_i in enumerate(shape_v):
             Validator.check_positive_int(shape_i, f'shape[{i}]', self.name)
-        Validator.check_tensor_type_same({"minval": minval["dtype"]}, [mstype.int32], self.name)
-        Validator.check_tensor_type_same({"maxval": maxval["dtype"]}, [mstype.int32], self.name)
+        Validator.check_tensor_dtype_valid("minval", minval["dtype"], [mstype.int32], self.name)
+        Validator.check_tensor_dtype_valid("maxval", maxval["dtype"], [mstype.int32], self.name)
         minval_shape = minval['shape']
         maxval_shape = maxval['shape']
         Validator.check("dim of minval", len(minval_shape), '0(scalar)', 0, Rel.EQ, self.name)
@@ -286,10 +315,16 @@ class UniformReal(PrimitiveWithInfer):
     Outputs:
         Tensor. The shape that the input 'shape' denotes. The dtype is float32.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> shape = (4, 16)
-        >>> uniformreal = P.UniformReal(seed=2)
+        >>> shape = (2, 2)
+        >>> uniformreal = ops.UniformReal(seed=2)
         >>> output = uniformreal(shape)
+        >>> result = output.shape
+        >>> print(result)
+        (2, 2)
     """
 
     @prim_attr_register
@@ -329,7 +364,7 @@ class RandomChoiceWithMask(PrimitiveWithInfer):
 
     Inputs:
         - **input_x** (Tensor[bool]) - The input tensor.
-            The input tensor rank must be greater than or equal to 1 and less than or equal to 5.
+          The input tensor rank must be greater than or equal to 1 and less than or equal to 5.
 
     Outputs:
         Two tensors, the first one is the index tensor and the other one is the mask tensor.
@@ -337,10 +372,19 @@ class RandomChoiceWithMask(PrimitiveWithInfer):
         - **index** (Tensor) - The output shape is 2-D.
         - **mask** (Tensor) - The output shape is 1-D.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> rnd_choice_mask = P.RandomChoiceWithMask()
+        >>> rnd_choice_mask = ops.RandomChoiceWithMask()
         >>> input_x = Tensor(np.ones(shape=[240000, 4]).astype(np.bool))
         >>> output_y, output_mask = rnd_choice_mask(input_x)
+        >>> result = output_y.shape
+        >>> print(result)
+        (256, 2)
+        >>> result = output_mask.shape
+        >>> print(result)
+        (256,)
     """
 
     @prim_attr_register
@@ -352,12 +396,12 @@ class RandomChoiceWithMask(PrimitiveWithInfer):
         Validator.check_value_type('seed2', seed2, [int], self.name)
 
     def infer_shape(self, x_shape):
-        Validator.check_integer("input_x rank", len(x_shape), 1, Rel.GE, self.name)
-        Validator.check_integer("input_x rank", len(x_shape), 5, Rel.LE, self.name)
+        Validator.check_int(len(x_shape), 1, Rel.GE, "input_x rank", self.name)
+        Validator.check_int(len(x_shape), 5, Rel.LE, "input_x rank", self.name)
         return ([self.count, len(x_shape)], [self.count])
 
     def infer_dtype(self, x_dtype):
-        Validator.check_tensor_type_same({'x': x_dtype}, [mstype.bool_], self.name)
+        Validator.check_tensor_dtype_valid('x', x_dtype, [mstype.bool_], self.name)
         return (mstype.int32, mstype.bool_)
 
 
@@ -377,18 +421,24 @@ class RandomCategorical(PrimitiveWithInfer):
     Outputs:
         - **output** (Tensor) - The output Tensor with shape [batch_size, num_samples].
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> class Net(nn.Cell):
-        >>>   def __init__(self, num_sample):
-        >>>     super(Net, self).__init__()
-        >>>     self.random_categorical = P.RandomCategorical(mindspore.int64)
-        >>>     self.num_sample = num_sample
-        >>>   def construct(self, logits, seed=0):
-        >>>     return self.random_categorical(logits, self.num_sample, seed)
-        >>>
+        ...   def __init__(self, num_sample):
+        ...     super(Net, self).__init__()
+        ...     self.random_categorical = ops.RandomCategorical(mindspore.int64)
+        ...     self.num_sample = num_sample
+        ...   def construct(self, logits, seed=0):
+        ...     return self.random_categorical(logits, self.num_sample, seed)
+        ...
         >>> x = np.random.random((10, 5)).astype(np.float32)
         >>> net = Net(8)
         >>> output = net(Tensor(x))
+        >>> result = output.shape
+        >>> print(result)
+        (10, 8)
     """
 
     @prim_attr_register
@@ -403,8 +453,8 @@ class RandomCategorical(PrimitiveWithInfer):
 
     def __infer__(self, logits, num_samples, seed):
         logits_dtype = logits['dtype']
-        valid_types = (mstype.float32, mstype.float16, mstype.float64)
-        Validator.check_tensor_type_same({'logits': logits_dtype}, valid_types, self.name)
+        valid_dtypes = (mstype.float32, mstype.float16, mstype.float64)
+        Validator.check_tensor_dtype_valid('logits', logits_dtype, valid_dtypes, self.name)
         num_samples_v = num_samples['value']
         seed_v = seed['value']
         Validator.check_value_type('num_samples', num_samples_v, (int,), self.name)
@@ -415,6 +465,8 @@ class RandomCategorical(PrimitiveWithInfer):
             raise ValueError("RandomCategorical shape should be 2-dimension.")
         ndim = len(x_shape) - 1
         x_shape[ndim] = num_samples_v
+        self.add_prim_attr('num_samples', num_samples_v)
+        self.add_prim_attr('seed', seed_v)
         return {'shape': (x_shape),
                 'dtype': (self.dtype),
                 'value': None}
@@ -429,34 +481,39 @@ class Multinomial(PrimitiveWithInfer):
         The rows of input do not need to sum to one (in which case we use the values as weights),
         but must be non-negative, finite and have a non-zero sum.
     Args:
-        seed (int): Seed data is used as entropy source for Random number engines to generate pseudo-random numbers.
-          Must be non-negative. Default: 0.
+        seed (int): Random seed, must be non-negative. Default: 0.
+        seed2 (int): Random seed2, must be non-negative. Default: 0.
     Inputs:
         - **input** (Tensor[float32]) - the input tensor containing the cumsum of probabilities, must be 1 or 2
-            dimensions.
+          dimensions.
         - **num_samples** (int32) - number of samples to draw.
 
     Outputs:
         Tensor with the same rows as input, each row has num_samples sampled indices.
 
+    Supported Platforms:
+        ``GPU``
+
     Examples:
         >>> input = Tensor([0., 9., 4., 0.], mstype.float32)
-        >>> multinomial = P.Multinomial(seed=10)
+        >>> multinomial = ops.Multinomial(seed=10)
         >>> output = multinomial(input, 2)
+        >>> print(output)
+        [2 1]
     """
 
     @prim_attr_register
-    def __init__(self, seed=0):
+    def __init__(self, seed=0, seed2=0):
         """init"""
-        Validator.check_value_type("seed", seed, [int], self.name)
         Validator.check_non_negative_int(seed, "seed", self.name)
+        Validator.check_non_negative_int(seed2, "seed2", self.name)
         self.init_prim_io_names(inputs=['input', 'num_sample'], outputs=['output'])
 
     def __infer__(self, inputs, num_samples):
         input_shape = inputs["shape"]
         if len(input_shape) != 1 and len(input_shape) != 2:
             raise ValueError("input dim must be 1 or 2")
-        Validator.check_tensor_type_same({'inputs': inputs['dtype']}, [mstype.float32], self.name)
+        Validator.check_tensor_dtype_valid('inputs', inputs['dtype'], [mstype.float32], self.name)
         num_samples_value = num_samples["value"]
         if num_samples_value is None:
             raise ValueError(f"For {self.name}, shape nust be const")
@@ -470,3 +527,141 @@ class Multinomial(PrimitiveWithInfer):
             "dtype": mstype.int32,
             "value": None}
         return out
+
+
+class UniformCandidateSampler(PrimitiveWithInfer):
+    r"""
+    Uniform candidate sampler.
+
+    This function samples a set of classes(sampled_candidates) from [0, range_max-1] based on uniform distribution.
+    If unique=True, candidates are drawn without replacement, else unique=False with replacement.
+
+    Args:
+        num_true (int): The number of target classes in each training example.
+        num_sampled (int): The number of classes to randomly sample. The sampled_candidates will have a shape
+            of num_sampled. If unique=True, num_sampled must be less than or equal to range_max.
+        unique (bool): Whether all sampled classes in a batch are unique.
+        range_max (int): The number of possible classes, must be non-negative.
+        seed (int): Used for random number generation, must be non-negative. If seed has a value of 0,
+            seed will be replaced with a randomly generated value. Default: 0.
+        remove_accidental_hits (bool): Whether accidental hit is removed. Default: False.
+
+    Inputs:
+        - **true_classes** (Tensor) - A Tensor. The target classes with a Tensor shape of (batch_size, num_true).
+
+    Outputs:
+        - **sampled_candidates** (Tensor) - The sampled_candidates is independent of the true classes.
+          Shape: (num_sampled, ).
+        - **true_expected_count** (Tensor) - The expected counts under the sampling distribution of each
+          of true_classes. Shape: (batch_size, num_true).
+        - **sampled_expected_count** (Tensor) - The expected counts under the sampling distribution of
+          each of sampled_candidates. Shape: (num_sampled, ).
+
+    Supported Platforms:
+        ``GPU``
+
+    Examples:
+        >>> sampler = ops.UniformCandidateSampler(1, 3, False, 4)
+        >>> output1, output2, output3 = sampler(Tensor(np.array([[1], [3], [4], [6], [3]], dtype=np.int32)))
+        >>> print(output1, output2, output3)
+        [1, 1, 3], [[0.75], [0.75], [0.75], [0.75], [0.75]], [0.75, 0.75, 0.75]
+    """
+
+    @prim_attr_register
+    def __init__(self, num_true, num_sampled, unique, range_max, seed=0, remove_accidental_hits=False):
+        """Initialize UniformCandidateSampler"""
+        Validator.check_value_type("num_true", num_true, [int], self.name)
+        Validator.check_value_type("num_sampled", num_sampled, [int], self.name)
+        Validator.check_value_type("unique", unique, [bool], self.name)
+        Validator.check_value_type("range_max", range_max, [int], self.name)
+        Validator.check_value_type("seed", seed, [int], self.name)
+        Validator.check_value_type("remove_accidental_hits", remove_accidental_hits, [bool], self.name)
+        Validator.check("value of num_sampled", num_sampled, '', 0, Rel.GT, self.name)
+        Validator.check("value of range_max", range_max, '', 0, Rel.GT, self.name)
+        self.num_true = num_true
+        if unique:
+            Validator.check('value of num_sampled', num_sampled, "value of range_max", range_max, Rel.LE, self.name)
+        Validator.check("value of seed", seed, '', 0, Rel.GE, self.name)
+        self.num_sampled = num_sampled
+
+    def infer_dtype(self, true_classes_type):
+        Validator.check_subclass("true_classes_type", true_classes_type, mstype.tensor, self.name)
+        Validator.check_tensor_dtype_valid("true_classes_type", true_classes_type,
+                                           (mstype.int32, mstype.int64), self.name)
+        return (true_classes_type, mstype.float32, mstype.float32)
+
+    def infer_shape(self, true_classes_shape):
+        Validator.check("true_class.shape[1]", true_classes_shape[1], "num_true", self.num_true, Rel.EQ, self.name)
+        return ([self.num_sampled], true_classes_shape, [self.num_sampled])
+
+
+class LogUniformCandidateSampler(PrimitiveWithInfer):
+    """
+    Generates random labels with a log-uniform distribution for sampled_candidates.
+
+    Random sampling a tensor of sampled classes from the range of integers [0, range_max).
+
+    Args:
+        num_true (int): The number of target classes per training example. Default: 1.
+        num_sampled (int): The number of classes to randomly sample. Default: 5.
+        unique (bool): Determines whether sample with rejection. If `unique` is True,
+          all sampled classes in a batch are unique. Default: True.
+        range_max (int): The number of possible classes. When `unique` is True,
+          `range_max` must be greater than or equal to `num_sampled`. Default: 5.
+        seed (int): Random seed, must be non-negative.
+
+    Inputs:
+        - **true_classes** (Tensor) - The target classes. With data type of int64 and shape [batch_size, num_true].
+
+    Outputs:
+        Tuple of 3 Tensors.
+
+        - **sampled_candidates** (Tensor) - A Tensor with shape (num_sampled,) and the same type as `true_classes`.
+        - **true_expected_count** (Tensor) - A Tensor with the same shape as `true_classes and` type float32.
+        - **sampled_expected_count** (Tensor) - A Tensor with the same shape as `sampled_candidates` and type float32.
+
+    Supported Platforms:
+        ``Ascend``
+
+    Examples:
+        >>> sampler = ops.LogUniformCandidateSampler(2, 5, True, 5)
+        >>> output1, output2, output3 = sampler(Tensor(np.array([[1, 7], [0, 4], [3, 3]])))
+        >>> print(output1, output2, output3)
+        [3 2 0 4 1]
+        [[0.92312991 0.49336370]
+         [0.99248987 0.65806371]
+         [0.73553443 0.73553443]]
+        [0.73553443 0.82625800 0.99248987 0.65806371 0.92312991]
+
+    """
+
+    @prim_attr_register
+    def __init__(self, num_true=1, num_sampled=5, unique=True, range_max=5, seed=0):
+        """Initialize LogUniformCandidateSampler"""
+        self.init_prim_io_names(inputs=['true_classes'],
+                                outputs=['sampled_candidates', 'true_expected_count', 'sampled_expected_count'])
+        Validator.check_value_type("num_true", num_true, [int], self.name)
+        Validator.check_value_type("num_sampled", num_sampled, [int], self.name)
+        Validator.check_value_type("unique", unique, [bool], self.name)
+        Validator.check_value_type("range_max", range_max, [int], self.name)
+        Validator.check_value_type("seed", seed, [int], self.name)
+        self.num_true = Validator.check_number("num_true", num_true, 1, Rel.GE, self.name)
+        self.num_sampled = Validator.check_number("num_sampled", num_sampled, 1, Rel.GE, self.name)
+        Validator.check_number("range_max", range_max, 1, Rel.GE, self.name)
+        if unique:
+            Validator.check("range_max", range_max, "num_sampled", num_sampled, Rel.GE, self.name)
+        self.range_max = range_max
+        self.unique = unique
+        self.seed = Validator.check_number("seed", seed, 0, Rel.GE, self.name)
+
+    def infer_shape(self, true_classes_shape):
+        Validator.check_int(len(true_classes_shape), 2, Rel.EQ, "dim of true_classes", self.name)
+        Validator.check("true_classes_shape[1]", true_classes_shape[1], "num_true", self.num_true, Rel.EQ, self.name)
+        return (self.num_sampled,), true_classes_shape, (self.num_sampled,)
+
+    def infer_dtype(self, true_classes_type):
+        Validator.check_subclass("true_classes_type", true_classes_type, mstype.tensor, self.name)
+        valid_types = (mstype.int64,)
+        Validator.check_tensor_dtype_valid("true_classes_type", true_classes_type, valid_types, self.name)
+        expected_type = mstype.float32
+        return true_classes_type, expected_type, expected_type

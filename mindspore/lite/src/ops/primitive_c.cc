@@ -15,8 +15,12 @@
  */
 
 #include "src/ops/primitive_c.h"
+#ifdef PRIMITIVE_WRITEABLE
 #include <memory>
 #include <map>
+
+#include "tools/converter/quantizer/quantize_util.h"
+#include "src/ops/assert_op.h"
 #include "src/ops/space_to_batch.h"
 #include "src/ops/space_to_batch_nd.h"
 #include "src/ops/conv2d.h"
@@ -64,7 +68,6 @@
 #include "src/ops/slice.h"
 #include "src/ops/squeeze.h"
 #include "src/ops/flatten.h"
-#include "src/ops/mean.h"
 #include "src/ops/nhwc2nchw.h"
 #include "src/ops/stack.h"
 #include "src/ops/crop.h"
@@ -99,6 +102,7 @@
 #include "src/ops/logical_not.h"
 #include "src/ops/floor_div.h"
 #include "src/ops/floor_mod.h"
+#include "src/ops/mod.h"
 #include "src/ops/equal.h"
 #include "src/ops/not_equal.h"
 #include "src/ops/less.h"
@@ -128,13 +132,36 @@
 #include "src/ops/lsh_projection.h"
 #include "src/ops/hashtable_lookup.h"
 #include "src/ops/skip_gram.h"
+#include "src/ops/clip.h"
+#include "src/ops/adder.h"
 #include "src/ops/custom_predict.h"
 #include "src/ops/custom_normalize.h"
 #include "src/ops/custom_extract_features.h"
 #include "src/ops/upsample.h"
-#ifdef PRIMITIVE_WRITEABLE
-#include "tools/converter/quantizer/quantize_util.h"
-#endif
+#include "src/ops/layer_norm.h"
+#include "src/ops/non_max_suppression.h"
+#include "src/ops/rfft.h"
+#include "src/ops/fft_real.h"
+#include "src/ops/fft_imag.h"
+#include "src/ops/audio_spectrogram.h"
+#include "src/ops/mfcc.h"
+#include "src/ops/identity.h"
+#include "src/ops/instance_norm.h"
+#include "src/ops/while.h"
+#include "src/ops/oneslike.h"
+#include "src/ops/unsorted_segment_sum.h"
+#include "src/ops/reciprocal.h"
+#include "src/ops/constant.h"
+#include "src/ops/tensorlist_fromtensor.h"
+#include "src/ops/tensorlist_getitem.h"
+#include "src/ops/tensorlist_setitem.h"
+#include "src/ops/tensorlist_reserve.h"
+#include "src/ops/tensorlist_stack.h"
+#include "src/ops/merge.h"
+#include "src/ops/switch.h"
+#include "src/ops/partial.h"
+#include "src/ops/gelu.h"
+#include "src/ops/gru.h"
 
 #ifdef SUPPORT_TRAIN
 #include "src/ops/neg_grad.h"
@@ -144,63 +171,109 @@
 #include "src/ops/pooling_grad.h"
 #include "src/ops/conv2d_grad_filter.h"
 #include "src/ops/conv2d_grad_input.h"
+#include "src/ops/group_conv2d_grad_input.h"
 #include "src/ops/power_grad.h"
 #include "src/ops/softmax_cross_entropy.h"
+#include "src/ops/sparse_softmax_cross_entropy.h"
 #include "src/ops/bn_grad.h"
 #include "src/ops/arithmetic_grad.h"
 #include "src/ops/depend.h"
 #include "src/ops/flatten_grad.h"
 #include "src/ops/log_grad.h"
 #include "src/ops/sgd.h"
+#include "src/ops/adam.h"
+#include "src/ops/assign.h"
+#include "src/ops/dropout_grad.h"
+#include "src/ops/maximum_grad.h"
+#include "src/ops/minimum_grad.h"
+#include "src/ops/control_depend.h"
+#include "src/ops/assign_add.h"
+#include "src/ops/binary_cross_entropy.h"
+#include "src/ops/binary_cross_entropy_grad.h"
+#include "src/ops/smooth_l1_loss.h"
+#include "src/ops/smooth_l1_loss_grad.h"
+#include "src/ops/sigmoid_cross_entropy_with_logits.h"
+#include "src/ops/sigmoid_cross_entropy_with_logits_grad.h"
 #endif
-
+#endif
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
-void PrimitiveC::CalQuantParam(const double &mean, const double &stdDev, float *mMin, float *mMax) {
+std::vector<int> CastToInt(const ValuePtr &value) {
+  if (value == nullptr) {
+    MS_LOG(WARNING) << "valueptr is nullptr.";
+    return {};
+  }
+  std::vector<int> cur_value;
+  if (utils::isa<ValueSequeuePtr>(value)) {
+    if (value->cast<ValueSequeuePtr>()->value().front()->type()->number_type() == kNumberTypeInt64) {
+      auto origin_value = GetValue<std::vector<int64_t>>(value);
+      for (size_t index = 0; index < origin_value.size(); ++index) {
+        cur_value.push_back(static_cast<int>(origin_value[index]));
+      }
+    } else {
+      cur_value = GetValue<std::vector<int>>(value);
+    }
+  } else {
+    if (value->type()->number_type() == kNumberTypeInt64) {
+      cur_value.push_back(static_cast<int>(GetValue<int64_t>(value)));
+    } else {
+      cur_value.push_back(GetValue<int>(value));
+    }
+  }
+  return cur_value;
+}
+
+void PrimitiveC::CalFloatScopeByMeanAndStddev(const double &mean, const double &stdDev, float *mMin, float *mMax) {
   const float qmin = 0;
   const float qmax = 255;
   *mMin = static_cast<float>((qmin - mean) / stdDev);
   *mMax = static_cast<float>((qmax - mean) / stdDev);
 }
 
-void PrimitiveC::PopulaterQuantParam(const Primitive &prim,
-                                     std::vector<std::vector<schema::QuantParamT>> *vecInputQuantParam,
-                                     std::vector<std::vector<schema::QuantParamT>> *vecOutputQuantParam,
-                                     const std::vector<AnfNodePtr> &inputs) {
-  auto narrow_range = prim.GetAttr("narrow_range");
-  bool narrowRangeQuantParam = GetValue<bool>(narrow_range);
-  auto num_bits = prim.GetAttr("num_bits");
-  int32_t numbitsRangeQuantParam = GetValue<int32_t>(num_bits);
-
+void PrimitiveC::FillDefaultInputQuantParamIfNeed(const size_t &inputSize) {
   std::vector<schema::QuantParamT> quants;
   schema::QuantParamT quantParam;
-  auto mean = prim.GetAttr("mean");
-  auto std_dev = prim.GetAttr("std_dev");
-  if (mean != nullptr && std_dev != nullptr) {
-    auto meanQuantOaram = GetValue<double>(mean);
-    double stddevQuantOaram = GetValue<double>(std_dev);
-    float mMin = 0.0;
-    float mMax = 0.0;
-    CalQuantParam(meanQuantOaram, stddevQuantOaram, &mMin, &mMax);
-    quantParam.min = mMin;
-    quantParam.max = mMax;
-  } else {
-    auto inputMin = prim.GetAttr("input_minq");
-    auto inputMax = prim.GetAttr("input_maxq");
-    if (inputMin != nullptr && inputMax != nullptr) {
-      auto inputMinPtr = inputMin->cast<TensorPtr>();
-      auto inputMaxPtr = inputMax->cast<TensorPtr>();
-      float *minBuf = static_cast<float *>(inputMinPtr->data_c());
-      float *maxBuf = static_cast<float *>(inputMaxPtr->data_c());
-      quantParam.min = *minBuf;
-      quantParam.max = *maxBuf;
-    }
+
+  if (input_quant_param_.size() == kDoubleNum) {
+    quants.clear();
+    quantParam.min = 0.0;
+    quantParam.max = 0.0;
+    quantParam.zeroPoint = 0;
+    quantParam.scale = input_quant_param_.at(0).at(0).scale * input_quant_param_.at(1).at(0).scale;
+    quants.emplace_back(quantParam);
+    input_quant_param_.emplace_back(quants);
   }
-  quant::CalQuantizationParams(&quantParam, quantParam.min, quantParam.max, narrowRangeQuantParam,
-                               numbitsRangeQuantParam);
-  quants.emplace_back(quantParam);
-  vecInputQuantParam->emplace_back(quants);
+  // fill input_quant_param_ by not inited quant_parm
+  if (input_quant_param_.size() < inputSize) {
+    schema::QuantParamT tmpQuantParam;
+    quants.emplace_back(tmpQuantParam);
+    input_quant_param_.insert(input_quant_param_.end(), inputSize - input_quant_param_.size(), quants);
+  }
+}
+
+void PrimitiveC::PopulaterInputQuantParam(const Primitive &prim, const std::vector<AnfNodePtr> &inputs,
+                                          bool narrowRangeQuantParam, int32_t numbitsRangeQuantParam) {
+  std::vector<schema::QuantParamT> quants;
+  schema::QuantParamT quantParam;
+  auto inputMin = prim.GetAttr("input_minq");
+  auto inputMax = prim.GetAttr("input_maxq");
+  if (inputMin != nullptr && inputMax != nullptr) {
+    auto inputMinPtr = inputMin->cast<TensorPtr>();
+    auto inputMaxPtr = inputMax->cast<TensorPtr>();
+    auto *minBuf = static_cast<float *>(inputMinPtr->data_c());
+    auto *maxBuf = static_cast<float *>(inputMaxPtr->data_c());
+    quantParam.min = *minBuf;
+    quantParam.max = *maxBuf;
+    auto ret = quant::CalQuantizationParams(&quantParam, quantParam.min, quantParam.max, narrowRangeQuantParam,
+                                            numbitsRangeQuantParam);
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "Can't calculate quant parameters";
+      return;
+    }
+    quants.emplace_back(quantParam);
+    input_quant_param_.emplace_back(quants);
+  }
 
   quants.clear();
   auto filterMin = prim.GetAttr("filter_minq");
@@ -208,8 +281,8 @@ void PrimitiveC::PopulaterQuantParam(const Primitive &prim,
   if (filterMin != nullptr && filterMax != nullptr) {
     auto filterMinPtr = filterMin->cast<TensorPtr>();
     auto filterMaxPtr = filterMax->cast<TensorPtr>();
-    float *minBuf = static_cast<float *>(filterMinPtr->data_c());
-    float *maxBuf = static_cast<float *>(filterMaxPtr->data_c());
+    auto *minBuf = static_cast<float *>(filterMinPtr->data_c());
+    auto *maxBuf = static_cast<float *>(filterMaxPtr->data_c());
     quantParam.min = FLT_MAX;
     quantParam.max = FLT_MIN;
     for (int i = 0; i < filterMinPtr->ElementsNum(); ++i) {
@@ -218,39 +291,74 @@ void PrimitiveC::PopulaterQuantParam(const Primitive &prim,
       minBuf++;
       maxBuf++;
     }
-    quant::CalQuantizationParams(&quantParam, quantParam.min, quantParam.max, true, numbitsRangeQuantParam);
+    auto ret = quant::CalQuantizationParams(&quantParam, quantParam.min, quantParam.max, true, numbitsRangeQuantParam);
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "Can't calculate quant parameters";
+      return;
+    }
     quants.emplace_back(quantParam);
-    vecInputQuantParam->emplace_back(quants);
+    input_quant_param_.emplace_back(quants);
   }
+  FillDefaultInputQuantParamIfNeed(inputs.size());
+}
 
-  if (vecInputQuantParam->size() == kDoubleNum) {
-    quants.clear();
-    quantParam.min = 0.0;
-    quantParam.max = 0.0;
-    quantParam.zeroPoint = 0;
-    quantParam.scale = vecInputQuantParam->at(0).at(0).scale * vecInputQuantParam->at(1).at(0).scale;
-    quants.emplace_back(quantParam);
-    vecInputQuantParam->emplace_back(quants);
-  }
-
-  quants.clear();
+void PrimitiveC::PopulaterOutputQuantParam(const Primitive &prim, bool narrowRangeQuantParam,
+                                           int32_t numbitsRangeQuantParam) {
+  std::vector<schema::QuantParamT> quants;
+  schema::QuantParamT quantParam;
   auto outputMin = prim.GetAttr("output_minq");
   auto outputMax = prim.GetAttr("output_maxq");
   if (outputMin != nullptr && outputMax != nullptr) {
     auto outputMinPtr = outputMin->cast<TensorPtr>();
     auto outputMaxPtr = outputMax->cast<TensorPtr>();
-    float *minBuf = static_cast<float *>(outputMinPtr->data_c());
-    float *maxBuf = static_cast<float *>(outputMaxPtr->data_c());
+    auto *minBuf = static_cast<float *>(outputMinPtr->data_c());
+    auto *maxBuf = static_cast<float *>(outputMaxPtr->data_c());
     quantParam.min = *minBuf;
     quantParam.max = *maxBuf;
-    quant::CalQuantizationParams(&quantParam, quantParam.min, quantParam.max, narrowRangeQuantParam,
-                                 numbitsRangeQuantParam);
+    auto ret = quant::CalQuantizationParams(&quantParam, quantParam.min, quantParam.max, narrowRangeQuantParam,
+                                            numbitsRangeQuantParam);
+    if (ret != RET_OK) {
+      MS_LOG(ERROR) << "Can't calculate quant parameters";
+      return;
+    }
     quants.emplace_back(quantParam);
-    vecOutputQuantParam->emplace_back(quants);
+    output_quant_param_.emplace_back(quants);
+  } else {
+    schema::QuantParamT tmpQuantParam;
+    quants.emplace_back(tmpQuantParam);
+    output_quant_param_.emplace_back(quants);
   }
 }
 
-void PrimitiveC::GetAttrDataFromInput(const AnfNodePtr inputNode, std::vector<int> *data) {
+void PrimitiveC::PopulaterQuantParam(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
+  auto narrow_range = prim.GetAttr("narrow_range");
+  bool narrowRangeQuantParam = false;
+  if (narrow_range != nullptr) {
+    if (utils::isa<tensor::TensorPtr>(narrow_range)) {
+      auto narrow_range_tensor = narrow_range->cast<tensor::TensorPtr>();
+      narrowRangeQuantParam = *reinterpret_cast<bool *>(narrow_range_tensor->data_c());
+    } else if (utils::isa<ImmTraits<bool>::type>(narrow_range)) {
+      narrowRangeQuantParam = GetValue<bool>(narrow_range);
+    } else {
+      MS_LOG(ERROR) << "valueptr is invalid.";
+      return;
+    }
+  }
+  auto num_bits = prim.GetAttr("num_bits");
+  int32_t numbitsRangeQuantParam = 8;
+  if (num_bits != nullptr) {
+    if (utils::isa<tensor::TensorPtr>(num_bits)) {
+      auto num_bits_tensor = num_bits->cast<tensor::TensorPtr>();
+      numbitsRangeQuantParam = *reinterpret_cast<int64_t *>(num_bits_tensor->data_c());
+    } else if (utils::isa<ImmTraits<int64_t>::type>(num_bits)) {
+      numbitsRangeQuantParam = GetValue<int64_t>(num_bits);
+    }
+  }
+  PopulaterInputQuantParam(prim, inputs, narrowRangeQuantParam, numbitsRangeQuantParam);
+  PopulaterOutputQuantParam(prim, narrowRangeQuantParam, numbitsRangeQuantParam);
+}
+
+void PrimitiveC::GetAttrDataFromInput(const AnfNodePtr &inputNode, std::vector<int> *data) {
   if (inputNode->isa<ValueNode>()) {
     auto valNode = inputNode->cast<ValueNodePtr>();
     MS_ASSERT(valNode != nullptr);
@@ -260,24 +368,59 @@ void PrimitiveC::GetAttrDataFromInput(const AnfNodePtr inputNode, std::vector<in
       auto tuple = val->cast<ValueTuplePtr>();
       MS_ASSERT(tuple != nullptr);
       for (size_t i = 0; i < tuple->size(); i++) {
-        auto elem = tuple->value()[i]->cast<Int32ImmPtr>();
+        auto elem = tuple->value().at(i);
         MS_ASSERT(elem != nullptr);
-        data->emplace_back(static_cast<int>(elem->value()));
+        data->emplace_back(CastToInt(elem).front());
       }
     }
   }
 }
 
-schema::PrimitiveT *PrimitiveC::GetPrimitiveT() const { return this->primitive_; }
+schema::PrimitiveT *PrimitiveC::primitiveT() const { return this->primitive_; }
 
 void PrimitiveC::ClearPrimitiveT() { this->primitive_ = nullptr; }
 
-void PrimitiveC::SetInputQuantParam(const std::vector<std::vector<schema::QuantParamT>> &input_quant_param) {
+void PrimitiveC::set_input_quant_params(const std::vector<std::vector<schema::QuantParamT>> &input_quant_param) {
   this->input_quant_param_ = input_quant_param;
 }
 
-void PrimitiveC::SetOutputQuantParam(const std::vector<std::vector<schema::QuantParamT>> &output_quant_param) {
+void PrimitiveC::set_input_quant_param(const size_t &index, const std::vector<schema::QuantParamT> &input_quant_param) {
+  MS_ASSERT(index < this->input_quant_param_.size());
+  this->input_quant_param_.at(index) = input_quant_param;
+}
+
+void PrimitiveC::set_output_quant_params(const std::vector<std::vector<schema::QuantParamT>> &output_quant_param) {
   this->output_quant_param_ = output_quant_param;
+}
+
+void PrimitiveC::set_output_quant_param(const size_t &index,
+                                        const std::vector<schema::QuantParamT> &output_quant_param) {
+  MS_ASSERT(index < this->output_quant_param_.size());
+  this->output_quant_param_.at(index) = output_quant_param;
+}
+
+bool PrimitiveC::IsInputQuantParamsInited() {
+  if (this->input_quant_param_.empty()) {
+    return false;
+  }
+  for (auto &quant_param : this->input_quant_param_) {
+    if (!quant_param.front().inited) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool PrimitiveC::IsOutputQuantParamsInited() {
+  if (this->output_quant_param_.empty()) {
+    return false;
+  }
+  for (auto &quant_param : this->output_quant_param_) {
+    if (!quant_param.front().inited) {
+      return false;
+    }
+  }
+  return true;
 }
 
 void PrimitiveC::ClearInputOutputQuantParam() {
@@ -285,19 +428,19 @@ void PrimitiveC::ClearInputOutputQuantParam() {
   output_quant_param_.clear();
 }
 
-void PrimitiveC::AddInputQuantParam(std::vector<schema::QuantParamT> quant_param) {
+void PrimitiveC::AddInputQuantParam(const std::vector<schema::QuantParamT> &quant_param) {
   this->input_quant_param_.emplace_back(quant_param);
 }
-std::vector<std::vector<schema::QuantParamT>> PrimitiveC::GetInputQuantParams() const { return input_quant_param_; }
+std::vector<std::vector<schema::QuantParamT>> PrimitiveC::input_quant_params() const { return input_quant_param_; }
 
-void PrimitiveC::AddOutputQuantParam(std::vector<schema::QuantParamT> quant_param) {
+void PrimitiveC::AddOutputQuantParam(const std::vector<schema::QuantParamT> &quant_param) {
   this->output_quant_param_.emplace_back(quant_param);
 }
-std::vector<std::vector<schema::QuantParamT>> PrimitiveC::GetOutputQuantParams() const { return output_quant_param_; }
+std::vector<std::vector<schema::QuantParamT>> PrimitiveC::output_quant_params() const { return output_quant_param_; }
 
-void PrimitiveC::SetQuantType(const schema::QuantType &quant_type) { this->quant_type_ = quant_type; }
+void PrimitiveC::set_quant_type(const schema::QuantType &quant_type) { this->quant_type_ = quant_type; }
 
-schema::QuantType PrimitiveC::GetQuantType() const { return quant_type_; }
+schema::QuantType PrimitiveC::quant_type() const { return quant_type_; }
 
 std::shared_ptr<PrimitiveC> GetReturnPrim() {
   auto return_primitiveT = new (std::nothrow) schema::PrimitiveT;
@@ -306,7 +449,7 @@ std::shared_ptr<PrimitiveC> GetReturnPrim() {
     return nullptr;
   }
   return_primitiveT->value.type = schema::PrimitiveType_Return;
-  return_primitiveT->value.value = new schema::ReturnT;
+  return_primitiveT->value.value = new (std::nothrow) schema::ReturnT;
   if (return_primitiveT->value.value == nullptr) {
     MS_LOG(ERROR) << "new ReturnT failed";
     delete (return_primitiveT);
@@ -316,13 +459,13 @@ std::shared_ptr<PrimitiveC> GetReturnPrim() {
 }
 
 std::shared_ptr<PrimitiveC> GetMakeTuplePrim() {
-  auto make_tuple_primitiveT = new schema::PrimitiveT;
+  auto make_tuple_primitiveT = new (std::nothrow) schema::PrimitiveT;
   if (make_tuple_primitiveT == nullptr) {
     MS_LOG(ERROR) << "new PrimitiveT failed";
     return nullptr;
   }
   make_tuple_primitiveT->value.type = schema::PrimitiveType_MakeTuple;
-  make_tuple_primitiveT->value.value = new schema::MakeTupleT;
+  make_tuple_primitiveT->value.value = new (std::nothrow) schema::MakeTupleT;
   if (make_tuple_primitiveT->value.value == nullptr) {
     MS_LOG(ERROR) << "new MakeTupleT failed";
     delete (make_tuple_primitiveT);
@@ -332,13 +475,13 @@ std::shared_ptr<PrimitiveC> GetMakeTuplePrim() {
 }
 
 std::shared_ptr<PrimitiveC> GetTupleGetItemPrim() {
-  auto tuple_get_item_primitiveT = new schema::PrimitiveT();
+  auto tuple_get_item_primitiveT = new (std::nothrow) schema::PrimitiveT();
   if (tuple_get_item_primitiveT == nullptr) {
     MS_LOG(ERROR) << "new PrimitiveT failed";
     return nullptr;
   }
   tuple_get_item_primitiveT->value.type = schema::PrimitiveType_TupleGetItem;
-  tuple_get_item_primitiveT->value.value = new schema::TupleGetItemT;
+  tuple_get_item_primitiveT->value.value = new (std::nothrow) schema::TupleGetItemT;
   if (tuple_get_item_primitiveT->value.value == nullptr) {
     MS_LOG(ERROR) << "new TupleGetItemT failed";
     delete (tuple_get_item_primitiveT);
@@ -355,7 +498,7 @@ std::shared_ptr<PrimitiveC> NewPrimitiveC(const Primitive &prim, const std::vect
     MS_LOG(ERROR) << "make_shared PrimitiveC failed";
     return nullptr;
   }
-  primc->SetQuantType(quantType);
+  primc->set_quant_type(quantType);
   auto ret = primc->UnPackAttr(prim, inputs);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "UnPackAttr failed";
@@ -367,7 +510,7 @@ std::shared_ptr<PrimitiveC> NewPrimitiveC(const Primitive &prim, const std::vect
 std::shared_ptr<PrimitiveC> PrimitiveC::Create(const Primitive &prim, const std::vector<AnfNodePtr> &inputs,
                                                const schema::QuantType &quantType) {
   const auto &op_type = prim.name();
-  if (op_type == "ReLU" || op_type == "ReLU6" || op_type == "Sigmoid") {
+  if (op_type == "ReLU" || op_type == "ReLU6" || op_type == "Sigmoid" || op_type == "HSwish" || op_type == "HSigmoid") {
     return NewPrimitiveC<Activation>(prim, inputs, quantType);
   } else if (op_type == "AddN") {
     return NewPrimitiveC<AddN>(prim, inputs, quantType);
@@ -389,7 +532,7 @@ std::shared_ptr<PrimitiveC> PrimitiveC::Create(const Primitive &prim, const std:
     return NewPrimitiveC<FusedBatchNorm>(prim, inputs, quantType);
   } else if (op_type == "make_tuple") {
     return NewPrimitiveC<MakeTuple>(prim, inputs, quantType);
-  } else if (op_type == "MatMul") {
+  } else if (op_type == "MatMul" || op_type == "BatchMatMul") {
     return NewPrimitiveC<MatMul>(prim, inputs, quantType);
   } else if (op_type == "Mul") {
     return NewPrimitiveC<Mul>(prim, inputs, quantType);
@@ -413,6 +556,10 @@ std::shared_ptr<PrimitiveC> PrimitiveC::Create(const Primitive &prim, const std:
     return NewPrimitiveC<Reduce>(prim, inputs, quantType);
   } else if (op_type == "Reshape") {
     return NewPrimitiveC<Reshape>(prim, inputs, quantType);
+  } else if (op_type == "Slice") {
+    return NewPrimitiveC<Slice>(prim, inputs, quantType);
+  } else if (op_type == "Squeeze") {
+    return NewPrimitiveC<Squeeze>(prim, inputs, quantType);
   } else if (op_type == "TensorAdd") {
     return NewPrimitiveC<Add>(prim, inputs, quantType);
   } else if (op_type == "Transpose") {
@@ -421,6 +568,10 @@ std::shared_ptr<PrimitiveC> PrimitiveC::Create(const Primitive &prim, const std:
     return NewPrimitiveC<Elu>(prim, inputs, quantType);
   } else if (op_type == "Log") {
     return NewPrimitiveC<Log>(prim, inputs, quantType);
+  } else if (op_type == "Exp") {
+    return NewPrimitiveC<Exp>(prim, inputs, quantType);
+  } else if (op_type == "Neg") {
+    return NewPrimitiveC<Neg>(prim, inputs, quantType);
   } else if (op_type == "DeConv2D") {
     return NewPrimitiveC<DeConv2D>(prim, inputs, quantType);
   } else if (op_type == "tuple_getitem") {
@@ -435,19 +586,88 @@ std::shared_ptr<PrimitiveC> PrimitiveC::Create(const Primitive &prim, const std:
     return NewPrimitiveC<Maximum>(prim, inputs, quantType);
   } else if (op_type == "Split") {
     return NewPrimitiveC<Split>(prim, inputs, quantType);
+  } else if (op_type == "OneHot") {
+    return NewPrimitiveC<OneHot>(prim, inputs, quantType);
+  } else if (op_type == "Dropout") {
+    return NewPrimitiveC<Dropout>(prim, inputs, quantType);
+  } else if (op_type == "While") {
+    return NewPrimitiveC<While>(prim, inputs, quantType);
+  } else if (op_type == "MirrorPad") {
+    return NewPrimitiveC<Pad>(prim, inputs, quantType);
+  } else if (op_type == "GatherV2") {
+    return NewPrimitiveC<Gather>(prim, inputs, quantType);
+  } else if (op_type == "OnesLike") {
+    return NewPrimitiveC<OnesLike>(prim, inputs, quantType);
+  } else if (op_type == "Pow") {
+    return NewPrimitiveC<Power>(prim, inputs, quantType);
+  } else if (op_type == "Sub") {
+    return NewPrimitiveC<Sub>(prim, inputs, quantType);
+  } else if (op_type == "ExpandDims") {
+    return NewPrimitiveC<ExpandDims>(prim, inputs, quantType);
+  } else if (op_type == "UnsortedSegmentSum") {
+    return NewPrimitiveC<UnsortedSegmentSum>(prim, inputs, quantType);
+  } else if (op_type == "ResizeNearestNeighbor") {
+    return NewPrimitiveC<Resize>(prim, inputs, quantType);
+  } else if (op_type == "ResizeBilinear") {
+    return NewPrimitiveC<Resize>(prim, inputs, quantType);
+  } else if (op_type == "Floor") {
+    return NewPrimitiveC<Floor>(prim, inputs, quantType);
+  } else if (op_type == "Minimum") {
+    return NewPrimitiveC<Minimum>(prim, inputs, quantType);
+  } else if (op_type == "Div") {
+    return NewPrimitiveC<Div>(prim, inputs, quantType);
+  } else if (op_type == "Tanh") {
+    return NewPrimitiveC<Activation>(prim, inputs, quantType);
+  } else if (op_type == "Equal") {
+    return NewPrimitiveC<Equal>(prim, inputs, quantType);
+  } else if (op_type == "TopK") {
+    return NewPrimitiveC<TopK>(prim, inputs, quantType);
+  } else if (op_type == "Mod") {
+    return NewPrimitiveC<Mod>(prim, inputs, quantType);
+  } else if (op_type == "ArgMin" || op_type == "ArgMinWithValue") {
+    return NewPrimitiveC<ArgMin>(prim, inputs, quantType);
+  } else if (op_type == "Range") {
+    return NewPrimitiveC<Range>(prim, inputs, quantType);
+  } else if (op_type == "Tile") {
+    return NewPrimitiveC<Tile>(prim, inputs, quantType);
+  } else if (op_type == "GatherNd") {
+    return NewPrimitiveC<GatherNd>(prim, inputs, quantType);
+  } else if (op_type == "Square") {
+    return NewPrimitiveC<Square>(prim, inputs, quantType);
+  } else if (op_type == "Sqrt") {
+    return NewPrimitiveC<Sqrt>(prim, inputs, quantType);
+  } else if (op_type == "Greater") {
+    return NewPrimitiveC<Greater>(prim, inputs, quantType);
+  } else if (op_type == "Switch") {
+    return NewPrimitiveC<Switch>(prim, inputs, quantType);
+  } else if (op_type == "Partial") {
+    return NewPrimitiveC<Partial>(prim, inputs, quantType);
+  } else if (op_type == "Merge") {
+    return NewPrimitiveC<Merge>(prim, inputs, quantType);
+  } else if (op_type == "LayerNorm") {
+    return NewPrimitiveC<LayerNorm>(prim, inputs, quantType);
+  } else if (op_type == "ArgMax" || op_type == "ArgMaxWithValue") {
+    return NewPrimitiveC<ArgMax>(prim, inputs, quantType);
+  } else if (op_type == "Gelu") {
+    return NewPrimitiveC<GeLU>(prim, inputs, quantType);
 
 #ifdef SUPPORT_TRAIN
   } else if (op_type == "SoftmaxCrossEntropyWithLogits") {
     return NewPrimitiveC<SoftmaxCrossEntropy>(prim, inputs, quantType);
+  } else if (op_type == "SparseSoftmaxCrossEntropyWithLogits") {
+    return NewPrimitiveC<SparseSoftmaxCrossEntropy>(prim, inputs, quantType);
   } else if (op_type == "BiasAddGrad") {
     return NewPrimitiveC<BiasGrad>(prim, inputs, quantType);
   } else if (op_type == "ApplyMomentum") {
     return NewPrimitiveC<ApplyMomentum>(prim, inputs, quantType);
   } else if (op_type == "Depend") {
     return NewPrimitiveC<Depend>(prim, inputs, quantType);
-  } else if ((op_type == "ReluGrad" || op_type == "Relu6Grad" || op_type == "SigmoidGrad")) {
+  } else if (op_type == "ControlDepend") {
+    return NewPrimitiveC<ControlDepend>(prim, inputs, quantType);
+  } else if ((op_type == "ReluGrad" || op_type == "ReLU6Grad" || op_type == "SigmoidGrad" ||
+              op_type == "HSigmoidGrad" || op_type == "HSwishGrad")) {
     return NewPrimitiveC<ActivationGrad>(prim, inputs, quantType);
-  } else if ((op_type == "MaxPoolGrad") || (op_type == "MeanPoolGrad")) {
+  } else if ((op_type == "MaxPoolGrad") || (op_type == "AvgPoolGrad") || (op_type == "AvgPoolGradGpu")) {
     return NewPrimitiveC<PoolingGrad>(prim, inputs, quantType);
   } else if (op_type == "Conv2DBackpropFilter") {
     return NewPrimitiveC<Conv2DGradFilter>(prim, inputs, quantType);
@@ -459,12 +679,34 @@ std::shared_ptr<PrimitiveC> PrimitiveC::Create(const Primitive &prim, const std:
     return NewPrimitiveC<FlattenGrad>(prim, inputs, quantType);
   } else if (op_type == "FusedBatchNormGrad") {
     return NewPrimitiveC<BNGrad>(prim, inputs, quantType);
-  } else if (op_type == "Tile") {
-    return NewPrimitiveC<Tile>(prim, inputs, quantType);
   } else if (op_type == "PowerGrad") {
     return NewPrimitiveC<PowerGrad>(prim, inputs, quantType);
   } else if (op_type == "SGD") {
     return NewPrimitiveC<Sgd>(prim, inputs, quantType);
+  } else if (op_type == "Adam") {
+    return NewPrimitiveC<Adam>(prim, inputs, quantType);
+  } else if (op_type == "Assign") {
+    return NewPrimitiveC<Assign>(prim, inputs, quantType);
+  } else if (op_type == "DropoutGrad") {
+    return NewPrimitiveC<DropoutGrad>(prim, inputs, quantType);
+  } else if (op_type == "MaximumGrad") {
+    return NewPrimitiveC<MaximumGrad>(prim, inputs, quantType);
+  } else if (op_type == "MinimumGrad") {
+    return NewPrimitiveC<MinimumGrad>(prim, inputs, quantType);
+  } else if (op_type == "AssignAdd") {
+    return NewPrimitiveC<AssignAdd>(prim, inputs, quantType);
+  } else if (op_type == "BinaryCrossEntropy") {
+    return NewPrimitiveC<BinaryCrossEntropy>(prim, inputs, quantType);
+  } else if (op_type == "BinaryCrossEntropyGrad") {
+    return NewPrimitiveC<BinaryCrossEntropyGrad>(prim, inputs, quantType);
+  } else if (op_type == "SmoothL1Loss") {
+    return NewPrimitiveC<SmoothL1Loss>(prim, inputs, quantType);
+  } else if (op_type == "SmoothL1LossGrad") {
+    return NewPrimitiveC<SmoothL1LossGrad>(prim, inputs, quantType);
+  } else if (op_type == "SigmoidCrossEntropyWithLogits") {
+    return NewPrimitiveC<SigmoidCrossEntropyWithLogits>(prim, inputs, quantType);
+  } else if (op_type == "SigmoidCrossEntropyWithLogitsGrad") {
+    return NewPrimitiveC<SigmoidCrossEntropyWithLogitsGrad>(prim, inputs, quantType);
 #else
   } else if (op_type == "Conv2DBackpropInput") {
     return NewPrimitiveC<DeConv2D>(prim, inputs, quantType);
@@ -480,539 +722,364 @@ PrimitiveC *PrimitiveC::Create(mindspore::schema::PrimitiveT *primitive) {
   auto op_type = primitive->value.type;
   switch (op_type) {
     case schema::PrimitiveType_SoftMax:
-      return new SoftMax(primitive);
+      return new (std::nothrow) SoftMax(primitive);
     case schema::PrimitiveType_Activation:
-      return new Activation(primitive);
+      return new (std::nothrow) Activation(primitive);
     case schema::PrimitiveType_Conv2D:
-      return new Conv2D(primitive);
+      return new (std::nothrow) Conv2D(primitive);
     case schema::PrimitiveType_DeConv2D:
-      return new DeConv2D(primitive);
+      return new (std::nothrow) DeConv2D(primitive);
     case schema::PrimitiveType_Reduce:
-      return new Reduce(primitive);
+      return new (std::nothrow) Reduce(primitive);
     case schema::PrimitiveType_Pooling:
-      return new Pooling(primitive);
+      return new (std::nothrow) Pooling(primitive);
     case schema::PrimitiveType_ROIPooling:
-      return new ROIPooling(primitive);
+      return new (std::nothrow) ROIPooling(primitive);
     case schema::PrimitiveType_DepthwiseConv2D:
-      return new DepthwiseConv2D(primitive);
+      return new (std::nothrow) DepthwiseConv2D(primitive);
     case schema::PrimitiveType_FusedBatchNorm:
-      return new FusedBatchNorm(primitive);
+      return new (std::nothrow) FusedBatchNorm(primitive);
     case schema::PrimitiveType_BatchNorm:
-      return new BatchNorm(primitive);
+      return new (std::nothrow) BatchNorm(primitive);
     case schema::PrimitiveType_FullConnection:
-      return new FullConnection(primitive);
+      return new (std::nothrow) FullConnection(primitive);
     case schema::PrimitiveType_Power:
-      return new Power(primitive);
+      return new (std::nothrow) Power(primitive);
     case schema::PrimitiveType_Pad:
-      return new Pad(primitive);
+      return new (std::nothrow) Pad(primitive);
     case schema::PrimitiveType_Range:
-      return new Range(primitive);
+      return new (std::nothrow) Range(primitive);
     case schema::PrimitiveType_Mul:
-      return new Mul(primitive);
+      return new (std::nothrow) Mul(primitive);
     case schema::PrimitiveType_Add:
-      return new Add(primitive);
+      return new (std::nothrow) Add(primitive);
     case schema::PrimitiveType_Sub:
-      return new Sub(primitive);
+      return new (std::nothrow) Sub(primitive);
     case schema::PrimitiveType_Div:
-      return new Div(primitive);
+      return new (std::nothrow) Div(primitive);
     case schema::PrimitiveType_BiasAdd:
-      return new BiasAdd(primitive);
+      return new (std::nothrow) BiasAdd(primitive);
     case schema::PrimitiveType_ExpandDims:
-      return new ExpandDims(primitive);
+      return new (std::nothrow) ExpandDims(primitive);
     case schema::PrimitiveType_ArgMax:
-      return new ArgMax(primitive);
+      return new (std::nothrow) ArgMax(primitive);
     case schema::PrimitiveType_ArgMin:
-      return new ArgMin(primitive);
+      return new (std::nothrow) ArgMin(primitive);
     case schema::PrimitiveType_Cast:
-      return new Cast(primitive);
+      return new (std::nothrow) Cast(primitive);
     case schema::PrimitiveType_Reshape:
-      return new Reshape(primitive);
+      return new (std::nothrow) Reshape(primitive);
     case schema::PrimitiveType_Scale:
-      return new Scale(primitive);
+      return new (std::nothrow) Scale(primitive);
     case schema::PrimitiveType_Eltwise:
-      return new Eltwise(primitive);
+      return new (std::nothrow) Eltwise(primitive);
     case schema::PrimitiveType_Ceil:
-      return new Ceil(primitive);
+      return new (std::nothrow) Ceil(primitive);
     case schema::PrimitiveType_Concat:
-      return new Concat(primitive);
+      return new (std::nothrow) Concat(primitive);
     case schema::PrimitiveType_Fill:
-      return new Fill(primitive);
+      return new (std::nothrow) Fill(primitive);
     case schema::PrimitiveType_Nhwc2Nchw:
-      return new Nhwc2Nchw(primitive);
+      return new (std::nothrow) Nhwc2Nchw(primitive);
     case schema::PrimitiveType_Nchw2Nhwc:
-      return new Nchw2Nhwc(primitive);
+      return new (std::nothrow) Nchw2Nhwc(primitive);
     case schema::PrimitiveType_Transpose:
-      return new Transpose(primitive);
+      return new (std::nothrow) Transpose(primitive);
     case schema::PrimitiveType_Slice:
-      return new Slice(primitive);
+      return new (std::nothrow) Slice(primitive);
     case schema::PrimitiveType_Squeeze:
-      return new Squeeze(primitive);
+      return new (std::nothrow) Squeeze(primitive);
     case schema::PrimitiveType_Flatten:
-      return new Flatten(primitive);
-    case schema::PrimitiveType_Mean:
-      return new Mean(primitive);
+      return new (std::nothrow) Flatten(primitive);
     case schema::PrimitiveType_Stack:
-      return new Stack(primitive);
+      return new (std::nothrow) Stack(primitive);
     case schema::PrimitiveType_Crop:
-      return new Crop(primitive);
+      return new (std::nothrow) Crop(primitive);
     case schema::PrimitiveType_SquaredDifference:
-      return new SquaredDifference(primitive);
+      return new (std::nothrow) SquaredDifference(primitive);
     case schema::PrimitiveType_AddN:
-      return new AddN(primitive);
+      return new (std::nothrow) AddN(primitive);
     case schema::PrimitiveType_Abs:
-      return new Abs(primitive);
+      return new (std::nothrow) Abs(primitive);
     case schema::PrimitiveType_Sin:
-      return new Sin(primitive);
+      return new (std::nothrow) Sin(primitive);
     case schema::PrimitiveType_Cos:
-      return new Cos(primitive);
+      return new (std::nothrow) Cos(primitive);
     case schema::PrimitiveType_Log:
-      return new Log(primitive);
+      return new (std::nothrow) Log(primitive);
     case schema::PrimitiveType_Sqrt:
-      return new Sqrt(primitive);
+      return new (std::nothrow) Sqrt(primitive);
     case schema::PrimitiveType_Rsqrt:
-      return new Rsqrt(primitive);
+      return new (std::nothrow) Rsqrt(primitive);
     case schema::PrimitiveType_Square:
-      return new Square(primitive);
+      return new (std::nothrow) Square(primitive);
     case schema::PrimitiveType_Exp:
-      return new Exp(primitive);
+      return new (std::nothrow) Exp(primitive);
     case schema::PrimitiveType_Gather:
-      return new Gather(primitive);
+      return new (std::nothrow) Gather(primitive);
     case schema::PrimitiveType_GatherNd:
-      return new GatherNd(primitive);
+      return new (std::nothrow) GatherNd(primitive);
     case schema::PrimitiveType_LocalResponseNormalization:
-      return new LocalResponseNormalization(primitive);
+      return new (std::nothrow) LocalResponseNormalization(primitive);
     case schema::PrimitiveType_Maximum:
-      return new Maximum(primitive);
+      return new (std::nothrow) Maximum(primitive);
     case schema::PrimitiveType_Minimum:
-      return new Minimum(primitive);
+      return new (std::nothrow) Minimum(primitive);
     case schema::PrimitiveType_StridedSlice:
-      return new StridedSlice(primitive);
+      return new (std::nothrow) StridedSlice(primitive);
     case schema::PrimitiveType_LeakyReLU:
       return new (std::nothrow) LeakyReLU(primitive);
     case schema::PrimitiveType_PReLU:
       return new (std::nothrow) PReLU(primitive);
     case schema::PrimitiveType_Round:
-      return new Round(primitive);
+      return new (std::nothrow) Round(primitive);
     case schema::PrimitiveType_Reverse:
-      return new Reverse(primitive);
+      return new (std::nothrow) Reverse(primitive);
     case schema::PrimitiveType_ReverseSequence:
-      return new ReverseSequence(primitive);
+      return new (std::nothrow) ReverseSequence(primitive);
     case schema::PrimitiveType_LogicalAnd:
-      return new LogicalAnd(primitive);
+      return new (std::nothrow) LogicalAnd(primitive);
     case schema::PrimitiveType_LogicalOr:
-      return new LogicalOr(primitive);
+      return new (std::nothrow) LogicalOr(primitive);
     case schema::PrimitiveType_LogicalNot:
-      return new LogicalNot(primitive);
+      return new (std::nothrow) LogicalNot(primitive);
     case schema::PrimitiveType_FloorDiv:
-      return new FloorDiv(primitive);
+      return new (std::nothrow) FloorDiv(primitive);
     case schema::PrimitiveType_FloorMod:
-      return new FloorMod(primitive);
+      return new (std::nothrow) FloorMod(primitive);
+    case schema::PrimitiveType_Mod:
+      return new (std::nothrow) Mod(primitive);
     case schema::PrimitiveType_Equal:
-      return new Equal(primitive);
+      return new (std::nothrow) Equal(primitive);
     case schema::PrimitiveType_NotEqual:
-      return new NotEqual(primitive);
+      return new (std::nothrow) NotEqual(primitive);
     case schema::PrimitiveType_Less:
-      return new Less(primitive);
+      return new (std::nothrow) Less(primitive);
     case schema::PrimitiveType_LessEqual:
-      return new LessEqual(primitive);
+      return new (std::nothrow) LessEqual(primitive);
     case schema::PrimitiveType_Greater:
-      return new Greater(primitive);
+      return new (std::nothrow) Greater(primitive);
     case schema::PrimitiveType_GreaterEqual:
-      return new GreaterEqual(primitive);
+      return new (std::nothrow) GreaterEqual(primitive);
     case schema::PrimitiveType_Floor:
-      return new Floor(primitive);
+      return new (std::nothrow) Floor(primitive);
     case schema::PrimitiveType_Split:
-      return new Split(primitive);
+      return new (std::nothrow) Split(primitive);
     case schema::PrimitiveType_OneHot:
-      return new OneHot(primitive);
+      return new (std::nothrow) OneHot(primitive);
     case schema::PrimitiveType_PriorBox:
-      return new PriorBox(primitive);
+      return new (std::nothrow) PriorBox(primitive);
     case schema::PrimitiveType_SpaceToDepth:
-      return new SpaceToDepth(primitive);
+      return new (std::nothrow) SpaceToDepth(primitive);
     case schema::PrimitiveType_Tile:
-      return new Tile(primitive);
+      return new (std::nothrow) Tile(primitive);
     case schema::PrimitiveType_Resize:
-      return new Resize(primitive);
+      return new (std::nothrow) Resize(primitive);
     case schema::PrimitiveType_Unstack:
-      return new Unstack(primitive);
+      return new (std::nothrow) Unstack(primitive);
     case schema::PrimitiveType_Unique:
-      return new Unique(primitive);
+      return new (std::nothrow) Unique(primitive);
     case schema::PrimitiveType_TopK:
-      return new TopK(primitive);
+      return new (std::nothrow) TopK(primitive);
     case schema::PrimitiveType_MatMul:
-      return new MatMul(primitive);
+      return new (std::nothrow) MatMul(primitive);
     case schema::PrimitiveType_QuantDTypeCast:
-      return new QuantDTypeCast(primitive);
+      return new (std::nothrow) QuantDTypeCast(primitive);
     case schema::PrimitiveType_EmbeddingLookup:
-      return new EmbeddingLookup(primitive);
+      return new (std::nothrow) EmbeddingLookup(primitive);
     case schema::PrimitiveType_Elu:
-      return new Elu(primitive);
+      return new (std::nothrow) Elu(primitive);
     case schema::PrimitiveType_DeDepthwiseConv2D:
-      return new DeDepthwiseConv2D(primitive);
+      return new (std::nothrow) DeDepthwiseConv2D(primitive);
     case schema::PrimitiveType_Shape:
-      return new Shape(primitive);
+      return new (std::nothrow) Shape(primitive);
     case schema::PrimitiveType_Unsqueeze:
-      return new Unsqueeze(primitive);
+      return new (std::nothrow) Unsqueeze(primitive);
     case schema::PrimitiveType_BatchToSpace:
     case schema::PrimitiveType_BatchToSpaceND:
-      return new BatchToSpace(primitive);
+      return new (std::nothrow) BatchToSpace(primitive);
     case schema::PrimitiveType_SpaceToBatch:
-      return new SpaceToBatch(primitive);
+      return new (std::nothrow) SpaceToBatch(primitive);
     case schema::PrimitiveType_SpaceToBatchND:
-      return new SpaceToBatchND(primitive);
+      return new (std::nothrow) SpaceToBatchND(primitive);
     case schema::PrimitiveType_BroadcastTo:
-      return new BroadcastTo(primitive);
+      return new (std::nothrow) BroadcastTo(primitive);
     case schema::PrimitiveType_DepthToSpace:
-      return new DepthToSpace(primitive);
+      return new (std::nothrow) DepthToSpace(primitive);
     case schema::PrimitiveType_Lstm:
-      return new Lstm(primitive);
+      return new (std::nothrow) Lstm(primitive);
     case schema::PrimitiveType_ZerosLike:
-      return new ZerosLike(primitive);
+      return new (std::nothrow) ZerosLike(primitive);
     case schema::PrimitiveType_MakeTuple:
-      return new MakeTuple(primitive);
+      return new (std::nothrow) MakeTuple(primitive);
     case schema::PrimitiveType_Where:
-      return new Where(primitive);
+      return new (std::nothrow) Where(primitive);
     case schema::PrimitiveType_ScatterND:
-      return new ScatterND(primitive);
+      return new (std::nothrow) ScatterND(primitive);
     case schema::PrimitiveType_ConstantOfShape:
-      return new ConstantOfShape(primitive);
+      return new (std::nothrow) ConstantOfShape(primitive);
     case schema::PrimitiveType_L2Norm:
-      return new L2Norm(primitive);
+      return new (std::nothrow) L2Norm(primitive);
     case schema::PrimitiveType_SparseToDense:
-      return new SparseToDense(primitive);
+      return new (std::nothrow) SparseToDense(primitive);
     case schema::PrimitiveType_DetectionPostProcess:
-      return new DetectionPostProcess(primitive);
+      return new (std::nothrow) DetectionPostProcess(primitive);
     case schema::PrimitiveType_Dropout:
-      return new Dropout(primitive);
+      return new (std::nothrow) Dropout(primitive);
     case schema::PrimitiveType_Neg:
-      return new Neg(primitive);
+      return new (std::nothrow) Neg(primitive);
+    case schema::PrimitiveType_RealDiv:
+      return new (std::nothrow) RealDiv(primitive);
     case schema::PrimitiveType_LshProjection:
-      return new LshProjection(primitive);
+      return new (std::nothrow) LshProjection(primitive);
     case schema::PrimitiveType_HashtableLookup:
-      return new HashtableLookup(primitive);
+      return new (std::nothrow) HashtableLookup(primitive);
     case schema::PrimitiveType_SkipGram:
-      return new SkipGram(primitive);
+      return new (std::nothrow) SkipGram(primitive);
+    case schema::PrimitiveType_Clip:
+      return new (std::nothrow) Clip(primitive);
+    case schema::PrimitiveType_Adder:
+      return new (std::nothrow) Adder(primitive);
     case schema::PrimitiveType_CustomPredict:
-      return new CustomPredict(primitive);
+      return new (std::nothrow) CustomPredict(primitive);
     case schema::PrimitiveType_CustomNormalize:
-      return new CustomNormalize(primitive);
+      return new (std::nothrow) CustomNormalize(primitive);
     case schema::PrimitiveType_CustomExtractFeatures:
-      return new CustomExtractFeatures(primitive);
+      return new (std::nothrow) CustomExtractFeatures(primitive);
     case schema::PrimitiveType_Upsample:
-      return new Upsample(primitive);
-
+      return new (std::nothrow) Upsample(primitive);
+    case schema::PrimitiveType_LayerNorm:
+      return new (std::nothrow) LayerNorm(primitive);
+    case schema::PrimitiveType_NonMaxSuppression:
+      return new (std::nothrow) NonMaxSuppression(primitive);
+    case schema::PrimitiveType_Identity:
+      return new (std::nothrow) Identity(primitive);
+    case schema::PrimitiveType_Rfft:
+      return new (std::nothrow) Rfft(primitive);
+    case schema::PrimitiveType_FftReal:
+      return new (std::nothrow) FftReal(primitive);
+    case schema::PrimitiveType_FftImag:
+      return new (std::nothrow) FftImag(primitive);
+    case schema::PrimitiveType_AudioSpectrogram:
+      return new (std::nothrow) AudioSpectrogram(primitive);
+    case schema::PrimitiveType_Mfcc:
+      return new (std::nothrow) Mfcc(primitive);
+    case schema::PrimitiveType_InstanceNorm:
+      return new (std::nothrow) InstanceNorm(primitive);
+    case schema::PrimitiveType_While:
+      return new (std::nothrow) While(primitive);
+    case schema::PrimitiveType_OnnxInt8Quantize:
+      return new (std::nothrow) Quant(primitive);
+    case schema::PrimitiveType_OnnxInt8Dequantize:
+      return new (std::nothrow) Dequant(primitive);
+    case schema::PrimitiveType_Reciprocal:
+      return new (std::nothrow) Reciprocal(primitive);
+    case schema::PrimitiveType_Constant:
+      return new (std::nothrow) Constant(primitive);
+    case schema::PrimitiveType_TensorListFromTensor:
+      return new (std::nothrow) TensorListFromTensor(primitive);
+    case schema::PrimitiveType_TensorListGetItem:
+      return new (std::nothrow) TensorListGetItem(primitive);
+    case schema::PrimitiveType_TensorListSetItem:
+      return new (std::nothrow) TensorListSetItem(primitive);
+    case schema::PrimitiveType_TensorListReserve:
+      return new (std::nothrow) TensorListReserve(primitive);
+    case schema::PrimitiveType_TensorListStack:
+      return new (std::nothrow) TensorListStack(primitive);
+    case schema::PrimitiveType_Switch:
+      return new (std::nothrow) Switch(primitive);
+    case schema::PrimitiveType_Merge:
+      return new (std::nothrow) Merge(primitive);
+    case schema::PrimitiveType_Partial:
+      return new (std::nothrow) Partial(primitive);
+    case schema::PrimitiveType_Assert:
+      return new (std::nothrow) AssertOP(primitive);
+    case schema::PrimitiveType_GeLU:
+      return new (std::nothrow) GeLU(primitive);
+    case schema::PrimitiveType_Gru:
+      return new (std::nothrow) Gru(primitive);
 #ifdef SUPPORT_TRAIN
     case schema::PrimitiveType_ActivationGrad:
-      return new ActivationGrad(primitive);
+      return new (std::nothrow) ActivationGrad(primitive);
     case schema::PrimitiveType_PoolingGrad:
-      return new PoolingGrad(primitive);
+      return new (std::nothrow) PoolingGrad(primitive);
     case schema::PrimitiveType_Conv2DGradFilter:
-      return new Conv2DGradFilter(primitive);
+      return new (std::nothrow) Conv2DGradFilter(primitive);
     case schema::PrimitiveType_Conv2DGradInput:
-      return new Conv2DGradInput(primitive);
+      return new (std::nothrow) Conv2DGradInput(primitive);
+    case schema::PrimitiveType_GroupConv2DGradInput:
+      return new (std::nothrow) GroupConv2DGradInput(primitive);
     case schema::PrimitiveType_BiasGrad:
-      return new BiasGrad(primitive);
+      return new (std::nothrow) BiasGrad(primitive);
     case schema::PrimitiveType_ApplyMomentum:
-      return new ApplyMomentum(primitive);
+      return new (std::nothrow) ApplyMomentum(primitive);
     case schema::PrimitiveType_BNGrad:
-      return new BNGrad(primitive);
+      return new (std::nothrow) BNGrad(primitive);
     case schema::PrimitiveType_AddGrad:
-      return new ArithmeticGrad(primitive);
+      return new (std::nothrow) ArithmeticGrad(primitive);
     case schema::PrimitiveType_SubGrad:
-      return new ArithmeticGrad(primitive);
+      return new (std::nothrow) ArithmeticGrad(primitive);
     case schema::PrimitiveType_MulGrad:
-      return new ArithmeticGrad(primitive);
+      return new (std::nothrow) ArithmeticGrad(primitive);
     case schema::PrimitiveType_DivGrad:
-      return new ArithmeticGrad(primitive);
+      return new (std::nothrow) ArithmeticGrad(primitive);
     case schema::PrimitiveType_SoftmaxCrossEntropy:
-      return new SoftmaxCrossEntropy(primitive);
+      return new (std::nothrow) SoftmaxCrossEntropy(primitive);
+    case schema::PrimitiveType_SparseSoftmaxCrossEntropy:
+      return new (std::nothrow) SparseSoftmaxCrossEntropy(primitive);
     case schema::PrimitiveType_PowerGrad:
-      return new PowerGrad(primitive);
+      return new (std::nothrow) PowerGrad(primitive);
     case schema::PrimitiveType_Depend:
-      return new Depend(primitive);
+      return new (std::nothrow) Depend(primitive);
+    case schema::PrimitiveType_ControlDepend:
+      return new (std::nothrow) ControlDepend(primitive);
     case schema::PrimitiveType_FlattenGrad:
-      return new FlattenGrad(primitive);
+      return new (std::nothrow) FlattenGrad(primitive);
     case schema::PrimitiveType_NegGrad:
-      return new NegGrad(primitive);
+      return new (std::nothrow) NegGrad(primitive);
     case schema::PrimitiveType_LogGrad:
-      return new LogGrad(primitive);
+      return new (std::nothrow) LogGrad(primitive);
     case schema::PrimitiveType_Sgd:
-      return new Sgd(primitive);
+      return new (std::nothrow) Sgd(primitive);
+    case schema::PrimitiveType_Adam:
+      return new (std::nothrow) Adam(primitive);
+    case schema::PrimitiveType_Assign:
+      return new (std::nothrow) Assign(primitive);
+    case schema::PrimitiveType_AssignAdd:
+      return new (std::nothrow) AssignAdd(primitive);
+    case schema::PrimitiveType_OnesLike:
+      return new (std::nothrow) OnesLike(primitive);
+    case schema::PrimitiveType_UnsortedSegmentSum:
+      return new (std::nothrow) UnsortedSegmentSum(primitive);
+    case schema::PrimitiveType_BinaryCrossEntropyGrad:
+      return new (std::nothrow) BinaryCrossEntropyGrad(primitive);
+    case schema::PrimitiveType_BinaryCrossEntropy:
+      return new (std::nothrow) BinaryCrossEntropy(primitive);
+    case schema::PrimitiveType_DropoutGrad:
+      return new (std::nothrow) DropoutGrad(primitive);
+    case schema::PrimitiveType_MaximumGrad:
+      return new (std::nothrow) MaximumGrad(primitive);
+    case schema::PrimitiveType_MinimumGrad:
+      return new (std::nothrow) MinimumGrad(primitive);
+    case schema::PrimitiveType_SmoothL1Loss:
+      return new (std::nothrow) SmoothL1Loss(primitive);
+    case schema::PrimitiveType_SmoothL1LossGrad:
+      return new (std::nothrow) SmoothL1LossGrad(primitive);
+    case schema::PrimitiveType_SigmoidCrossEntropyWithLogits:
+      return new (std::nothrow) SigmoidCrossEntropyWithLogits(primitive);
+    case schema::PrimitiveType_SigmoidCrossEntropyWithLogitsGrad:
+      return new (std::nothrow) SigmoidCrossEntropyWithLogitsGrad(primitive);
 #endif
-
     default:
       MS_LOG(ERROR) << "Unsupported primitive type in Create : " << schema::EnumNamePrimitiveType(op_type);
       break;
   }
   return nullptr;
 }
+
 #else
-PrimitiveC *PrimitiveC::Create(const schema::Primitive *primitive) {
-  MS_ASSERT(primitive);
-  auto op_type = primitive->value_type();
-  switch (op_type) {
-    case schema::PrimitiveType_SoftMax:
-      return NewPrimitiveC<SoftMax>(primitive);
-    case schema::PrimitiveType_Activation:
-      return NewPrimitiveC<Activation>(primitive);
-    case schema::PrimitiveType_Conv2D:
-      return NewPrimitiveC<Conv2D>(primitive);
-    case schema::PrimitiveType_DeConv2D:
-      return NewPrimitiveC<DeConv2D>(primitive);
-    case schema::PrimitiveType_Reduce:
-      return NewPrimitiveC<Reduce>(primitive);
-    case schema::PrimitiveType_Pooling:
-      return NewPrimitiveC<Pooling>(primitive);
-    case schema::PrimitiveType_ROIPooling:
-      return NewPrimitiveC<ROIPooling>(primitive);
-    case schema::PrimitiveType_DepthwiseConv2D:
-      return NewPrimitiveC<DepthwiseConv2D>(primitive);
-    case schema::PrimitiveType_FusedBatchNorm:
-      return NewPrimitiveC<FusedBatchNorm>(primitive);
-    case schema::PrimitiveType_BatchNorm:
-      return NewPrimitiveC<BatchNorm>(primitive);
-    case schema::PrimitiveType_FullConnection:
-      return NewPrimitiveC<FullConnection>(primitive);
-    case schema::PrimitiveType_Power:
-      return NewPrimitiveC<Power>(primitive);
-    case schema::PrimitiveType_Pad:
-      return NewPrimitiveC<Pad>(primitive);
-    case schema::PrimitiveType_Range:
-      return NewPrimitiveC<Range>(primitive);
-    case schema::PrimitiveType_Mul:
-      return NewPrimitiveC<Mul>(primitive);
-    case schema::PrimitiveType_Add:
-      return NewPrimitiveC<Add>(primitive);
-    case schema::PrimitiveType_Sub:
-      return NewPrimitiveC<Sub>(primitive);
-    case schema::PrimitiveType_Div:
-      return NewPrimitiveC<Div>(primitive);
-    case schema::PrimitiveType_BiasAdd:
-      return NewPrimitiveC<BiasAdd>(primitive);
-    case schema::PrimitiveType_ExpandDims:
-      return NewPrimitiveC<ExpandDims>(primitive);
-    case schema::PrimitiveType_ArgMax:
-      return NewPrimitiveC<ArgMax>(primitive);
-    case schema::PrimitiveType_ArgMin:
-      return NewPrimitiveC<ArgMin>(primitive);
-    case schema::PrimitiveType_Cast:
-      return NewPrimitiveC<Cast>(primitive);
-    case schema::PrimitiveType_Reshape:
-      return NewPrimitiveC<Reshape>(primitive);
-    case schema::PrimitiveType_Scale:
-      return NewPrimitiveC<Scale>(primitive);
-    case schema::PrimitiveType_Eltwise:
-      return NewPrimitiveC<Eltwise>(primitive);
-    case schema::PrimitiveType_Ceil:
-      return NewPrimitiveC<Ceil>(primitive);
-    case schema::PrimitiveType_Concat:
-      return NewPrimitiveC<Concat>(primitive);
-    case schema::PrimitiveType_Fill:
-      return NewPrimitiveC<Fill>(primitive);
-    case schema::PrimitiveType_Nhwc2Nchw:
-      return NewPrimitiveC<Nhwc2Nchw>(primitive);
-    case schema::PrimitiveType_Nchw2Nhwc:
-      return NewPrimitiveC<Nchw2Nhwc>(primitive);
-    case schema::PrimitiveType_Transpose:
-      return NewPrimitiveC<Transpose>(primitive);
-    case schema::PrimitiveType_Slice:
-      return NewPrimitiveC<Slice>(primitive);
-    case schema::PrimitiveType_Squeeze:
-      return NewPrimitiveC<Squeeze>(primitive);
-    case schema::PrimitiveType_Flatten:
-      return NewPrimitiveC<Flatten>(primitive);
-    case schema::PrimitiveType_Mean:
-      return NewPrimitiveC<Mean>(primitive);
-    case schema::PrimitiveType_Stack:
-      return NewPrimitiveC<Stack>(primitive);
-    case schema::PrimitiveType_Crop:
-      return NewPrimitiveC<Crop>(primitive);
-    case schema::PrimitiveType_SquaredDifference:
-      return NewPrimitiveC<SquaredDifference>(primitive);
-    case schema::PrimitiveType_AddN:
-      return NewPrimitiveC<AddN>(primitive);
-    case schema::PrimitiveType_Abs:
-      return NewPrimitiveC<Abs>(primitive);
-    case schema::PrimitiveType_Sin:
-      return NewPrimitiveC<Sin>(primitive);
-    case schema::PrimitiveType_Cos:
-      return NewPrimitiveC<Cos>(primitive);
-    case schema::PrimitiveType_Log:
-      return NewPrimitiveC<Log>(primitive);
-    case schema::PrimitiveType_Neg:
-      return NewPrimitiveC<Neg>(primitive);
-    case schema::PrimitiveType_Sqrt:
-      return NewPrimitiveC<Sqrt>(primitive);
-    case schema::PrimitiveType_Rsqrt:
-      return NewPrimitiveC<Rsqrt>(primitive);
-    case schema::PrimitiveType_Square:
-      return NewPrimitiveC<Square>(primitive);
-    case schema::PrimitiveType_Exp:
-      return NewPrimitiveC<Exp>(primitive);
-    case schema::PrimitiveType_Gather:
-      return NewPrimitiveC<Gather>(primitive);
-    case schema::PrimitiveType_GatherNd:
-      return NewPrimitiveC<GatherNd>(primitive);
-    case schema::PrimitiveType_LocalResponseNormalization:
-      return NewPrimitiveC<LocalResponseNormalization>(primitive);
-    case schema::PrimitiveType_Maximum:
-      return NewPrimitiveC<Maximum>(primitive);
-    case schema::PrimitiveType_Minimum:
-      return NewPrimitiveC<Minimum>(primitive);
-    case schema::PrimitiveType_StridedSlice:
-      return NewPrimitiveC<StridedSlice>(primitive);
-    case schema::PrimitiveType_LeakyReLU:
-      return NewPrimitiveC<LeakyReLU>(primitive);
-    case schema::PrimitiveType_PReLU:
-      return NewPrimitiveC<PReLU>(primitive);
-    case schema::PrimitiveType_Round:
-      return NewPrimitiveC<Round>(primitive);
-    case schema::PrimitiveType_Reverse:
-      return NewPrimitiveC<Reverse>(primitive);
-    case schema::PrimitiveType_ReverseSequence:
-      return NewPrimitiveC<ReverseSequence>(primitive);
-    case schema::PrimitiveType_LogicalAnd:
-      return NewPrimitiveC<LogicalAnd>(primitive);
-    case schema::PrimitiveType_LogicalOr:
-      return NewPrimitiveC<LogicalOr>(primitive);
-    case schema::PrimitiveType_LogicalNot:
-      return NewPrimitiveC<LogicalNot>(primitive);
-    case schema::PrimitiveType_FloorDiv:
-      return NewPrimitiveC<FloorDiv>(primitive);
-    case schema::PrimitiveType_FloorMod:
-      return NewPrimitiveC<FloorMod>(primitive);
-    case schema::PrimitiveType_Equal:
-      return NewPrimitiveC<Equal>(primitive);
-    case schema::PrimitiveType_NotEqual:
-      return NewPrimitiveC<NotEqual>(primitive);
-    case schema::PrimitiveType_Less:
-      return NewPrimitiveC<Less>(primitive);
-    case schema::PrimitiveType_LessEqual:
-      return NewPrimitiveC<LessEqual>(primitive);
-    case schema::PrimitiveType_Greater:
-      return NewPrimitiveC<Greater>(primitive);
-    case schema::PrimitiveType_GreaterEqual:
-      return NewPrimitiveC<GreaterEqual>(primitive);
-    case schema::PrimitiveType_Floor:
-      return NewPrimitiveC<Floor>(primitive);
-    case schema::PrimitiveType_Split:
-      return NewPrimitiveC<Split>(primitive);
-    case schema::PrimitiveType_OneHot:
-      return NewPrimitiveC<OneHot>(primitive);
-    case schema::PrimitiveType_PriorBox:
-      return NewPrimitiveC<PriorBox>(primitive);
-    case schema::PrimitiveType_SpaceToDepth:
-      return NewPrimitiveC<SpaceToDepth>(primitive);
-    case schema::PrimitiveType_Tile:
-      return NewPrimitiveC<Tile>(primitive);
-    case schema::PrimitiveType_Resize:
-      return NewPrimitiveC<Resize>(primitive);
-    case schema::PrimitiveType_Unstack:
-      return NewPrimitiveC<Unstack>(primitive);
-    case schema::PrimitiveType_Unique:
-      return NewPrimitiveC<Unique>(primitive);
-    case schema::PrimitiveType_TopK:
-      return NewPrimitiveC<TopK>(primitive);
-    case schema::PrimitiveType_MatMul:
-      return NewPrimitiveC<MatMul>(primitive);
-    case schema::PrimitiveType_QuantDTypeCast:
-      return NewPrimitiveC<QuantDTypeCast>(primitive);
-    case schema::PrimitiveType_EmbeddingLookup:
-      return NewPrimitiveC<EmbeddingLookup>(primitive);
-    case schema::PrimitiveType_Elu:
-      return NewPrimitiveC<Elu>(primitive);
-    case schema::PrimitiveType_DeDepthwiseConv2D:
-      return NewPrimitiveC<DeDepthwiseConv2D>(primitive);
-    case schema::PrimitiveType_Shape:
-      return NewPrimitiveC<Shape>(primitive);
-    case schema::PrimitiveType_Unsqueeze:
-      return NewPrimitiveC<Unsqueeze>(primitive);
-    case schema::PrimitiveType_BatchToSpace:
-    case schema::PrimitiveType_BatchToSpaceND:
-      return NewPrimitiveC<BatchToSpace>(primitive);
-    case schema::PrimitiveType_SpaceToBatch:
-      return NewPrimitiveC<SpaceToBatch>(primitive);
-    case schema::PrimitiveType_SpaceToBatchND:
-      return NewPrimitiveC<SpaceToBatchND>(primitive);
-    case schema::PrimitiveType_BroadcastTo:
-      return NewPrimitiveC<BroadcastTo>(primitive);
-    case schema::PrimitiveType_DepthToSpace:
-      return NewPrimitiveC<DepthToSpace>(primitive);
-    case schema::PrimitiveType_Lstm:
-      return NewPrimitiveC<Lstm>(primitive);
-    case schema::PrimitiveType_ZerosLike:
-      return NewPrimitiveC<ZerosLike>(primitive);
-    case schema::PrimitiveType_MakeTuple:
-      return NewPrimitiveC<MakeTuple>(primitive);
-    case schema::PrimitiveType_Where:
-      return NewPrimitiveC<Where>(primitive);
-    case schema::PrimitiveType_ScatterND:
-      return NewPrimitiveC<ScatterND>(primitive);
-    case schema::PrimitiveType_ConstantOfShape:
-      return NewPrimitiveC<ConstantOfShape>(primitive);
-    case schema::PrimitiveType_L2Norm:
-      return NewPrimitiveC<L2Norm>(primitive);
-    case schema::PrimitiveType_SparseToDense:
-      return NewPrimitiveC<SparseToDense>(primitive);
-    case schema::PrimitiveType_DetectionPostProcess:
-      return NewPrimitiveC<DetectionPostProcess>(primitive);
-    case schema::PrimitiveType_Dropout:
-      return NewPrimitiveC<Dropout>(primitive);
-    case schema::PrimitiveType_LshProjection:
-      return NewPrimitiveC<LshProjection>(primitive);
-    case schema::PrimitiveType_HashtableLookup:
-      return NewPrimitiveC<HashtableLookup>(primitive);
-    case schema::PrimitiveType_SkipGram:
-      return NewPrimitiveC<SkipGram>(primitive);
-    case schema::PrimitiveType_CustomPredict:
-      return NewPrimitiveC<CustomPredict>(primitive);
-    case schema::PrimitiveType_CustomNormalize:
-      return NewPrimitiveC<CustomNormalize>(primitive);
-    case schema::PrimitiveType_CustomExtractFeatures:
-      return NewPrimitiveC<CustomExtractFeatures>(primitive);
-    case schema::PrimitiveType_Upsample:
-      return NewPrimitiveC<Upsample>(primitive);
-
-#ifdef SUPPORT_TRAIN
-    case schema::PrimitiveType_ActivationGrad:
-      return NewPrimitiveC<ActivationGrad>(primitive);
-    case schema::PrimitiveType_PoolingGrad:
-      return NewPrimitiveC<PoolingGrad>(primitive);
-    case schema::PrimitiveType_Conv2DGradFilter:
-      return NewPrimitiveC<Conv2DGradFilter>(primitive);
-    case schema::PrimitiveType_Conv2DGradInput:
-      return NewPrimitiveC<Conv2DGradInput>(primitive);
-    case schema::PrimitiveType_BiasGrad:
-      return NewPrimitiveC<BiasGrad>(primitive);
-    case schema::PrimitiveType_ApplyMomentum:
-      return NewPrimitiveC<ApplyMomentum>(primitive);
-    case schema::PrimitiveType_BNGrad:
-      return NewPrimitiveC<BNGrad>(primitive);
-    case schema::PrimitiveType_AddGrad:
-      return NewPrimitiveC<ArithmeticGrad>(primitive);
-    case schema::PrimitiveType_SubGrad:
-      return NewPrimitiveC<ArithmeticGrad>(primitive);
-    case schema::PrimitiveType_MulGrad:
-      return NewPrimitiveC<ArithmeticGrad>(primitive);
-    case schema::PrimitiveType_DivGrad:
-      return NewPrimitiveC<ArithmeticGrad>(primitive);
-    case schema::PrimitiveType_SoftmaxCrossEntropy:
-      return NewPrimitiveC<SoftmaxCrossEntropy>(primitive);
-    case schema::PrimitiveType_NegGrad:
-      return NewPrimitiveC<NegGrad>(primitive);
-    case schema::PrimitiveType_LogGrad:
-      return NewPrimitiveC<LogGrad>(primitive);
-    case schema::PrimitiveType_Sgd:
-      return NewPrimitiveC<Sgd>(primitive);
-#endif
-    default:
-      MS_LOG(ERROR) << "Unsupported primitive type in Create : " << schema::EnumNamePrimitiveType(op_type);
-      break;
-  }
-  return nullptr;
-}
-void PrimitiveC::SetQuantType(schema::QuantType quant_type) { this->quant_type_ = quant_type; }
-schema::QuantType PrimitiveC::GetQuantType() const { return quant_type_; }
+void PrimitiveC::set_quant_type(schema::QuantType quant_type) { this->quant_type_ = quant_type; }
+schema::QuantType PrimitiveC::quant_type() const { return quant_type_; }
 #endif
 
 int PrimitiveC::Type() const {
@@ -1025,18 +1092,18 @@ int PrimitiveC::Type() const {
   return this->primitive_->value_type();
 #endif
 }
-bool PrimitiveC::GetInferFlag() const { return this->infer_flag_; }
+bool PrimitiveC::infer_flag() const { return this->infer_flag_; }
 
-void PrimitiveC::SetInferFlag(bool flag) { this->infer_flag_ = flag; }
+void PrimitiveC::set_infer_flag(bool flag) { this->infer_flag_ = flag; }
 
-int PrimitiveC::InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) {
-  auto input = inputs_.front();
+int PrimitiveC::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Tensor *> outputs) {
+  auto input = inputs.front();
   MS_ASSERT(input != nullptr);
-  auto output = outputs_.front();
+  auto output = outputs.front();
   MS_ASSERT(output != nullptr);
   output->set_shape(input->shape());
   output->set_data_type(input->data_type());
-  output->SetFormat(input->GetFormat());
+  output->set_format(input->format());
   return 0;
 }
 

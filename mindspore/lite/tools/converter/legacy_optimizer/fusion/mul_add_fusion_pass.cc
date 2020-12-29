@@ -17,15 +17,12 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <utility>
 #include <memory>
 #include "tools/converter/legacy_optimizer/fusion/mul_add_fusion_pass.h"
 #include "src/common/log_adapter.h"
-#include "securec/include/securec.h"
 #include "tools/common/graph_util.h"
 #include "include/errorcode.h"
 #include "schema/inner/model_generated.h"
-#include "src/common/op_utils.h"
 
 namespace mindspore {
 namespace lite {
@@ -101,6 +98,10 @@ STATUS MulAddFusionPass::DoFusion(MetaGraphT *graph, const std::string &patternN
     // dont fusion, return
     return RET_OK;
   }
+  if (mulNodeBiasTensor->dataType == TypeId::kNumberTypeUInt8) {
+    MS_LOG(DEBUG) << "won't fusion uint8 mul add for precision.";
+    return RET_OK;
+  }
   // add node the second tensor is not constant tensor, don't fusion
   auto addNodeInputIndex = addNode->inputIndex;
   if (addNodeInputIndex.size() != ADD_OP_INPUT_NUM) {
@@ -136,7 +137,7 @@ STATUS MulAddFusionPass::AddNewScaleNode(MetaGraphT *graph, const std::unique_pt
   MS_ASSERT(addNode != nullptr);
   // replace mulNode as scale
   mulNode->primitive->value.type = schema::PrimitiveType_Scale;
-  std::unique_ptr<ScaleT> scaleParam(new ScaleT());
+  std::unique_ptr<ScaleT> scaleParam(new (std::nothrow) ScaleT());
   if (scaleParam == nullptr) {
     MS_LOG(ERROR) << "new transposeParam failed";
     return RET_ERROR;
@@ -145,6 +146,8 @@ STATUS MulAddFusionPass::AddNewScaleNode(MetaGraphT *graph, const std::unique_pt
   int shape_size = graph->allTensors.at(addBiasIndex)->dims.size();
   scaleParam->axis = 0 - shape_size;
   mulNode->inputIndex.push_back(addBiasIndex);
+  MS_ASSERT(addNode->primitive != nullptr);
+  MS_ASSERT(addNode->primitive->value.AsAdd() != nullptr);
   auto activationType = addNode->primitive->value.AsAdd()->activationType;
   if (activationType == ActivationType_RELU || activationType == ActivationType_RELU6 ||
       activationType == ActivationType_NO_ACTIVATION) {
@@ -158,6 +161,8 @@ STATUS MulAddFusionPass::AddNewScaleNode(MetaGraphT *graph, const std::unique_pt
   } else {
     // repace addnode as activation
     std::unique_ptr<ActivationT> activationParam(new ActivationT());
+    MS_ASSERT(addNode->primitive != nullptr);
+    MS_ASSERT(addNode->primitive->value.AsAdd() != nullptr);
     activationParam->type = addNode->primitive->value.AsAdd()->activationType;
     addNode->primitive->value.type = schema::PrimitiveType_Activation;
     addNode->primitive->value.value = activationParam.release();

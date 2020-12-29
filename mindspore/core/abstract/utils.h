@@ -26,6 +26,7 @@
 #include "abstract/abstract_value.h"
 #include "utils/any.h"
 #include "utils/misc.h"
+#include "utils/shape_utils.h"
 
 namespace mindspore {
 namespace abstract {
@@ -46,12 +47,22 @@ TypePtr CheckTypeList(const TypePtr &predicate, const TypePtrList &args_type_lis
 
 bool CheckType(const TypePtr &expected_type, const TypePtr &x);
 
-int GetPositiveAxis(int axis_value, size_t increment);
+int64_t GetPositiveAxis(int64_t axis_value, size_t increment);
 
-std::vector<int> BroadcastShape(std::vector<int> shpx, std::vector<int> shpy);
+ShapeVector BroadcastShape(ShapeVector shpx, ShapeVector shpy);
+
+size_t TypeIdSize(const TypeId data_type);
+size_t ShapeSize(const std::vector<size_t> &shape);
 
 // Get broadcasted shape for binary element-wise operation
 ShapePtr GetBroadcastShape(const std::string &op, const AbstractTensorPtr &tensor_x, const AbstractTensorPtr &tensor_y);
+
+// Check dynamic shape routine
+void CheckMinMaxShape(const ShapeVector &shape, ShapeVector *min_shape, ShapeVector *max_shape);
+
+// Get 3rd argument for UnsortedSegmentOps' inferImpl function
+int64_t GetUnsortedSegmentOpScalarArg(const AbstractBasePtrList &args_spec_list, const std::string &op_name);
+
 }  // namespace abstract
 }  // namespace mindspore
 #endif  // MINDSPORE_CORE_ABSTRACT_UTILS_H_

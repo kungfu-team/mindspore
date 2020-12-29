@@ -14,30 +14,29 @@
  * limitations under the License.
  */
 #include "src/runtime/kernel/arm/int8/argminmax_int8.h"
-#include <vector>
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
-#include "nnacl/int8/arg_min_max_int8.h"
-#include "include/errorcode.h"
 
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
 
+using mindspore::lite::KernelRegistrar;
+using mindspore::lite::RET_FORMAT_ERR;
+using mindspore::lite::RET_PARAM_INVALID;
+using mindspore::schema::PrimitiveType_ArgMax;
+using mindspore::schema::PrimitiveType_ArgMin;
+
 namespace mindspore::kernel {
 int ArgMinMaxInt8CPUKernel::Init() {
-  auto ret = ArgMinMaxBaseCPUKernel::Init();
-  if (ret != RET_OK) {
-    return ret;
-  }
   auto param = reinterpret_cast<ArgMinMaxParameter *>(op_parameter_);
   param->data_type_ = kNumberTypeInt8;
   auto *input_tensor = in_tensors_.at(kInputIndex);
-  auto in_quant_args = input_tensor->GetQuantParams();
+  auto in_quant_args = input_tensor->quant_params();
   in_quant_arg_.scale_ = in_quant_args.front().scale;
   in_quant_arg_.zp_ = in_quant_args.front().zeroPoint;
 
   auto *out_tensor = out_tensors_.at(kOutputIndex);
-  auto out_quant_args = out_tensor->GetQuantParams();
+  auto out_quant_args = out_tensor->quant_params();
   out_quant_arg_.scale_ = out_quant_args.front().scale;
   out_quant_arg_.zp_ = out_quant_args.front().zeroPoint;
   if (!InferShapeDone()) {
@@ -46,14 +45,25 @@ int ArgMinMaxInt8CPUKernel::Init() {
   return ReSize();
 }
 
-int ArgMinMaxInt8CPUKernel::ReSize() { return ArgMinMaxBaseCPUKernel::ReSize(); }
+int ArgMinMaxInt8CPUKernel::ReSize() {
+  auto in_shape = in_tensors_.at(0)->shape();
+  auto dims_size = in_shape.size();
+  auto param = reinterpret_cast<ArgMinMaxParameter *>(op_parameter_);
+  int axis = param->axis_ < 0 ? param->axis_ + dims_size : param->axis_;
+  param->axis_ = axis;
+  param->dims_size_ = dims_size;
+  if (param->topk_ <= 0) {
+    MS_LOG(ERROR) << "Invalid topk " << param->topk_;
+    return RET_ERROR;
+  }
+  param->topk_ = MSMIN(param->topk_, in_shape.at(axis));
+  ComputeStrides(in_shape.data(), param->in_strides_, in_shape.size());
+  auto out_shape = out_tensors_.at(0)->shape();
+  ComputeStrides(out_shape.data(), param->out_strides_, out_shape.size());
+  return RET_OK;
+}
 
 int ArgMinMaxInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << ret;
-    return ret;
-  }
   auto input = in_tensors_.at(0);
 
   const int8_t *input_data = reinterpret_cast<const int8_t *>(in_tensors_.at(0)->MutableData());
@@ -79,7 +89,13 @@ int ArgMinMaxInt8CPUKernel::Run() {
     case 3:
       Int8ArgMinMaxDim3(input_data, output_data, in_shape.data(), param, &in_quant_arg_, &out_quant_arg_);
       break;
+    default:
+      MS_LOG(ERROR) << "axis is invalid";
+      return RET_ERROR;
   }
   return RET_OK;
 }
+
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_ArgMax, LiteKernelCreator<ArgMinMaxInt8CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_ArgMin, LiteKernelCreator<ArgMinMaxInt8CPUKernel>)
 }  // namespace mindspore::kernel

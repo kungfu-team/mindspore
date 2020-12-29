@@ -17,6 +17,10 @@
 #include "src/ops/flatten_grad.h"
 #include <memory>
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 int FlattenGrad::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
@@ -33,17 +37,17 @@ int FlattenGrad::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *>
   }
 
   output->set_data_type(input->data_type());
-  output->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output->set_format(input->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
 
   auto input_shape = input->shape();
   std::vector<int> output_shape(2);
-  output_shape[0] = input_shape[0];
-  output_shape[1] = 1;
+  output_shape.at(0) = input_shape.at(0);
+  output_shape.at(1) = 1;
   for (size_t i = 1; i < input_shape.size(); i++) {
-    output_shape[1] *= input_shape[i];
+    output_shape.at(1) *= input_shape.at(i);
   }
   output->set_shape(output_shape);
   return RET_OK;
@@ -85,6 +89,10 @@ int FlattenGrad::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuf
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+PrimitiveC *FlattenGradCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<FlattenGrad>(primitive);
+}
+Registry FlattenGradRegistry(schema::PrimitiveType_FlattenGrad, FlattenGradCreator);
 #endif
 }  // namespace lite
 }  // namespace mindspore

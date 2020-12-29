@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-#include "lite_cv/image_process.h"
+#include "minddata/dataset/kernels/image/lite_cv/image_process.h"
 
+#include <limits.h>
 #include <string.h>
 #include <cmath>
 #include <vector>
-#include <algorithm>
 
 namespace mindspore {
 namespace dataset {
@@ -62,6 +62,9 @@ static void ResizeBilinear3C(const unsigned char *src, int src_width, int src_he
   double scale_width = static_cast<double>(src_width) / dst_width;
   double scale_height = static_cast<double>(src_height) / dst_height;
 
+  if (dst_height >= (INT_MAX / 2 - dst_width)) {
+    return;
+  }
   int *data_buf = new int[2 * dst_width + 2 * dst_height];
 
   int *x_offset = data_buf;
@@ -129,7 +132,7 @@ static void ResizeBilinear3C(const unsigned char *src, int src_width, int src_he
     for (int k = 0; k < dst_width * 3; k++) {
       int16_t t0 = (int16_t)((y_weight[0] * (int16_t)(*row0_ptr0++)) >> 16);
       int16_t t1 = (int16_t)((y_weight[1] * (int16_t)(*row1_ptr1++)) >> 16);
-      *dst_ptr++ = (unsigned char)((t0 + t1 + 2) >> 2);
+      *dst_ptr++ = static_cast<unsigned char>((t0 + t1 + 2) >> 2);
     }
     y_weight += 2;
   }
@@ -141,6 +144,9 @@ static void ResizeBilinear1C(const unsigned char *src, int src_width, int src_he
   double scale_width = static_cast<double>(src_width) / dst_width;
   double scale_height = static_cast<double>(src_height) / dst_height;
 
+  if (dst_height >= (INT_MAX / 2 - dst_width)) {
+    return;
+  }
   int *data_buf = new int[2 * dst_width + 2 * dst_height];
 
   int *x_offset = data_buf;
@@ -201,7 +207,7 @@ static void ResizeBilinear1C(const unsigned char *src, int src_width, int src_he
     for (int k = 0; k < dst_width; k++) {
       int16_t t0 = (int16_t)((y_weight[0] * (int16_t)(*row0_ptr0++)) >> 16);
       int16_t t1 = (int16_t)((y_weight[1] * (int16_t)(*row1_ptr1++)) >> 16);
-      *dst_ptr++ = (unsigned char)((t0 + t1 + 2) >> 2);
+      *dst_ptr++ = static_cast<unsigned char>((t0 + t1 + 2) >> 2);
     }
 
     y_weight += 2;
@@ -216,16 +222,35 @@ bool ResizeBilinear(const LiteMat &src, LiteMat &dst, int dst_w, int dst_h) {
   if (src.data_type_ != LDataType::UINT8) {
     return false;
   }
+  if (src.channel_ != 3 && src.channel_ != 1) {
+    return false;
+  }
+  if (dst.IsEmpty()) {
+    (void)dst.Init(dst_w, dst_h, src.channel_, LDataType::UINT8);
+  } else if (dst.height_ != dst_h || dst.width_ != dst_w || dst.channel_ != src.channel_) {
+    return false;
+  } else if (dst.data_type_ != LDataType::UINT8) {
+    return false;
+  } else {
+  }
+
   if (src.channel_ == 3) {
-    (void)dst.Init(dst_w, dst_h, 3, LDataType::UINT8);
     const unsigned char *src_start_p = src;
     unsigned char *dst_start_p = dst;
     (void)ResizeBilinear3C(src_start_p, src.width_, src.height_, dst_start_p, dst_w, dst_h);
-  } else if (src.channel_ == 1) {
-    (void)dst.Init(dst_w, dst_h, 1, LDataType::UINT8);
+  } else {  // channel == 1
     const unsigned char *src_start_p = src;
     unsigned char *dst_start_p = dst;
     (void)ResizeBilinear1C(src_start_p, src.width_, src.height_, dst_start_p, dst_w, dst_h);
+  }
+  return true;
+}
+
+static bool ConvertBGR(const unsigned char *data, LDataType data_type, int w, int h, LiteMat &mat) {
+  if (data_type == LDataType::UINT8) {
+    mat.Init(w, h, 3, LDataType::UINT8);
+    unsigned char *dst_ptr = mat;
+    (void)memcpy(dst_ptr, data, w * h * 3 * sizeof(unsigned char));
   } else {
     return false;
   }
@@ -272,6 +297,76 @@ static bool ConvertRGBAToRGB(const unsigned char *data, LDataType data_type, int
   return true;
 }
 
+static bool ConvertYUV420SPToBGR(const uint8_t *data, LDataType data_type, bool flag, int w, int h, LiteMat &mat) {
+  if (data == nullptr || w <= 0 || h <= 0) {
+    return false;
+  }
+  if (data_type == LDataType::UINT8) {
+    mat.Init(w, h, 3, LDataType::UINT8);
+    const uint8_t *y_ptr = data;
+    const uint8_t *uv_ptr = y_ptr + w * h;
+    uint8_t *bgr_ptr = mat;
+    const int bgr_stride = 3 * w;
+
+    for (uint64_t y = 0; y < h; ++y) {
+      uint8_t *bgr_buf = bgr_ptr;
+      const uint8_t *uv_buf = uv_ptr;
+      const uint8_t *y_buf = y_ptr;
+      uint8_t u;
+      uint8_t v;
+      for (int x = 0; x < w - 1; x += 2) {
+        if (flag) {
+          // NV21
+          u = uv_buf[1];
+          v = uv_buf[0];
+        } else {
+          // NV12
+          u = uv_buf[0];
+          v = uv_buf[1];
+        }
+        uint32_t tmp_y = (uint32_t)(y_buf[0] * YSCALE * YTOG) >> 16;
+        // b
+        bgr_buf[0] = std::clamp((int32_t)(-(u * UTOB) + tmp_y + BTOB) >> 6, 0, 255);
+        // g
+        bgr_buf[1] = std::clamp((int32_t)(-(u * UTOG + v * VTOG) + tmp_y + BTOG) >> 6, 0, 255);
+        // r
+        bgr_buf[2] = std::clamp((int32_t)(-(v * VTOR) + tmp_y + BTOR) >> 6, 0, 255);
+
+        tmp_y = (uint32_t)(y_buf[1] * YSCALE * YTOG) >> 16;
+        bgr_buf[3] = std::clamp((int32_t)(-(u * UTOB) + tmp_y + BTOB) >> 6, 0, 255);
+        bgr_buf[4] = std::clamp((int32_t)(-(u * UTOG + v * VTOG) + tmp_y + BTOG) >> 6, 0, 255);
+        bgr_buf[5] = std::clamp((int32_t)(-(v * VTOR) + tmp_y + BTOR) >> 6, 0, 255);
+
+        y_buf += 2;
+        uv_buf += 2;
+        bgr_buf += 6;
+      }
+      if (w & 1) {
+        if (flag) {
+          // NV21
+          u = uv_buf[1];
+          v = uv_buf[0];
+        } else {
+          // NV12
+          u = uv_buf[0];
+          v = uv_buf[1];
+        }
+        uint32_t tmp_y = (uint32_t)(y_buf[0] * YSCALE * YTOG) >> 16;
+        bgr_buf[0] = std::clamp((int32_t)(-(u * UTOB) + tmp_y + BTOB) >> 6, 0, 255);
+        bgr_buf[1] = std::clamp((int32_t)(-(u * UTOG + v * VTOG) + tmp_y + BTOG) >> 6, 0, 255);
+        bgr_buf[2] = std::clamp((int32_t)(-(v * VTOR) + tmp_y + BTOR) >> 6, 0, 255);
+      }
+
+      bgr_ptr += bgr_stride;
+      y_ptr += w;
+      if (y & 1) {
+        uv_ptr += w;
+      }
+    }
+  }
+  return true;
+}
+
 static bool ConvertRGBAToGRAY(const unsigned char *data, LDataType data_type, int w, int h, LiteMat &mat) {
   if (data_type == LDataType::UINT8) {
     mat.Init(w, h, 1, LDataType::UINT8);
@@ -300,12 +395,24 @@ bool InitFromPixel(const unsigned char *data, LPixelType pixel_type, LDataType d
   if (w <= 0 || h <= 0) {
     return false;
   }
+
+  if (data_type != LDataType::UINT8) {
+    return false;
+  }
   if (pixel_type == LPixelType::RGBA2BGR) {
     return ConvertRGBAToBGR(data, data_type, w, h, m);
   } else if (pixel_type == LPixelType::RGBA2GRAY) {
     return ConvertRGBAToGRAY(data, data_type, w, h, m);
   } else if (pixel_type == LPixelType::RGBA2RGB) {
     return ConvertRGBAToRGB(data, data_type, w, h, m);
+  } else if (pixel_type == LPixelType::NV212BGR) {
+    return ConvertYUV420SPToBGR(data, data_type, true, w, h, m);
+  } else if (pixel_type == LPixelType::NV122BGR) {
+    return ConvertYUV420SPToBGR(data, data_type, false, w, h, m);
+  } else if (pixel_type == LPixelType::BGR) {
+    return ConvertBGR(data, data_type, w, h, m);
+  } else if (pixel_type == LPixelType::RGB) {
+    return ConvertBGR(data, data_type, w, h, m);
   } else {
     return false;
   }
@@ -316,14 +423,22 @@ bool ConvertTo(const LiteMat &src, LiteMat &dst, double scale) {
   if (src.data_type_ != LDataType::UINT8) {
     return false;
   }
-
-  (void)dst.Init(src.width_, src.height_, src.channel_, LDataType::FLOAT32);
+  if (scale < 0.0 || scale > 100) {
+    return false;
+  }
+  if (dst.IsEmpty()) {
+    (void)dst.Init(src.width_, src.height_, src.channel_, LDataType::FLOAT32);
+  } else if (dst.height_ != src.height_ || dst.width_ != src.width_ || dst.channel_ != src.channel_) {
+    return false;
+  } else if (dst.data_type_ != LDataType::FLOAT32) {
+    return false;
+  }
   const unsigned char *src_start_p = src;
   float *dst_start_p = dst;
   for (int h = 0; h < src.height_; h++) {
     for (int w = 0; w < src.width_; w++) {
+      uint32_t index = (h * src.width_ + w) * src.channel_;
       for (int c = 0; c < src.channel_; c++) {
-        int index = (h * src.width_ + w) * src.channel_;
         dst_start_p[index + c] = (static_cast<float>(src_start_p[index + c] * scale));
       }
     }
@@ -332,11 +447,17 @@ bool ConvertTo(const LiteMat &src, LiteMat &dst, double scale) {
 }
 
 template <typename T>
-static void CropInternal(const LiteMat &src, LiteMat &dst, int x, int y, int w, int h) {
+static bool CropInternal(const LiteMat &src, LiteMat &dst, int x, int y, int w, int h) {
   int dst_h = h;
   int dst_w = w;
   int dst_c = src.channel_;
-  dst.Init(dst_w, dst_h, dst_c, src.data_type_);
+  if (dst.IsEmpty()) {
+    dst.Init(dst_w, dst_h, dst_c, src.data_type_);
+  } else if (dst.height_ != h || dst.width_ != w || dst.channel_ != src.channel_) {
+    return false;
+  } else if (dst.data_type_ != src.data_type_) {
+    return false;
+  }
   const T *src_start_p = src;
   T *dst_start_p = dst;
   for (int i_h = 0; i_h < dst_h; i_h++) {
@@ -344,20 +465,21 @@ static void CropInternal(const LiteMat &src, LiteMat &dst, int x, int y, int w, 
     T *dst_index_p = dst_start_p + i_h * dst_w * dst_c;
     (void)memcpy(dst_index_p, src_index_p, dst_w * dst_c * sizeof(T));
   }
+  return true;
 }
 
 bool Crop(const LiteMat &src, LiteMat &dst, int x, int y, int w, int h) {
-  if (x <= 0 || y <= 0 || w <= 0 || h <= 0) {
+  if (x < 0 || y < 0 || w <= 0 || h <= 0) {
     return false;
   }
-  if (y + h > src.height_ || x + w > src.width_) {
+  if (y > src.height_ - h || x > src.width_ - w) {
     return false;
   }
 
   if (src.data_type_ == LDataType::UINT8) {
-    CropInternal<uint8_t>(src, dst, x, y, w, h);
+    return CropInternal<uint8_t>(src, dst, x, y, w, h);
   } else if (src.data_type_ == LDataType::FLOAT32) {
-    CropInternal<float>(src, dst, x, y, w, h);
+    return CropInternal<float>(src, dst, x, y, w, h);
   } else {
     return false;
   }
@@ -410,16 +532,22 @@ bool SubStractMeanNormalize(const LiteMat &src, LiteMat &dst, const std::vector<
   if (!CheckMeanAndStd(src.channel_, mean, std)) {
     return false;
   }
-
-  dst.Init(src.width_, src.height_, src.channel_, LDataType::FLOAT32);
+  if (dst.IsEmpty()) {
+    dst.Init(src.width_, src.height_, src.channel_, LDataType::FLOAT32);
+  } else if (dst.height_ != src.height_ || dst.width_ != src.width_ || dst.channel_ != src.channel_) {
+    return false;
+  } else if (dst.data_type_ != LDataType::FLOAT32) {
+    return false;
+  }
 
   const float *src_start_p = src;
   float *dst_start_p = dst;
   if ((!mean.empty()) && std.empty()) {
     for (int h = 0; h < src.height_; h++) {
       for (int w = 0; w < src.width_; w++) {
+        uint32_t src_start = (h * src.width_ + w) * src.channel_;
         for (int c = 0; c < src.channel_; c++) {
-          int index = (h * src.width_ + w) * src.channel_ + c;
+          uint32_t index = src_start + c;
           dst_start_p[index] = src_start_p[index] - mean[c];
         }
       }
@@ -427,8 +555,9 @@ bool SubStractMeanNormalize(const LiteMat &src, LiteMat &dst, const std::vector<
   } else if (mean.empty() && (!std.empty())) {
     for (int h = 0; h < src.height_; h++) {
       for (int w = 0; w < src.width_; w++) {
+        uint32_t src_start = (h * src.width_ + w) * src.channel_;
         for (int c = 0; c < src.channel_; c++) {
-          int index = (h * src.width_ + w) * src.channel_ + c;
+          uint32_t index = src_start + c;
           dst_start_p[index] = src_start_p[index] / std[c];
         }
       }
@@ -436,8 +565,9 @@ bool SubStractMeanNormalize(const LiteMat &src, LiteMat &dst, const std::vector<
   } else if ((!mean.empty()) && (!std.empty())) {
     for (int h = 0; h < src.height_; h++) {
       for (int w = 0; w < src.width_; w++) {
+        uint32_t src_start = (h * src.width_ + w) * src.channel_;
         for (int c = 0; c < src.channel_; c++) {
-          int index = (h * src.width_ + w) * src.channel_ + c;
+          uint32_t index = src_start + c;
           dst_start_p[index] = (src_start_p[index] - mean[c]) / std[c];
         }
       }
@@ -452,82 +582,188 @@ template <typename T>
 static void PadWithConstant(const LiteMat &src, LiteMat &dst, const int top, const int bottom, const int left,
                             const int right, const PaddBorderType pad_type, uint8_t fill_b_or_gray, uint8_t fill_g,
                             uint8_t fill_r) {
-  dst.Init(src.width_ + left + right, src.height_ + top + bottom, src.channel_, src.data_type_);
-  const T *src_start_p = src;
-  T *dst_start_p = dst;
-  // padd top
-  for (int h = 0; h < top; h++) {
-    for (int w = 0; w < dst.width_; w++) {
-      int index = (h * dst.width_ + w) * dst.channel_;
-      if (dst.channel_ == 1) {
-        dst_start_p[index] = fill_b_or_gray;
-      } else if (dst.channel_ == 3) {
-        dst_start_p[index] = fill_b_or_gray;
-        dst_start_p[index + 1] = fill_g;
-        dst_start_p[index + 2] = fill_r;
-      } else {
-      }
+  std::vector<uint8_t> row_buffer(dst.width_ * dst.channel_ * dst.elem_size_);
+  T *const_ptr = reinterpret_cast<T *>(row_buffer.data());
+  int src_step = src.width_ * src.channel_ * src.elem_size_;
+  int dst_step = dst.width_ * dst.channel_ * dst.elem_size_;
+  if (dst.channel_ == 1) {
+    for (int i = 0; i < dst_step; i++) {
+      const_ptr[i] = fill_b_or_gray;
     }
-  }
-  // padd bottom
-  for (int h = dst.height_ - bottom; h < dst.height_; h++) {
-    for (int w = 0; w < dst.width_; w++) {
-      int index = (h * dst.width_ + w) * dst.channel_;
-      if (dst.channel_ == 1) {
-        dst_start_p[index] = fill_b_or_gray;
-      } else if (dst.channel_ == 3) {
-        dst_start_p[index] = fill_b_or_gray;
-        dst_start_p[index + 1] = fill_g;
-        dst_start_p[index + 2] = fill_r;
-      } else {
-      }
+  } else if (dst.channel_ == 3) {
+    for (int i = 0; i < dst.width_; i++) {
+      const_ptr[i * dst.channel_] = fill_b_or_gray;
+      const_ptr[i * dst.channel_ + 1] = fill_g;
+      const_ptr[i * dst.channel_ + 2] = fill_r;
     }
   }
 
-  // padd left
-  for (int h = top; h < dst.height_ - bottom; h++) {
-    for (int w = 0; w < left; w++) {
-      int index = (h * dst.width_ + w) * dst.channel_;
-      if (dst.channel_ == 1) {
-        dst_start_p[index] = fill_b_or_gray;
-      } else if (dst.channel_ == 3) {
-        dst_start_p[index] = fill_b_or_gray;
-        dst_start_p[index + 1] = fill_g;
-        dst_start_p[index + 2] = fill_r;
-      } else {
+  uint8_t *dst_ptr = reinterpret_cast<uint8_t *>(dst.data_ptr_);
+  uint8_t *src_ptr = reinterpret_cast<uint8_t *>(src.data_ptr_);
+  for (int i = 0; i < top; i++) {
+    memcpy(dst_ptr + i * dst_step, const_ptr, dst_step);
+  }
+
+  int left_size = left * dst.channel_ * dst.elem_size_;
+  int right_size = right * dst.channel_ * dst.elem_size_;
+  uint8_t *dst_raw_data = dst_ptr + top * dst_step + left_size;
+  for (int i = 0; i < src.height_; i++, dst_raw_data += dst_step, src_ptr += src_step) {
+    memcpy(dst_raw_data, src_ptr, src_step);
+    memcpy(dst_raw_data - left_size, const_ptr, left_size);
+    memcpy(dst_raw_data + src_step, const_ptr, right_size);
+  }
+
+  for (int i = dst.height_ - bottom; i < dst.height_; i++) {
+    memcpy(dst_ptr + i * dst_step, const_ptr, dst_step);
+  }
+}
+
+bool ExtractChannel(const LiteMat &src, LiteMat &dst, int col) {
+  if (src.IsEmpty() || col < 0 || col > src.channel_ - 1) {
+    return false;
+  }
+  if (src.data_type_ == LDataType::FLOAT32) {
+    (void)dst.Init(src.width_, src.height_, 1, src.data_type_);
+    const float *src_start_p = src;
+    float *dst_start_p = dst;
+    for (int h = 0; h < src.height_; h++) {
+      uint32_t src_start = h * src.width_ * src.channel_ + col;
+      uint32_t dst_start = h * dst.width_;
+      for (int w = 0; w < src.width_; w++) {
+        uint32_t src_index = src_start + w * src.channel_;
+        uint32_t dst_index = dst_start + w;
+        dst_start_p[dst_index] = src_start_p[src_index];
       }
+    }
+    return true;
+  } else if (src.data_type_ == LDataType::UINT8) {
+    (void)dst.Init(src.width_, src.height_, 1, src.data_type_);
+    const uint8_t *src_start_p = src;
+    uint8_t *dst_start_p = dst;
+    for (int h = 0; h < src.height_; h++) {
+      uint32_t src_start = h * src.width_ * src.channel_ + col;
+      uint32_t dst_start = h * dst.width_;
+      for (int w = 0; w < src.width_; w++) {
+        uint32_t src_index = src_start + w * src.channel_;
+        uint32_t dst_index = dst_start + w;
+        dst_start_p[dst_index] = src_start_p[src_index];
+      }
+    }
+    return true;
+  } else {
+    return false;
+  }
+  return false;
+}
+
+bool Split(const LiteMat &src, std::vector<LiteMat> &mv) {
+  if (src.data_type_ == LDataType::FLOAT32) {
+    const float *src_start_p = src;
+    for (int c = 0; c < src.channel_; c++) {
+      LiteMat dst;
+      (void)dst.Init(src.width_, src.height_, 1, src.data_type_);
+      float *dst_start_p = dst;
+      for (int h = 0; h < src.height_; h++) {
+        uint32_t src_start = h * src.width_ * src.channel_;
+        uint32_t dst_start = h * dst.width_;
+        for (int w = 0; w < src.width_; w++) {
+          uint32_t src_index = src_start + w * src.channel_ + c;
+          uint32_t dst_index = dst_start + w;
+          dst_start_p[dst_index] = src_start_p[src_index];
+        }
+      }
+      mv.emplace_back(dst);
+    }
+    return true;
+  } else if (src.data_type_ == LDataType::UINT8) {
+    const uint8_t *src_start_p = src;
+    for (int c = 0; c < src.channel_; c++) {
+      LiteMat dst;
+      (void)dst.Init(src.width_, src.height_, 1, src.data_type_);
+      uint8_t *dst_start_p = dst;
+      for (int h = 0; h < src.height_; h++) {
+        uint32_t src_start = h * src.width_ * src.channel_;
+        uint32_t dst_start = h * dst.width_;
+        for (int w = 0; w < src.width_; w++) {
+          uint32_t src_index = src_start + w * src.channel_ + c;
+          uint32_t dst_index = dst_start + w;
+          dst_start_p[dst_index] = src_start_p[src_index];
+        }
+      }
+      mv.emplace_back(dst);
+    }
+    return true;
+  } else {
+    return false;
+  }
+  return false;
+}
+
+template <typename T>
+inline void MergeImpl(const std::vector<LiteMat> &mv, T *dst_ptr, int height, int width, int channel) {
+  T *mv_ptr[4];
+  int area = height * width;
+  for (int c = 0; c < channel; c++) {
+    mv_ptr[c] = reinterpret_cast<T *>(mv[c].data_ptr_);
+  }
+  for (int i = 0; i < area; i++) {
+    for (int c = 0; c < channel; c++) {
+      dst_ptr[c] = *mv_ptr[c];
+      mv_ptr[c]++;
+    }
+    dst_ptr += channel;
+  }
+}
+
+bool Merge(const std::vector<LiteMat> &mv, LiteMat &dst) {
+  if (mv.size() != 1 && mv.size() != 3 && mv.size() != 4) return false;
+
+  int width = mv[0].width_;
+  int height = mv[0].height_;
+  int channel = mv.size();
+  LDataType data_type = mv[0].data_type_;
+
+  // The arrays in list must be single-channel
+  for (int i = 0; i < mv.size(); i++) {
+    if (mv[i].channel_ != 1) return false;
+  }
+
+  for (int i = 1; i < mv.size(); i++) {
+    if (width != mv[i].width_ || height != mv[i].height_ || data_type != mv[i].data_type_) {
+      return false;
     }
   }
 
-  // padd right
-  for (int h = top; h < dst.height_ - bottom; h++) {
-    for (int w = dst.width_ - right; w < dst.width_; w++) {
-      int index = (h * dst.width_ + w) * dst.channel_;
-      if (dst.channel_ == 1) {
-        dst_start_p[index] = fill_b_or_gray;
-      } else if (dst.channel_ == 3) {
-        dst_start_p[index] = fill_b_or_gray;
-        dst_start_p[index + 1] = fill_g;
-        dst_start_p[index + 2] = fill_r;
-      } else {
-      }
-    }
+  if (dst.IsEmpty() || dst.width_ != width || dst.height_ != height || dst.channel_ != channel ||
+      dst.data_type_ != data_type) {
+    dst.Init(width, height, channel, data_type);
   }
-  // image data
-  dst_start_p = dst_start_p + (top * dst.width_ + left) * dst.channel_;
-  for (int i_h = 0; i_h < src.height_; i_h++) {
-    const T *src_index_p = src_start_p + i_h * src.width_ * src.channel_;
-    T *dst_index_p = dst_start_p + i_h * dst.width_ * dst.channel_;
-    (void)memcpy(dst_index_p, src_index_p, src.width_ * src.channel_ * sizeof(T));
+
+  if (dst.data_type_ == LDataType::FLOAT32) {
+    MergeImpl<float>(mv, dst, height, width, channel);
+  } else if (dst.data_type_ == LDataType::UINT8) {
+    MergeImpl<uint8_t>(mv, dst, height, width, channel);
+  } else {
+    return false;
   }
+  return true;
 }
 
 bool Pad(const LiteMat &src, LiteMat &dst, int top, int bottom, int left, int right, PaddBorderType pad_type,
          uint8_t fill_b_or_gray, uint8_t fill_g, uint8_t fill_r) {
-  if (top <= 0 || bottom <= 0 || left <= 0 || right <= 0) {
+  if (top < 0 || bottom < 0 || left < 0 || right < 0) {
     return false;
   }
   if (src.IsEmpty()) {
+    return false;
+  }
+  int dst_width = src.width_ + left + right;
+  int dst_height = src.height_ + top + bottom;
+  if (dst.IsEmpty()) {
+    dst.Init(dst_width, dst_height, src.channel_, src.data_type_);
+  } else if (dst.width_ != dst_width || dst.height_ != dst_height || src.channel_ != dst.channel_) {
+    return false;
+  } else if (src.data_type_ != dst.data_type_) {
     return false;
   }
   if (pad_type == PADD_BORDER_CONSTANT && src.data_type_ == LDataType::FLOAT32) {
@@ -545,6 +781,9 @@ std::vector<std::vector<float>> GetDefaultBoxes(BoxesConfig config) {
   float num = static_cast<float>(config.img_shape[0]);
   for (int i = 0; i < config.steps.size(); i++) {
     fk.push_back(num / config.steps[i]);
+  }
+  if (config.num_default.size() < 2) {
+    return {};
   }
   float scale_rate = (config.max_scale - config.min_scale) / (config.num_default.size() - 1);
   std::vector<float> scales(config.num_default.size());
@@ -645,7 +884,8 @@ std::vector<int> ApplyNms(const std::vector<std::vector<float>> &all_boxes, std:
 }
 
 template <typename Pixel_Type>
-bool ImplementAffine(LiteMat &src, LiteMat &out_img, double M[6], std::vector<size_t> &dsize, Pixel_Type borderValue) {
+bool ImplementAffine(LiteMat &src, LiteMat &out_img, const double M[6], std::vector<size_t> &dsize,
+                     Pixel_Type borderValue) {
   if (dsize.size() != 2 || CheckZero(dsize)) {
     return false;
   }
@@ -666,8 +906,14 @@ bool ImplementAffine(LiteMat &src, LiteMat &out_img, double M[6], std::vector<si
   double b2 = -IM[3] * IM[2] - IM[4] * IM[5];
   IM[2] = b1;
   IM[5] = b2;
+  if (out_img.IsEmpty()) {
+    out_img.Init(dsize[0], dsize[1], sizeof(Pixel_Type), src.data_type_);
+  } else if (out_img.height_ != dsize[1] || out_img.width_ != dsize[0] || out_img.channel_ != src.channel_) {
+    return false;
+  } else if (out_img.data_type_ != src.data_type_) {
+    return false;
+  }
 
-  out_img.Init(dsize[0], dsize[1], sizeof(Pixel_Type));
   for (int y = 0; y < out_img.height_; y++) {
     for (int x = 0; x < out_img.width_; x++) {
       int src_x = IM[0] * x + IM[1] * y + IM[2];
@@ -684,12 +930,36 @@ bool ImplementAffine(LiteMat &src, LiteMat &out_img, double M[6], std::vector<si
   return true;
 }
 
-bool Affine(LiteMat &src, LiteMat &out_img, double M[6], std::vector<size_t> dsize, UINT8_C1 borderValue) {
-  return ImplementAffine(src, out_img, M, dsize, borderValue);
+bool Affine(LiteMat &src, LiteMat &out_img, const double M[6], std::vector<size_t> dsize, UINT8_C1 borderValue) {
+  if (src.channel_ == 1 && src.data_type_ == LDataType::UINT8) {
+    return ImplementAffine(src, out_img, M, dsize, borderValue);
+  } else {
+    return false;
+  }
 }
 
-bool Affine(LiteMat &src, LiteMat &out_img, double M[6], std::vector<size_t> dsize, UINT8_C3 borderValue) {
-  return ImplementAffine(src, out_img, M, dsize, borderValue);
+bool Affine(LiteMat &src, LiteMat &out_img, const double M[6], std::vector<size_t> dsize, UINT8_C3 borderValue) {
+  if (src.channel_ == 3 && src.data_type_ == LDataType::UINT8) {
+    return ImplementAffine(src, out_img, M, dsize, borderValue);
+  } else {
+    return false;
+  }
+}
+
+bool Affine(LiteMat &src, LiteMat &out_img, const double M[6], std::vector<size_t> dsize, FLOAT32_C1 borderValue) {
+  if (src.channel_ == 1 && src.data_type_ == LDataType::FLOAT32) {
+    return ImplementAffine(src, out_img, M, dsize, borderValue);
+  } else {
+    return false;
+  }
+}
+
+bool Affine(LiteMat &src, LiteMat &out_img, const double M[6], std::vector<size_t> dsize, FLOAT32_C3 borderValue) {
+  if (src.channel_ == 3 && src.data_type_ == LDataType::FLOAT32) {
+    return ImplementAffine(src, out_img, M, dsize, borderValue);
+  } else {
+    return false;
+  }
 }
 
 }  // namespace dataset

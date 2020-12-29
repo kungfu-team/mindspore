@@ -75,17 +75,36 @@ class DynamicLossScaleUpdateCell(Cell):
     Outputs:
         Tensor, a scalar Tensor with shape :math:`()`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> net_with_loss = Net()
-        >>> optimizer = nn.Momentum(net_with_loss.trainable_params(), learning_rate=0.1, momentum=0.9)
-        >>> manager = nn.DynamicLossScaleUpdateCell(loss_scale_value=2**12, scale_factor=2, scale_window=1000)
-        >>> train_network = nn.TrainOneStepWithLossScaleCell(net_with_loss, optimizer, scale_update_cell=manager)
-        >>> train_network.set_train()
+        >>> import numpy as np
+        >>> from mindspore import Tensor, Parameter, nn
+        >>> from mindspore.ops import operations as P
+        >>> from mindspore.nn.wrap.cell_wrapper import WithLossCell
         >>>
-        >>> inputs = Tensor(np.ones([16, 16]).astype(np.float32))
-        >>> label = Tensor(np.zeros([16, 16]).astype(np.float32))
-        >>> scaling_sens = Tensor(np.full((1), np.finfo(np.float32).max), dtype=mindspore.float32)
-        >>> output = train_network(inputs, label, scaling_sens)
+        >>> class Net(nn.Cell):
+        ...     def __init__(self, in_features, out_features):
+        ...         super(Net, self).__init__()
+        ...         self.weight = Parameter(Tensor(np.ones([in_features, out_features]).astype(np.float32)),
+        ...                                 name='weight')
+        ...         self.matmul = P.MatMul()
+        ...
+        ...     def construct(self, x):
+        ...         output = self.matmul(x, self.weight)
+        ...         return output
+        ...
+        >>> in_features, out_features = 16, 10
+        >>> net = Net(in_features, out_features)
+        >>> loss = nn.MSELoss()
+        >>> optimizer = nn.Momentum(net.trainable_params(), learning_rate=0.1, momentum=0.9)
+        >>> net_with_loss = WithLossCell(net, loss)
+        >>> manager = nn.DynamicLossScaleUpdateCell(loss_scale_value=2**12, scale_factor=2, scale_window=1000)
+        >>> train_network = nn.TrainOneStepWithLossScaleCell(net_with_loss, optimizer, scale_sense=manager)
+        >>> input = Tensor(np.ones([out_features, in_features]), mindspore.float32)
+        >>> labels = Tensor(np.ones([out_features,]), mindspore.float32)
+        >>> output = train_network(input, labels)
     """
 
     def __init__(self,
@@ -141,17 +160,36 @@ class FixedLossScaleUpdateCell(Cell):
     Args:
         loss_scale_value (float): Initializes loss scale.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> net_with_loss = Net()
-        >>> optimizer = nn.Momentum(net_with_loss.trainable_params(), learning_rate=0.1, momentum=0.9)
-        >>> manager = nn.FixedLossScaleUpdateCell(loss_scale_value=2**12)
-        >>> train_network = nn.TrainOneStepWithLossScaleCell(net_with_loss, optimizer, scale_update_cell=manager)
-        >>> train_network.set_train()
+        >>> import numpy as np
+        >>> from mindspore import Tensor, Parameter, nn
+        >>> from mindspore.ops import operations as P
+        >>> from mindspore.nn.wrap.cell_wrapper import WithLossCell
         >>>
-        >>> inputs = Tensor(np.ones([16, 16]).astype(np.float32))
-        >>> label = Tensor(np.zeros([16, 16]).astype(np.float32))
-        >>> scaling_sens = Tensor(np.full((1), np.finfo(np.float32).max), dtype=mindspore.float32)
-        >>> output = train_network(inputs, label, scaling_sens)
+        >>> class Net(nn.Cell):
+        ...     def __init__(self, in_features, out_features):
+        ...         super(Net, self).__init__()
+        ...         self.weight = Parameter(Tensor(np.ones([in_features, out_features]).astype(np.float32)),
+        ...                                 name='weight')
+        ...         self.matmul = P.MatMul()
+        ...
+        ...     def construct(self, x):
+        ...         output = self.matmul(x, self.weight)
+        ...         return output
+        ...
+        >>> in_features, out_features = 16, 10
+        >>> net = Net(in_features, out_features)
+        >>> loss = nn.MSELoss()
+        >>> optimizer = nn.Momentum(net.trainable_params(), learning_rate=0.1, momentum=0.9)
+        >>> net_with_loss = WithLossCell(net, loss)
+        >>> manager = nn.FixedLossScaleUpdateCell(loss_scale_value=2**12)
+        >>> train_network = nn.TrainOneStepWithLossScaleCell(net_with_loss, optimizer, scale_sense=manager)
+        >>> input = Tensor(np.ones([out_features, in_features]), mindspore.float32)
+        >>> labels = Tensor(np.ones([out_features,]), mindspore.float32)
+        >>> output = train_network(input, labels)
     """
 
     def __init__(self, loss_scale_value):
@@ -192,20 +230,47 @@ class TrainOneStepWithLossScaleCell(TrainOneStepCell):
         - **overflow** (Tensor) -  Tensor with shape :math:`()`, type is bool.
         - **loss scaling value** (Tensor) -  Tensor with shape :math:`()`
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> #1) when the type scale_sense is Cell:
-        >>> net_with_loss = Net()
-        >>> optimizer = nn.Momentum(net_with_loss.trainable_params(), learning_rate=0.1, momentum=0.9)
+        >>> import numpy as np
+        >>> from mindspore import Tensor, Parameter, nn
+        >>> from mindspore.ops import operations as P
+        >>> from mindspore.nn.wrap.cell_wrapper import WithLossCell
+        >>> from mindspore.common import dtype as mstype
+        >>>
+        >>> class Net(nn.Cell):
+        ...     def __init__(self, in_features, out_features):
+        ...         super(Net, self).__init__()
+        ...         self.weight = Parameter(Tensor(np.ones([in_features, out_features]).astype(np.float32)),
+        ...                                 name='weight')
+        ...         self.matmul = P.MatMul()
+        ...
+        ...     def construct(self, x):
+        ...         output = self.matmul(x, self.weight)
+        ...         return output
+        ...
+        >>> size, in_features, out_features = 16, 16, 10
+        >>> #1) when the type of scale_sense is Cell:
+        >>> net = Net(in_features, out_features)
+        >>> loss = nn.MSELoss()
+        >>> optimizer = nn.Momentum(net.trainable_params(), learning_rate=0.1, momentum=0.9)
+        >>> net_with_loss = WithLossCell(net, loss)
         >>> manager = nn.DynamicLossScaleUpdateCell(loss_scale_value=2**12, scale_factor=2, scale_window=1000)
         >>> train_network = nn.TrainOneStepWithLossScaleCell(net_with_loss, optimizer, scale_sense=manager)
-        >>> train_network.set_train()
+        >>> input = Tensor(np.ones([out_features, in_features]), mindspore.float32)
+        >>> labels = Tensor(np.ones([out_features,]), mindspore.float32)
+        >>> output = train_network(input, labels)
         >>>
-        >>> #2) when the type scale_sense is Tensor:
-        >>> net_with_loss = Net()
-        >>> optimizer = nn.Momentum(net_with_loss.trainable_params(), learning_rate=0.1, momentum=0.9)
-        >>> inputs = Tensor(np.ones([16, 16]).astype(np.float32))
-        >>> label = Tensor(np.zeros([16, 16]).astype(np.float32))
-        >>> scaling_sens = Tensor(np.full((1), np.finfo(np.float32).max), dtype=mindspore.float32)
+        >>> #2) when the type of scale_sense is Tensor:
+        >>> net = Net(in_features, out_features)
+        >>> loss = nn.MSELoss()
+        >>> optimizer = nn.Momentum(net.trainable_params(), learning_rate=0.1, momentum=0.9)
+        >>> net_with_loss = WithLossCell(net, loss)
+        >>> inputs = Tensor(np.ones([size, in_features]).astype(np.float32))
+        >>> label = Tensor(np.zeros([size, out_features]).astype(np.float32))
+        >>> scaling_sens = Tensor(np.full((1), np.finfo(np.float32).max), dtype=mstype.float32)
         >>> train_network = nn.TrainOneStepWithLossScaleCell(net_with_loss, optimizer, scale_sense=scaling_sens)
         >>> output = train_network(inputs, label)
     """

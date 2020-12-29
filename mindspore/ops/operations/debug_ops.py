@@ -48,18 +48,22 @@ class ScalarSummary(PrimitiveWithInfer):
         - **name** (str) - The name of the input variable, it must not be an empty string.
         - **value** (Tensor) - The value of scalar, and the shape of value must be [] or [1].
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> class SummaryDemo(nn.Cell):
-        >>>     def __init__(self,):
-        >>>         super(SummaryDemo, self).__init__()
-        >>>         self.summary = P.ScalarSummary()
-        >>>         self.add = P.TensorAdd()
-        >>>
-        >>>     def construct(self, x, y):
-        >>>         name = "x"
-        >>>         self.summary(name, x)
-        >>>         x = self.add(x, y)
-        >>>         return x
+        ...     def __init__(self,):
+        ...         super(SummaryDemo, self).__init__()
+        ...         self.summary = ops.ScalarSummary()
+        ...         self.add = ops.TensorAdd()
+        ...
+        ...     def construct(self, x, y):
+        ...         name = "x"
+        ...         self.summary(name, x)
+        ...         x = self.add(x, y)
+        ...         return x
+        ...
     """
 
     @prim_attr_register
@@ -80,22 +84,26 @@ class ScalarSummary(PrimitiveWithInfer):
 
 class ImageSummary(PrimitiveWithInfer):
     """
-    Outputs image tensor to protocol buffer through image summary operator.
+    Outputs the image tensor to protocol buffer through image summary operator.
 
     Inputs:
         - **name** (str) - The name of the input variable, it must not be an empty string.
         - **value** (Tensor) - The value of image, the rank of tensor must be 4.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.summary = P.ImageSummary()
-        >>>
-        >>>     def construct(self, x):
-        >>>         name = "image"
-        >>>         out = self.summary(name, x)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.summary = ops.ImageSummary()
+        ...
+        ...     def construct(self, x):
+        ...         name = "image"
+        ...         out = self.summary(name, x)
+        ...         return out
+        ...
     """
 
     @prim_attr_register
@@ -123,18 +131,22 @@ class TensorSummary(PrimitiveWithInfer):
         - **name** (str) - The name of the input variable.
         - **value** (Tensor) - The value of tensor, and the rank of tensor must be greater than 0.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> class SummaryDemo(nn.Cell):
-        >>>     def __init__(self,):
-        >>>         super(SummaryDemo, self).__init__()
-        >>>         self.summary = P.TensorSummary()
-        >>>         self.add = P.TensorAdd()
-        >>>
-        >>>     def construct(self, x, y):
-        >>>         x = self.add(x, y)
-        >>>         name = "x"
-        >>>         self.summary(name, x)
-        >>>         return x
+        ...     def __init__(self,):
+        ...         super(SummaryDemo, self).__init__()
+        ...         self.summary = ops.TensorSummary()
+        ...         self.add = ops.TensorAdd()
+        ...
+        ...     def construct(self, x, y):
+        ...         x = self.add(x, y)
+        ...         name = "x"
+        ...         self.summary(name, x)
+        ...         return x
+        ...
     """
 
     @prim_attr_register
@@ -155,24 +167,28 @@ class TensorSummary(PrimitiveWithInfer):
 
 class HistogramSummary(PrimitiveWithInfer):
     """
-    Outputs tensor to protocol buffer through histogram summary operator.
+    Outputs the tensor to protocol buffer through histogram summary operator.
 
     Inputs:
         - **name** (str) - The name of the input variable.
         - **value** (Tensor) - The value of tensor, and the rank of tensor must be greater than 0.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> class SummaryDemo(nn.Cell):
-        >>>     def __init__(self,):
-        >>>         super(SummaryDemo, self).__init__()
-        >>>         self.summary = P.HistogramSummary()
-        >>>         self.add = P.TensorAdd()
-        >>>
-        >>>     def construct(self, x, y):
-        >>>         x = self.add(x, y)
-        >>>         name = "x"
-        >>>         self.summary(name, x)
-        >>>         return x
+        ...     def __init__(self,):
+        ...         super(SummaryDemo, self).__init__()
+        ...         self.summary = ops.HistogramSummary()
+        ...         self.add = ops.TensorAdd()
+        ...
+        ...     def construct(self, x, y):
+        ...         x = self.add(x, y)
+        ...         name = "x"
+        ...         self.summary(name, x)
+        ...         return x
+        ...
     """
 
     @prim_attr_register
@@ -193,7 +209,7 @@ class HistogramSummary(PrimitiveWithInfer):
 
 class InsertGradientOf(PrimitiveWithInfer):
     """
-    Attaches callback to graph node that will be invoked on the node's gradient.
+    Attaches callback to the graph node that will be invoked on the node's gradient.
 
     Args:
         f (Function): MindSpore's Function. Callback function.
@@ -204,35 +220,39 @@ class InsertGradientOf(PrimitiveWithInfer):
     Outputs:
         Tensor, returns `input_x` directly. `InsertGradientOf` does not affect the forward result.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> def clip_gradient(dx):
-        >>>     ret = dx
-        >>>     if ret > 1.0:
-        >>>         ret = 1.0
-        >>>
-        >>>     if ret < 0.2:
-        >>>         ret = 0.2
-        >>>
-        >>>     return ret
-        >>>
-        >>> clip = P.InsertGradientOf(clip_gradient)
-        >>> grad_all = C.GradOperation(get_all=True)
+        ...     ret = dx
+        ...     if ret > 1.0:
+        ...         ret = 1.0
+        ...
+        ...     if ret < 0.2:
+        ...         ret = 0.2
+        ...
+        ...     return ret
+        ...
+        >>> clip = ops.InsertGradientOf(clip_gradient)
+        >>> grad_all = ops.GradOperation(get_all=True)
         >>> def InsertGradientOfClipDemo():
-        >>>     def clip_test(x, y):
-        >>>         x = clip(x)
-        >>>         y = clip(y)
-        >>>         c = x * y
-        >>>         return c
-        >>>
-        >>>     @ms_function
-        >>>     def f(x, y):
-        >>>         return clip_test(x, y)
-        >>>
-        >>>     def fd(x, y):
-        >>>         return grad_all(clip_test)(x, y)
-        >>>
-        >>>     print("forward: ", f(1.1, 0.1))
-        >>>     print("clip_gradient:", fd(1.1, 0.1))
+        ...     def clip_test(x, y):
+        ...         x = clip(x)
+        ...         y = clip(y)
+        ...         c = x * y
+        ...         return c
+        ...
+        ...     @ms_function
+        ...     def f(x, y):
+        ...         return clip_test(x, y)
+        ...
+        ...     def fd(x, y):
+        ...         return grad_all(clip_test)(x, y)
+        ...
+        ...     print("forward: ", f(1.1, 0.1))
+        ...     print("clip_gradient:", fd(1.1, 0.1))
+        ...
     """
 
     @prim_attr_register
@@ -266,21 +286,21 @@ class HookBackward(PrimitiveWithInfer):
 
     Examples:
         >>> def hook_fn(grad_out):
-        >>>     print(grad_out)
-        >>>
+        ...     print(grad_out)
+        ...
         >>> grad_all = GradOperation(get_all=True)
-        >>> hook = P.HookBackward(hook_fn)
-        >>>
+        >>> hook = ops.HookBackward(hook_fn)
         >>> def hook_test(x, y):
-        >>>     z = x * y
-        >>>     z = hook(z)
-        >>>     z = z * y
-        >>>     return z
-        >>>
+        ...     z = x * y
+        ...     z = hook(z)
+        ...     z = z * y
+        ...     return z
+        ...
         >>> def backward(x, y):
-        >>>     return grad_all(hook_test)(x, y)
-        >>>
-        >>> backward(1, 2)
+        ...     return grad_all(hook_test)(x, y)
+        ...
+        >>> output = backward(1, 2)
+        >>> print(output)
     """
 
     def __init__(self, hook_fn, cell_id=""):
@@ -305,7 +325,7 @@ class HookBackward(PrimitiveWithInfer):
 
 class Print(PrimitiveWithInfer):
     """
-    Outputs tensor or string to stdout.
+    Outputs the tensor or string to stdout.
 
     Note:
         In pynative mode, please use python print function.
@@ -314,15 +334,28 @@ class Print(PrimitiveWithInfer):
         - **input_x** (Union[Tensor, str]) - The graph node to attach to. The input supports
           multiple strings and tensors which are separated by ','.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> class PrintDemo(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(PrintDemo, self).__init__()
-        >>>         self.print = P.Print()
-        >>>
-        >>>     def construct(self, x, y):
-        >>>         self.print('Print Tensor x and Tensor y:', x, y)
-        >>>         return x
+        ...     def __init__(self):
+        ...         super(PrintDemo, self).__init__()
+        ...         self.print = ops.Print()
+        ...
+        ...     def construct(self, x, y):
+        ...         self.print('Print Tensor x and Tensor y:', x, y)
+        ...         return x
+        ...
+        >>> x = Tensor(np.ones([2, 1]).astype(np.int32))
+        >>> y = Tensor(np.ones([2, 2]).astype(np.int32))
+        >>> net = PrintDemo()
+        >>> result = net(x, y)
+        Print Tensor x and Tensor y:
+        [[1]
+         [1]]
+        [[1 1]
+         [1 1]]
     """
 
     @prim_attr_register
@@ -344,7 +377,7 @@ class Print(PrimitiveWithInfer):
 
 class Assert(PrimitiveWithInfer):
     """
-    Asserts that the given condition is true.
+    Asserts that the given condition is True.
     If input condition evaluates to false, print the list of tensor in data.
 
     Args:
@@ -356,15 +389,16 @@ class Assert(PrimitiveWithInfer):
 
     Examples:
         >>> class AssertDemo(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(AssertDemo, self).__init__()
-        >>>         self.assert = P.Assert(summarize=10)
-        >>>         self.add = P.TensorAdd()
-        >>>
-        >>>     def construct(self, x, y):
-        >>>         data = self.add(x, y)
-        >>>         self.assert(True, [data])
-        >>>         return data
+        ...     def __init__(self):
+        ...         super(AssertDemo, self).__init__()
+        ...         self.assert1 = ops.Assert(summarize=10)
+        ...         self.add = ops.TensorAdd()
+        ...
+        ...     def construct(self, x, y):
+        ...         data = self.add(x, y)
+        ...         self.assert1(True, [data])
+        ...         return data
+        ...
     """
 
     @prim_attr_register
@@ -374,13 +408,13 @@ class Assert(PrimitiveWithInfer):
 
     def infer_shape(self, condition, inputs):
         condition_len = len(condition)
-        validator.check_integer("condition's rank", condition_len, 1, Rel.LE, self.name)
+        validator.check_int(condition_len, 1, Rel.LE, "condition's rank", self.name)
         if condition_len == 1:
-            validator.check_integer("condition[0]", condition[0], 1, Rel.EQ, self.name)
+            validator.check_equal_int(condition[0], 1, "condition[0]", self.name)
         return [1]
 
     def infer_dtype(self, condition, inputs):
-        validator.check_scalar_or_tensor_type_same({"condition": condition}, [mstype.bool_], self.name)
+        validator.check_scalar_or_tensor_types_same({"condition": condition}, [mstype.bool_], self.name)
         for dtype in inputs:
             validator.check_subclass("input", dtype, [mstype.tensor], self.name)
         return mstype.int32

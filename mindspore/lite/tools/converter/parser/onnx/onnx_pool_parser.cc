@@ -19,22 +19,13 @@
 
 namespace mindspore {
 namespace lite {
-STATUS OnnxPoolParser::Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) {
+lite::PrimitiveC *OnnxPoolParser::ParseLitePrimitive(const onnx::GraphProto &onnx_graph,
+                                                     const onnx::NodeProto &onnx_node) {
   MS_LOG(DEBUG) << "onnx PoolParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
-  std::unique_ptr<schema::PoolingT> attr = std::make_unique<schema::PoolingT>();
+  auto attr = std::make_unique<schema::PoolingT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   attr->format = schema::Format::Format_NCHW;
@@ -56,7 +47,7 @@ STATUS OnnxPoolParser::Parse(const onnx::GraphProto &onnx_graph, const onnx::Nod
     attr->global = false;
   } else {
     MS_LOG(ERROR) << "Pooling param`s PoolingMode is not MAX either AVE. MindSpore support MAX and AVE only.";
-    return RET_ERROR;
+    return nullptr;
   }
 
   attr->roundMode = schema::RoundMode_FLOOR;
@@ -66,18 +57,22 @@ STATUS OnnxPoolParser::Parse(const onnx::GraphProto &onnx_graph, const onnx::Nod
     const auto &attribute_name = onnx_node_attr.name();
     if (attribute_name == "kernel_shape") {
       if (onnx_node_attr.ints_size() == 2) {
-        attr->windowW = static_cast<int32_t>(onnx_node_attr.ints(0));
-        attr->windowH = static_cast<int32_t>(onnx_node_attr.ints(1));
+        attr->windowH = static_cast<int32_t>(onnx_node_attr.ints(0));
+        attr->windowW = static_cast<int32_t>(onnx_node_attr.ints(1));
       }
     }
     if (attribute_name == "strides") {
       if (onnx_node_attr.ints_size() == 2) {
-        attr->strideW = static_cast<int32_t>(onnx_node_attr.ints(0));
-        attr->strideH = static_cast<int32_t>(onnx_node_attr.ints(1));
+        attr->strideH = static_cast<int32_t>(onnx_node_attr.ints(0));
+        attr->strideW = static_cast<int32_t>(onnx_node_attr.ints(1));
       }
     }
     if (attribute_name == "auto_pad") {
-      MS_ASSERT(false);
+      if (onnx_node_attr.s() == "SAME_UPPER") {
+        attr->padMode = schema::PadMode_SAME_UPPER;
+      } else if (onnx_node_attr.s() == "SAME_LOWER") {
+        attr->padMode = schema::PadMode_SAME_LOWER;
+      }
     }
     if (attribute_name == "pads") {
       if (onnx_node_attr.ints_size() == 4) {
@@ -89,17 +84,26 @@ STATUS OnnxPoolParser::Parse(const onnx::GraphProto &onnx_graph, const onnx::Nod
       }
     }
     if (attribute_name == "ceil_mode") {
-      attr->roundMode = schema::RoundMode_CEIL;
+      if (onnx_node_attr.i() == 0) {
+        attr->roundMode = schema::RoundMode_FLOOR;
+      } else {
+        attr->roundMode = schema::RoundMode_CEIL;
+      }
     }
     if (attribute_name == "dilations") {
       MS_LOG(ERROR) << "pooling op not support dilations now";
-      return RET_ERROR;
+      return nullptr;
     }
   }
 
-  op->primitive->value.type = schema::PrimitiveType_Pooling;
-  op->primitive->value.value = attr.release();
-  return RET_OK;
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "new primitive failed";
+    return nullptr;
+  }
+  primitive->value.type = schema::PrimitiveType_Pooling;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
 OnnxNodeRegistrar g_onnxMaxPoolParser("MaxPool", new OnnxPoolParser());

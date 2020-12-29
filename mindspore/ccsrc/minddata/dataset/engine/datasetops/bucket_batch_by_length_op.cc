@@ -231,5 +231,6 @@ Status BucketBatchByLengthOp::ComputeColMap() {
   }
   return Status::OK();
 }
+
 }  // namespace dataset
 }  // namespace mindspore

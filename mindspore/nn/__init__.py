@@ -15,10 +15,11 @@
 """
 Neural Networks Cells.
 
-Pre-defined building blocks or computing units to construct Neural Networks.
+Pre-defined building blocks or computing units to construct neural networks.
 """
-from . import layer, loss, optim, metrics, wrap, probability, sparse
+from . import layer, loss, optim, metrics, wrap, probability, sparse, dynamic_lr
 from .learning_rate_schedule import *
+from .dynamic_lr import *
 from .cell import Cell, GraphKernel
 from .layer import *
 from .loss import *
@@ -36,5 +37,6 @@ __all__.extend(metrics.__all__)
 __all__.extend(wrap.__all__)
 __all__.extend(sparse.__all__)
 __all__.extend(learning_rate_schedule.__all__)
+__all__.extend(dynamic_lr.__all__)
 
 __all__.sort()

@@ -17,13 +17,13 @@
 #include <memory>
 #include "src/common/log_adapter.h"
 #include "common/common_test.h"
-#include "mindspore/lite/nnacl/fp32/lstm.h"
+#include "mindspore/lite/nnacl/fp32/lstm_fp32.h"
 #include "mindspore/lite/src/kernel_registry.h"
 
 namespace mindspore {
 class LstmFp32 : public mindspore::CommonTest {
  public:
-  LstmFp32() {}
+  LstmFp32() = default;
 };
 
 void InitLstmParam(LstmParameter *lstm_param) {
@@ -51,7 +51,7 @@ void InitLstmForwardCreator(std::vector<lite::Tensor *> *inputs, std::vector<lit
                                       -0.29129684, -0.27841482, 0.01964372, -0.42543447, 0.41720617,  -0.30054367};
   auto *weight_i = new lite::Tensor;
   weight_i->set_data_type(kNumberTypeFloat32);
-  weight_i->SetFormat(schema::Format_NHWC);
+  weight_i->set_format(schema::Format_NHWC);
   weight_i->set_shape({1, lstm_param->hidden_size_ * 4, lstm_param->input_size_});
   weight_i->MallocData();
   memcpy(weight_i->MutableData(), weight_i_data.data(), weight_i_data.size() * sizeof(float));
@@ -64,7 +64,7 @@ void InitLstmForwardCreator(std::vector<lite::Tensor *> *inputs, std::vector<lit
     0.34080023,  0.49467337,  0.23473483, 0.01759732,  0.04691631,  0.45574808,  -0.29481018, 0.29442167,  -0.36718};
   auto *weight_h = new lite::Tensor;
   weight_h->set_data_type(kNumberTypeFloat32);
-  weight_h->SetFormat(schema::Format_NHWC);
+  weight_h->set_format(schema::Format_NHWC);
   weight_h->set_shape({1, lstm_param->hidden_size_ * 4, lstm_param->hidden_size_});
   weight_h->MallocData();
   memcpy(weight_h->MutableData(), weight_h_data.data(), weight_h_data.size() * sizeof(float));
@@ -76,7 +76,7 @@ void InitLstmForwardCreator(std::vector<lite::Tensor *> *inputs, std::vector<lit
                                   -0.23593256, -0.3911457,  0.51128435,  0.5128727,   0.253451,    -0.51891875};
   auto *bias = new lite::Tensor;
   bias->set_data_type(kNumberTypeFloat32);
-  bias->SetFormat(schema::Format_NHWC);
+  bias->set_format(schema::Format_NHWC);
   bias->set_shape({1, lstm_param->hidden_size_ * 4 * 2});
   bias->MallocData();
   memcpy(bias->MutableData(), bias_data.data(), bias_data.size() * sizeof(float));
@@ -85,7 +85,7 @@ void InitLstmForwardCreator(std::vector<lite::Tensor *> *inputs, std::vector<lit
   std::vector<float> state_data = {0, 0, 0};
   auto *state = new lite::Tensor;
   state->set_data_type(kNumberTypeFloat32);
-  state->SetFormat(schema::Format_NHWC);
+  state->set_format(schema::Format_NHWC);
   state->set_shape({1, lstm_param->batch_, lstm_param->hidden_size_});
   state->MallocData();
   memcpy(state->MutableData(), state_data.data(), state_data.size() * sizeof(float));
@@ -101,21 +101,21 @@ void InitLstmForwardCreator(std::vector<lite::Tensor *> *inputs, std::vector<lit
   auto *output = new lite::Tensor;
   output->set_data_type(kNumberTypeFloat32);
   output->set_shape({lstm_param->seq_len_, lstm_param->batch_, lstm_param->hidden_size_});
-  output->SetFormat(schema::Format_NHWC);
+  output->set_format(schema::Format_NHWC);
   output->MallocData();
   memset(output->MutableData(), 0, output->ElementsNum() * sizeof(float));
 
   auto *cell_state = new lite::Tensor;
   cell_state->set_data_type(kNumberTypeFloat32);
   cell_state->set_shape({1, lstm_param->batch_, lstm_param->hidden_size_});
-  cell_state->SetFormat(schema::Format_NHWC);
+  cell_state->set_format(schema::Format_NHWC);
   cell_state->MallocData();
   memset(cell_state->MutableData(), 0, cell_state->ElementsNum() * sizeof(float));
 
   auto *hidden_state = new lite::Tensor;
   hidden_state->set_data_type(kNumberTypeFloat32);
   hidden_state->set_shape({1, lstm_param->batch_, lstm_param->hidden_size_});
-  hidden_state->SetFormat(schema::Format_NHWC);
+  hidden_state->set_format(schema::Format_NHWC);
   hidden_state->MallocData();
   memset(hidden_state->MutableData(), 0, hidden_state->ElementsNum() * sizeof(float));
 
@@ -124,7 +124,7 @@ void InitLstmForwardCreator(std::vector<lite::Tensor *> *inputs, std::vector<lit
   outputs->push_back(hidden_state);
 }
 
-void CompareOutput(lite::Tensor *output, std::vector<float> data) {
+void CompareResult(lite::Tensor *output, std::vector<float> data) {
   for (int i = 0; i < output->ElementsNum(); i++) {
     std::cout << reinterpret_cast<float *>(output->MutableData())[i] << ", ";
   }
@@ -162,20 +162,20 @@ TEST_F(LstmFp32, LstmForwardFp32Accuracy) {
   std::cout << "==================output data=================" << std::endl;
   std::vector<float> output0_data = {-0.0702, 0.1225,  0.0876,  -0.0357, -0.0227, -0.2294,
                                      -0.0345, -0.0108, -0.2002, 0.0451,  0.0853,  -0.1205};
-  CompareOutput(outputs[0], output0_data);
+  CompareResult(outputs[0], output0_data);
 
   std::vector<float> output1_data = {0.0451, 0.0853, -0.1205};
-  CompareOutput(outputs[1], output1_data);
+  CompareResult(outputs[1], output1_data);
 
   std::vector<float> output2_data = {0.0989, 0.2094, -0.4132};
-  CompareOutput(outputs[2], output2_data);
+  CompareResult(outputs[2], output2_data);
 
   delete lstm_param;
-  for (int i = 0; i < inputs.size() - 1; i++) {
+  for (unsigned int i = 0; i < inputs.size() - 1; i++) {
     delete inputs[i];
   }
-  for (int i = 0; i < outputs.size(); i++) {
-    delete outputs[i];
+  for (auto &output : outputs) {
+    delete output;
   }
   delete kernel;
   MS_LOG(INFO) << "LstmFp32 forward accuracy passed";
@@ -201,7 +201,7 @@ void InitLstmBackwardCreator(std::vector<lite::Tensor *> *inputs, std::vector<li
     0.3653409,   0.386924,     0.3170289,   -0.08830952, -0.31105759, 0.3110240,   0.15174299,  0.287579894};
   auto *weight_i = new lite::Tensor;
   weight_i->set_data_type(kNumberTypeFloat32);
-  weight_i->SetFormat(schema::Format_NHWC);
+  weight_i->set_format(schema::Format_NHWC);
   weight_i->set_shape({2, lstm_param->hidden_size_ * 4, lstm_param->input_size_});
   weight_i->MallocData();
   memcpy(weight_i->MutableData(), weight_i_data.data(), weight_i_data.size() * sizeof(float));
@@ -219,7 +219,7 @@ void InitLstmBackwardCreator(std::vector<lite::Tensor *> *inputs, std::vector<li
     0.35996592,   -0.201961308, -0.16323345,  0.119177639,  -0.12677872,  -0.175229549, -0.160024613, -0.21058899};
   auto *weight_h = new lite::Tensor;
   weight_h->set_data_type(kNumberTypeFloat32);
-  weight_h->SetFormat(schema::Format_NHWC);
+  weight_h->set_format(schema::Format_NHWC);
   weight_h->set_shape({2, lstm_param->hidden_size_ * 4, lstm_param->hidden_size_});
   weight_h->MallocData();
   memcpy(weight_h->MutableData(), weight_h_data.data(), weight_h_data.size() * sizeof(float));
@@ -234,7 +234,7 @@ void InitLstmBackwardCreator(std::vector<lite::Tensor *> *inputs, std::vector<li
     0.23712641,   -0.052937567, 0.272351622,  0.42767739,   0.303884744,  -0.46025499,   -0.43985402,  0.256422877};
   auto *bias = new lite::Tensor;
   bias->set_data_type(kNumberTypeFloat32);
-  bias->SetFormat(schema::Format_NHWC);
+  bias->set_format(schema::Format_NHWC);
   bias->set_shape({2, lstm_param->hidden_size_ * 4 * 2});
   bias->MallocData();
   memcpy(bias->MutableData(), bias_data.data(), bias_data.size() * sizeof(float));
@@ -243,7 +243,7 @@ void InitLstmBackwardCreator(std::vector<lite::Tensor *> *inputs, std::vector<li
   std::vector<float> state_data = {0, 0, 0, 0, 0, 0};
   auto *state = new lite::Tensor;
   state->set_data_type(kNumberTypeFloat32);
-  state->SetFormat(schema::Format_NHWC);
+  state->set_format(schema::Format_NHWC);
   state->set_shape({2, lstm_param->batch_, lstm_param->hidden_size_});
   state->MallocData();
   memcpy(state->MutableData(), state_data.data(), state_data.size() * sizeof(float));
@@ -259,21 +259,21 @@ void InitLstmBackwardCreator(std::vector<lite::Tensor *> *inputs, std::vector<li
   auto *output = new lite::Tensor;
   output->set_data_type(kNumberTypeFloat32);
   output->set_shape({lstm_param->seq_len_, 2, lstm_param->batch_, lstm_param->hidden_size_});
-  output->SetFormat(schema::Format_NHWC);
+  output->set_format(schema::Format_NHWC);
   output->MallocData();
   memset(output->MutableData(), 0, output->ElementsNum() * sizeof(float));
 
   auto *cell_state = new lite::Tensor;
   cell_state->set_data_type(kNumberTypeFloat32);
   cell_state->set_shape({2, lstm_param->batch_, lstm_param->hidden_size_});
-  cell_state->SetFormat(schema::Format_NHWC);
+  cell_state->set_format(schema::Format_NHWC);
   cell_state->MallocData();
   memset(cell_state->MutableData(), 0, cell_state->ElementsNum() * sizeof(float));
 
   auto *hidden_state = new lite::Tensor;
   hidden_state->set_data_type(kNumberTypeFloat32);
   hidden_state->set_shape({2, lstm_param->batch_, lstm_param->hidden_size_});
-  hidden_state->SetFormat(schema::Format_NHWC);
+  hidden_state->set_format(schema::Format_NHWC);
   hidden_state->MallocData();
   memset(hidden_state->MutableData(), 0, hidden_state->ElementsNum() * sizeof(float));
 
@@ -312,20 +312,20 @@ TEST_F(LstmFp32, LstmBackwardFp32Accuracy) {
   std::vector<float> output0_data = {-0.2922, -0.1416, 0.0077,  -0.0422, -0.0585, 0.2061,  -0.2385, -0.0146,
                                      -0.1796, -0.0554, -0.0973, 0.1013,  -0.3062, -0.1516, -0.0310, 0.0459,
                                      -0.0784, 0.0949,  0.0249,  -0.0653, -0.0869, -0.1113, -0.2155, -0.0500};
-  CompareOutput(outputs[0], output0_data);
+  CompareResult(outputs[0], output0_data);
 
   std::vector<float> output1_data = {0.0249, -0.0653, -0.0869, -0.0422, -0.0585, 0.2061};
-  CompareOutput(outputs[1], output1_data);
+  CompareResult(outputs[1], output1_data);
 
   std::vector<float> output2_data = {0.0373, -0.2322, -0.1477, -0.1621, -0.1808, 0.5146};
-  CompareOutput(outputs[2], output2_data);
+  CompareResult(outputs[2], output2_data);
 
   delete lstm_param;
-  for (int i = 0; i < inputs.size() - 1; i++) {
+  for (unsigned int i = 0; i < inputs.size() - 1; i++) {
     delete inputs[i];
   }
-  for (int i = 0; i < outputs.size(); i++) {
-    delete outputs[i];
+  for (auto &output : outputs) {
+    delete output;
   }
   delete kernel;
   MS_LOG(INFO) << "LstmFp32 backward accuracy passed";

@@ -38,7 +38,7 @@ def get_WideDeep_net(config):
     """
     WideDeep_net = WideDeepModel(config)
     loss_net = NetWithLossClass(WideDeep_net, config)
-    train_net = TrainStepWrap(loss_net)
+    train_net = TrainStepWrap(loss_net, sparse=config.sparse)
     eval_net = PredictWithSigmoid(WideDeep_net)
     return train_net, eval_net
 
@@ -72,6 +72,7 @@ def train_and_eval(config):
     set_seed(1000)
     data_path = config.data_path
     batch_size = config.batch_size
+    sparse = config.sparse
     epochs = config.epochs
     if config.dataset_type == "tfrecord":
         dataset_type = DataType.TFRECORD
@@ -104,14 +105,15 @@ def train_and_eval(config):
     ckpoint_cb = ModelCheckpoint(prefix='widedeep_train',
                                  directory=config.ckpt_path + '/ckpt_' + str(get_rank()) + '/',
                                  config=ckptconfig)
-    out = model.eval(ds_eval)
+    out = model.eval(ds_eval, dataset_sink_mode=(not sparse))
     print("=====" * 5 + "model.eval() initialized: {}".format(out))
     callback_list = [TimeMonitor(ds_train.get_dataset_size()), eval_callback, callback]
     if get_rank() == 0:
         callback_list.append(ckpoint_cb)
     model.train(epochs, ds_train,
                 callbacks=callback_list,
-                sink_size=ds_train.get_dataset_size())
+                sink_size=ds_train.get_dataset_size(),
+                dataset_sink_mode=(not sparse))
 
 
 if __name__ == "__main__":
@@ -119,7 +121,9 @@ if __name__ == "__main__":
     wide_deep_config.argparse_init()
 
     context.set_context(mode=context.GRAPH_MODE, device_target=wide_deep_config.device_target, save_graphs=True)
+    context.set_context(enable_sparse=wide_deep_config.sparse)
     init()
+    context.set_context(save_graphs_path='./graphs_of_device_id_'+str(get_rank()))
     context.set_auto_parallel_context(parallel_mode=ParallelMode.DATA_PARALLEL, gradients_mean=True,
                                       device_num=get_group_size())
 

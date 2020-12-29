@@ -14,14 +14,13 @@
  * limitations under the License.
  */
 #include "common/common.h"
-#include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/core/global_context.h"
 #include "minddata/dataset/include/datasets.h"
 
-using namespace mindspore::dataset::api;
+using namespace mindspore::dataset;
+using mindspore::dataset::GlobalContext;
 using mindspore::dataset::ShuffleMode;
 using mindspore::dataset::Tensor;
-using mindspore::dataset::GlobalContext;
 
 class MindDataTestPipeline : public UT::DatasetOpTesting {
  protected:
@@ -49,11 +48,8 @@ TEST_F(MindDataTestPipeline, TestCLUEDatasetAFQMC) {
   iter->GetNextRow(&row);
 
   EXPECT_NE(row.find("sentence1"), row.end());
-  std::vector<std::string> expected_result = {
-    "蚂蚁借呗等额还款能否换成先息后本",
-    "蚂蚁花呗说我违约了",
-    "帮我看看本月花呗账单结清了没"
-  };
+  std::vector<std::string> expected_result = {"蚂蚁借呗等额还款能否换成先息后本", "蚂蚁花呗说我违约了",
+                                              "帮我看看本月花呗账单结清了没"};
 
   uint64_t i = 0;
   while (row.size() != 0) {
@@ -75,11 +71,7 @@ TEST_F(MindDataTestPipeline, TestCLUEDatasetAFQMC) {
 
   // test
   usage = "test";
-  expected_result = {
-    "借呗取消的时间",
-    "网商贷用什么方法转变成借呗",
-    "我的借呗为什么开通不了"
-  };
+  expected_result = {"借呗取消的时间", "网商贷用什么方法转变成借呗", "我的借呗为什么开通不了"};
   ds = CLUE({test_file}, task, usage, 0, ShuffleMode::kFalse);
   EXPECT_NE(ds, nullptr);
   iter = ds->CreateIterator();
@@ -100,11 +92,7 @@ TEST_F(MindDataTestPipeline, TestCLUEDatasetAFQMC) {
 
   // eval
   usage = "eval";
-  expected_result = {
-    "你有花呗吗",
-    "吃饭能用花呗吗",
-    "蚂蚁花呗支付金额有什么限制"
-  };
+  expected_result = {"你有花呗吗", "吃饭能用花呗吗", "蚂蚁花呗支付金额有什么限制"};
   ds = CLUE({eval_file}, task, usage, 0, ShuffleMode::kFalse);
   EXPECT_NE(ds, nullptr);
   iter = ds->CreateIterator();
@@ -159,6 +147,77 @@ TEST_F(MindDataTestPipeline, TestCLUEDatasetBasic) {
   iter->Stop();
 }
 
+TEST_F(MindDataTestPipeline, TestCLUEDatasetBasicWithPipeline) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCLUEDatasetBasicWithPipeline.";
+
+  // Create two CLUEFile Dataset, with single CLUE file
+  std::string clue_file = datasets_root_path_ + "/testCLUE/afqmc/train.json";
+  std::string task = "AFQMC";
+  std::string usage = "train";
+  std::shared_ptr<Dataset> ds1 = CLUE({clue_file}, task, usage, 2);
+  std::shared_ptr<Dataset> ds2 = CLUE({clue_file}, task, usage, 2);
+  EXPECT_NE(ds1, nullptr);
+  EXPECT_NE(ds2, nullptr);
+
+  // Create two Repeat operation on ds
+  int32_t repeat_num = 2;
+  ds1 = ds1->Repeat(repeat_num);
+  EXPECT_NE(ds1, nullptr);
+  repeat_num = 3;
+  ds2 = ds2->Repeat(repeat_num);
+  EXPECT_NE(ds2, nullptr);
+
+  // Create two Project operation on ds
+  std::vector<std::string> column_project = {"sentence1"};
+  ds1 = ds1->Project(column_project);
+  EXPECT_NE(ds1, nullptr);
+  ds2 = ds2->Project(column_project);
+  EXPECT_NE(ds2, nullptr);
+
+  // Create a Concat operation on the ds
+  ds1 = ds1->Concat({ds2});
+  EXPECT_NE(ds1, nullptr);
+
+  // Create an iterator over the result of the above dataset
+  // This will trigger the creation of the Execution Tree and launch it.
+  std::shared_ptr<Iterator> iter = ds1->CreateIterator();
+  EXPECT_NE(iter, nullptr);
+
+  // Iterate the dataset and get each row
+  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  iter->GetNextRow(&row);
+
+  EXPECT_NE(row.find("sentence1"), row.end());
+  uint64_t i = 0;
+  while (row.size() != 0) {
+    auto text = row["sentence1"];
+    MS_LOG(INFO) << "Tensor text shape: " << text->shape();
+    i++;
+    iter->GetNextRow(&row);
+  }
+
+  // Expect 10 samples
+  EXPECT_EQ(i, 10);
+
+  // Manually terminate the pipeline
+  iter->Stop();
+}
+
+TEST_F(MindDataTestPipeline, TestCLUEGetters) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCLUEGetters.";
+
+  // Create a CLUEFile Dataset, with single CLUE file
+  std::string clue_file = datasets_root_path_ + "/testCLUE/afqmc/train.json";
+  std::string task = "AFQMC";
+  std::string usage = "train";
+  std::shared_ptr<Dataset> ds = CLUE({clue_file}, task, usage, 2);
+  std::vector<std::string> column_names = {"label", "sentence1", "sentence2"};
+  EXPECT_NE(ds, nullptr);
+
+  EXPECT_EQ(ds->GetDatasetSize(), 2);
+  EXPECT_EQ(ds->GetColumnNames(), column_names);
+}
+
 TEST_F(MindDataTestPipeline, TestCLUEDatasetCMNLI) {
   MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCLUEDatasetCMNLI.";
 
@@ -179,11 +238,7 @@ TEST_F(MindDataTestPipeline, TestCLUEDatasetCMNLI) {
   iter->GetNextRow(&row);
 
   EXPECT_NE(row.find("sentence1"), row.end());
-  std::vector<std::string> expected_result = {
-    "你应该给这件衣服定一个价格。",
-    "我怎么知道他要说什么",
-    "向左。"
-  };
+  std::vector<std::string> expected_result = {"你应该给这件衣服定一个价格。", "我怎么知道他要说什么", "向左。"};
 
   uint64_t i = 0;
   while (row.size() != 0) {
@@ -224,11 +279,7 @@ TEST_F(MindDataTestPipeline, TestCLUEDatasetCSL) {
   iter->GetNextRow(&row);
 
   EXPECT_NE(row.find("abst"), row.end());
-  std::vector<std::string> expected_result = {
-    "这是一段长文本",
-    "这是一段长文本",
-    "这是一段长文本"
-  };
+  std::vector<std::string> expected_result = {"这是一段长文本", "这是一段长文本", "这是一段长文本"};
 
   uint64_t i = 0;
   while (row.size() != 0) {
@@ -284,8 +335,8 @@ TEST_F(MindDataTestPipeline, TestCLUEDatasetDistribution) {
   iter->Stop();
 }
 
-TEST_F(MindDataTestPipeline, TestCLUEDatasetException) {
-  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCLUEDatasetException.";
+TEST_F(MindDataTestPipeline, TestCLUEDatasetFail) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCLUEDatasetFail.";
   // Create a CLUE Dataset
   std::string clue_file = datasets_root_path_ + "/testCLUE/wsc/train.json";
   std::string task = "WSC";
@@ -293,28 +344,60 @@ TEST_F(MindDataTestPipeline, TestCLUEDatasetException) {
   std::string invalid_clue_file = "./NotExistFile";
 
   std::shared_ptr<Dataset> ds0 = CLUE({}, task, usage);
-  EXPECT_EQ(ds0, nullptr);
+  EXPECT_NE(ds0, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter0 = ds0->CreateIterator();
+  // Expect failure: invalid CLUE input
+  EXPECT_EQ(iter0, nullptr);
 
   std::shared_ptr<Dataset> ds1 = CLUE({invalid_clue_file}, task, usage);
-  EXPECT_EQ(ds1, nullptr);
+  EXPECT_NE(ds1, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter1 = ds1->CreateIterator();
+  // Expect failure: invalid CLUE input
+  EXPECT_EQ(iter1, nullptr);
 
   std::shared_ptr<Dataset> ds2 = CLUE({clue_file}, "invalid_task", usage);
-  EXPECT_EQ(ds2, nullptr);
+  EXPECT_NE(ds2, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter2 = ds2->CreateIterator();
+  // Expect failure: invalid CLUE input
+  EXPECT_EQ(iter2, nullptr);
 
   std::shared_ptr<Dataset> ds3 = CLUE({clue_file}, task, "invalid_usage");
-  EXPECT_EQ(ds3, nullptr);
+  EXPECT_NE(ds3, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter3 = ds3->CreateIterator();
+  // Expect failure: invalid CLUE input
+  EXPECT_EQ(iter3, nullptr);
 
   std::shared_ptr<Dataset> ds4 = CLUE({clue_file}, task, usage, 0, ShuffleMode::kGlobal, 2, 2);
-  EXPECT_EQ(ds4, nullptr);
+  EXPECT_NE(ds4, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter4 = ds4->CreateIterator();
+  // Expect failure: invalid CLUE input
+  EXPECT_EQ(iter4, nullptr);
 
   std::shared_ptr<Dataset> ds5 = CLUE({clue_file}, task, usage, -1, ShuffleMode::kGlobal);
-  EXPECT_EQ(ds5, nullptr);
+  EXPECT_NE(ds5, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter5 = ds5->CreateIterator();
+  // Expect failure: invalid CLUE input
+  EXPECT_EQ(iter5, nullptr);
 
   std::shared_ptr<Dataset> ds6 = CLUE({clue_file}, task, usage, 0, ShuffleMode::kGlobal, -1);
-  EXPECT_EQ(ds6, nullptr);
+  EXPECT_NE(ds6, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter6 = ds6->CreateIterator();
+  // Expect failure: invalid CLUE input
+  EXPECT_EQ(iter6, nullptr);
 
   std::shared_ptr<Dataset> ds7 = CLUE({clue_file}, task, usage, 0, ShuffleMode::kGlobal, 0, -1);
-  EXPECT_EQ(ds7, nullptr);
+  EXPECT_NE(ds7, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter7 = ds7->CreateIterator();
+  // Expect failure: invalid CLUE input
+  EXPECT_EQ(iter7, nullptr);
 }
 
 TEST_F(MindDataTestPipeline, TestCLUEDatasetIFLYTEK) {
@@ -337,11 +420,7 @@ TEST_F(MindDataTestPipeline, TestCLUEDatasetIFLYTEK) {
   iter->GetNextRow(&row);
 
   EXPECT_NE(row.find("sentence"), row.end());
-  std::vector<std::string> expected_result = {
-    "第一个文本",
-    "第二个文本",
-    "第三个文本"
-  };
+  std::vector<std::string> expected_result = {"第一个文本", "第二个文本", "第三个文本"};
 
   uint64_t i = 0;
   while (row.size() != 0) {
@@ -396,14 +475,12 @@ TEST_F(MindDataTestPipeline, TestCLUEDatasetShuffleFilesA) {
   iter->GetNextRow(&row);
 
   EXPECT_NE(row.find("sentence1"), row.end());
-  std::vector<std::string> expected_result = {
-    "你有花呗吗",
-    "吃饭能用花呗吗",
-    "蚂蚁花呗支付金额有什么限制",
-    "蚂蚁借呗等额还款能否换成先息后本",
-    "蚂蚁花呗说我违约了",
-    "帮我看看本月花呗账单结清了没"
-  };
+  std::vector<std::string> expected_result = {"你有花呗吗",
+                                              "吃饭能用花呗吗",
+                                              "蚂蚁花呗支付金额有什么限制",
+                                              "蚂蚁借呗等额还款能否换成先息后本",
+                                              "蚂蚁花呗说我违约了",
+                                              "帮我看看本月花呗账单结清了没"};
 
   uint64_t i = 0;
   while (row.size() != 0) {
@@ -463,14 +540,12 @@ TEST_F(MindDataTestPipeline, TestCLUEDatasetShuffleFilesB) {
   iter->GetNextRow(&row);
 
   EXPECT_NE(row.find("sentence1"), row.end());
-  std::vector<std::string> expected_result = {
-    "你有花呗吗",
-    "吃饭能用花呗吗",
-    "蚂蚁花呗支付金额有什么限制",
-    "蚂蚁借呗等额还款能否换成先息后本",
-    "蚂蚁花呗说我违约了",
-    "帮我看看本月花呗账单结清了没"
-  };
+  std::vector<std::string> expected_result = {"你有花呗吗",
+                                              "吃饭能用花呗吗",
+                                              "蚂蚁花呗支付金额有什么限制",
+                                              "蚂蚁借呗等额还款能否换成先息后本",
+                                              "蚂蚁花呗说我违约了",
+                                              "帮我看看本月花呗账单结清了没"};
 
   uint64_t i = 0;
   while (row.size() != 0) {
@@ -523,11 +598,8 @@ TEST_F(MindDataTestPipeline, TestCLUEDatasetShuffleGlobal) {
   iter->GetNextRow(&row);
 
   EXPECT_NE(row.find("sentence1"), row.end());
-  std::vector<std::string> expected_result = {
-    "蚂蚁花呗说我违约了",
-    "帮我看看本月花呗账单结清了没",
-    "蚂蚁借呗等额还款能否换成先息后本"
-  };
+  std::vector<std::string> expected_result = {"蚂蚁花呗说我违约了", "帮我看看本月花呗账单结清了没",
+                                              "蚂蚁借呗等额还款能否换成先息后本"};
   uint64_t i = 0;
   while (row.size() != 0) {
     auto text = row["sentence1"];
@@ -572,11 +644,7 @@ TEST_F(MindDataTestPipeline, TestCLUEDatasetTNEWS) {
   iter->GetNextRow(&row);
 
   EXPECT_NE(row.find("sentence"), row.end());
-  std::vector<std::string> expected_result = {
-    "新闻1",
-    "新闻2",
-    "新闻3"
-  };
+  std::vector<std::string> expected_result = {"新闻1", "新闻2", "新闻3"};
 
   uint64_t i = 0;
   while (row.size() != 0) {
@@ -617,11 +685,8 @@ TEST_F(MindDataTestPipeline, TestCLUEDatasetWSC) {
   iter->GetNextRow(&row);
 
   EXPECT_NE(row.find("text"), row.end());
-  std::vector<std::string> expected_result = {
-    "小明呢，他在哪？",
-    "小红刚刚看到小明，他在操场",
-    "等小明回来，小张你叫他交作业"
-  };
+  std::vector<std::string> expected_result = {"小明呢，他在哪？", "小红刚刚看到小明，他在操场",
+                                              "等小明回来，小张你叫他交作业"};
 
   uint64_t i = 0;
   while (row.size() != 0) {

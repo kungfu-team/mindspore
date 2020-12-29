@@ -35,13 +35,12 @@ def _rand(a=0., b=1.):
     return np.random.rand() * (b - a) + a
 
 
-def get_imageId_from_fileName(filename):
-    """Get imageID from fileName"""
-    try:
-        filename = os.path.splitext(filename)[0]
+def get_imageId_from_fileName(filename, id_iter):
+    """Get imageID from fileName if fileName is int, else return id_iter."""
+    filename = os.path.splitext(filename)[0]
+    if filename.isdigit():
         return int(filename)
-    except:
-        raise NotImplementedError('Filename %s is supposed to be an integer.' % (filename))
+    return id_iter
 
 
 def random_sample_crop(image, boxes):
@@ -105,6 +104,7 @@ def random_sample_crop(image, boxes):
 
 def preprocess_fn(img_id, image, box, is_training):
     """Preprocess function for dataset."""
+    cv2.setNumThreads(2)
 
     def _infer_data(image, input_shape):
         img_h, img_w, _ = image.shape
@@ -159,10 +159,10 @@ def preprocess_fn(img_id, image, box, is_training):
 
 def create_voc_label(is_training):
     """Get image path and annotation from VOC."""
-    voc_dir = config.voc_dir
-    cls_map = {name: i for i, name in enumerate(config.coco_classes)}
+    voc_root = config.voc_root
+    cls_map = {name: i for i, name in enumerate(config.classes)}
     sub_dir = 'train' if is_training else 'eval'
-    voc_dir = os.path.join(voc_dir, sub_dir)
+    voc_dir = os.path.join(voc_root, sub_dir)
     if not os.path.isdir(voc_dir):
         raise ValueError(f'Cannot find {sub_dir} dataset path.')
 
@@ -173,8 +173,7 @@ def create_voc_label(is_training):
         anno_dir = os.path.join(voc_dir, 'Annotations')
 
     if not is_training:
-        data_dir = config.voc_root
-        json_file = os.path.join(data_dir, config.instances_set.format(sub_dir))
+        json_file = os.path.join(config.voc_root, config.voc_json)
         file_dir = os.path.split(json_file)[0]
         if not os.path.isdir(file_dir):
             os.makedirs(file_dir)
@@ -185,6 +184,7 @@ def create_voc_label(is_training):
     image_files_dict = {}
     image_anno_dict = {}
     images = []
+    id_iter = 0
     for anno_file in os.listdir(anno_dir):
         print(anno_file)
         if not anno_file.endswith('xml'):
@@ -192,7 +192,8 @@ def create_voc_label(is_training):
         tree = et.parse(os.path.join(anno_dir, anno_file))
         root_node = tree.getroot()
         file_name = root_node.find('filename').text
-        img_id = get_imageId_from_fileName(file_name)
+        img_id = get_imageId_from_fileName(file_name, id_iter)
+        id_iter += 1
         image_path = os.path.join(image_dir, file_name)
         print(image_path)
         if not os.path.isfile(image_path):
@@ -203,7 +204,7 @@ def create_voc_label(is_training):
         for obj in root_node.iter('object'):
             cls_name = obj.find('name').text
             if cls_name not in cls_map:
-                print(f'Label "{cls_name}" not in "{config.coco_classes}"')
+                print(f'Label "{cls_name}" not in "{config.classes}"')
                 continue
             bnd_box = obj.find('bndbox')
             x_min = int(bnd_box.find('xmin').text) - 1
@@ -258,7 +259,7 @@ def create_coco_label(is_training):
         data_type = config.train_data_type
 
     # Classes need to train or test.
-    train_cls = config.coco_classes
+    train_cls = config.classes
     train_cls_dict = {}
     for i, cls in enumerate(train_cls):
         train_cls_dict[cls] = i
@@ -390,8 +391,8 @@ def data_to_mindrecord_byte_image(dataset="coco", is_training=True, prefix="ssd.
 
 
 def create_ssd_dataset(mindrecord_file, batch_size=32, repeat_num=10, device_num=1, rank=0,
-                       is_training=True, num_parallel_workers=4):
-    """Creatr SSD dataset with MindDataset."""
+                       is_training=True, num_parallel_workers=4, use_multiprocessing=True):
+    """Create SSD dataset with MindDataset."""
     ds = de.MindDataset(mindrecord_file, columns_list=["img_id", "image", "annotation"], num_shards=device_num,
                         shard_id=rank, num_parallel_workers=num_parallel_workers, shuffle=is_training)
     decode = C.Decode()
@@ -409,10 +410,45 @@ def create_ssd_dataset(mindrecord_file, batch_size=32, repeat_num=10, device_num
         trans = [normalize_op, change_swap_op]
     ds = ds.map(operations=compose_map_func, input_columns=["img_id", "image", "annotation"],
                 output_columns=output_columns, column_order=output_columns,
-                python_multiprocessing=is_training,
+                python_multiprocessing=use_multiprocessing,
                 num_parallel_workers=num_parallel_workers)
-    ds = ds.map(operations=trans, input_columns=["image"], python_multiprocessing=is_training,
+    ds = ds.map(operations=trans, input_columns=["image"], python_multiprocessing=use_multiprocessing,
                 num_parallel_workers=num_parallel_workers)
     ds = ds.batch(batch_size, drop_remainder=True)
     ds = ds.repeat(repeat_num)
     return ds
+
+
+def create_mindrecord(dataset="coco", prefix="ssd.mindrecord", is_training=True):
+    print("Start create dataset!")
+
+    # It will generate mindrecord file in config.mindrecord_dir,
+    # and the file name is ssd.mindrecord0, 1, ... file_num.
+
+    mindrecord_dir = config.mindrecord_dir
+    mindrecord_file = os.path.join(mindrecord_dir, prefix + "0")
+    if not os.path.exists(mindrecord_file):
+        if not os.path.isdir(mindrecord_dir):
+            os.makedirs(mindrecord_dir)
+        if dataset == "coco":
+            if os.path.isdir(config.coco_root):
+                print("Create Mindrecord.")
+                data_to_mindrecord_byte_image("coco", is_training, prefix)
+                print("Create Mindrecord Done, at {}".format(mindrecord_dir))
+            else:
+                print("coco_root not exits.")
+        elif dataset == "voc":
+            if os.path.isdir(config.voc_root):
+                print("Create Mindrecord.")
+                voc_data_to_mindrecord(mindrecord_dir, is_training, prefix)
+                print("Create Mindrecord Done, at {}".format(mindrecord_dir))
+            else:
+                print("voc_root not exits.")
+        else:
+            if os.path.isdir(config.image_dir) and os.path.exists(config.anno_path):
+                print("Create Mindrecord.")
+                data_to_mindrecord_byte_image("other", is_training, prefix)
+                print("Create Mindrecord Done, at {}".format(mindrecord_dir))
+            else:
+                print("image_dir or anno_path not exits.")
+    return mindrecord_file

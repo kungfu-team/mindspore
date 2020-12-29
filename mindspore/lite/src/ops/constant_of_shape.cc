@@ -18,6 +18,9 @@
 #include "include/errorcode.h"
 #include "src/common/log_adapter.h"
 #include "src/tensor.h"
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
 
 namespace mindspore::lite {
 namespace {
@@ -25,9 +28,9 @@ constexpr int kShapeInputNum = 1;
 constexpr int kShapeOutputNum = 1;
 }  // namespace
 #ifdef PRIMITIVE_WRITEABLE
-float ConstantOfShape::GetValue() const { return this->primitive_->value.AsConstantOfShape()->value; }
+std::vector<float> ConstantOfShape::GetValue() const { return this->primitive_->value.AsConstantOfShape()->value; }
 
-void ConstantOfShape::SetValue(float value) { this->primitive_->value.AsConstantOfShape()->value = value; }
+int ConstantOfShape::GetDataType() const { return this->primitive_->value.AsConstantOfShape()->dataType; }
 
 #else
 int ConstantOfShape::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) {
@@ -38,12 +41,27 @@ int ConstantOfShape::UnPackToFlatBuilder(const schema::Primitive *primitive, fla
     MS_LOG(ERROR) << "value_as_ConstantOfShape return nullptr";
     return RET_ERROR;
   }
-  auto val_offset = schema::CreateConstantOfShape(*fbb, attr->value());
+  std::vector<float> value;
+  if (attr->value() != nullptr) {
+    for (int i = 0; i < static_cast<int>(attr->value()->size()); i++) {
+      value.push_back(attr->value()->data()[i]);
+    }
+  }
+  auto val_offset = schema::CreateConstantOfShapeDirect(*fbb, attr->dataType(), &value);
   auto prim_offset = schema::CreatePrimitive(*fbb, schema::PrimitiveType_ConstantOfShape, val_offset.o);
   fbb->Finish(prim_offset);
   return RET_OK;
 }
-float ConstantOfShape::GetValue() const { return this->primitive_->value_as_ConstantOfShape()->value(); }
+std::vector<float> ConstantOfShape::GetValue() const {
+  auto fb_vector = this->primitive_->value_as_ConstantOfShape()->value();
+  return std::vector<float>(fb_vector->begin(), fb_vector->end());
+}
+int ConstantOfShape::GetDataType() const { return this->primitive_->value_as_ConstantOfShape()->dataType(); }
+
+PrimitiveC *ConstantOfShapeCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<ConstantOfShape>(primitive);
+}
+Registry ConstantOfShapeRegistry(schema::PrimitiveType_ConstantOfShape, ConstantOfShapeCreator);
 
 #endif
 
@@ -60,25 +78,42 @@ int ConstantOfShape::InferShape(std::vector<Tensor *> inputs_, std::vector<Tenso
     MS_LOG(ERROR) << "outputs to ConstantOfShape operator should be 1, but " << outputs_.size() << " is given.";
     return RET_ERROR;
   }
+
   auto in_tensor = inputs_.front();
   auto out_tensor = outputs_.front();
-  out_tensor->set_data_type(kNumberTypeFloat32);
-  out_tensor->SetFormat(in_tensor->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
-  }
-  auto in_data = reinterpret_cast<int *>(in_tensor->data_c());
-  if (in_data == nullptr) {
-    MS_LOG(ERROR) << "Input data is nullptr";
+  out_tensor->set_data_type(static_cast<TypeId>(GetDataType()));
+  out_tensor->set_format(in_tensor->format());
+
+  if (!infer_flag() || in_tensor->data_c() == nullptr) {
     return RET_INFER_INVALID;
   }
+
   int size = in_tensor->ElementsNum();
   std::vector<int> out_shape(size);
-  for (int i = 0; i < size; ++i) {
-    out_shape[i] = in_data[i];
-  }
-  out_tensor->set_shape(out_shape);
 
+  switch (in_tensor->data_type()) {
+    case kNumberTypeInt32: {
+      int32_t *in_data = reinterpret_cast<int32_t *>(in_tensor->data_c());
+      for (int i = 0; i < size; ++i) {
+        out_shape[i] = in_data[i];
+        MS_ASSERT(out_shape[i] > 0);
+      }
+      break;
+    }
+    case kNumberTypeInt64: {
+      int64_t *in_data = reinterpret_cast<int64_t *>(in_tensor->data_c());
+      for (int i = 0; i < size; ++i) {
+        out_shape[i] = in_data[i];
+        MS_ASSERT(out_shape[i] > 0);
+      }
+      break;
+    }
+    default:
+      MS_LOG(INFO) << "Invalid input data type!";
+      return RET_INFER_INVALID;
+  }
+
+  out_tensor->set_shape(out_shape);
   return RET_OK;
 }
 }  // namespace mindspore::lite

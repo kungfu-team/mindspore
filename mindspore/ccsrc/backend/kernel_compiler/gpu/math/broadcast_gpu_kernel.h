@@ -31,13 +31,7 @@ constexpr int MAX_DIMS = 7;
 template <typename T>
 class BroadcastOpGpuKernel : public GpuKernel {
  public:
-  BroadcastOpGpuKernel()
-      : op_type_(BROADCAST_TYPE_INVALID),
-        need_broadcast_(false),
-        is_comp_op_(false),
-        input1_num_(1),
-        input2_num_(1),
-        output_num_(1) {}
+  BroadcastOpGpuKernel() { ResetResource(); }
   ~BroadcastOpGpuKernel() override = default;
 
   const std::vector<size_t> &GetInputSizeList() const override { return input_size_list_; }
@@ -71,9 +65,9 @@ class BroadcastOpGpuKernel : public GpuKernel {
   }
   bool Init(const CNodePtr &kernel_node) override {
     GetOpType(kernel_node);
-    auto shape1 = AnfAlgo::GetInputDeviceShape(kernel_node, 0);
-    auto shape2 = AnfAlgo::GetInputDeviceShape(kernel_node, 1);
-    auto shape3 = AnfAlgo::GetOutputDeviceShape(kernel_node, 0);
+    auto shape1 = AnfAlgo::GetInputRealDeviceShapeIfExist(kernel_node, 0);
+    auto shape2 = AnfAlgo::GetInputRealDeviceShapeIfExist(kernel_node, 1);
+    auto shape3 = AnfAlgo::GetOutputRealDeviceShapeIfExist(kernel_node, 0);
     need_broadcast_ = IsBroadcast(shape1, shape2);
     if (need_broadcast_ && shape1.size() > 7) {
       MS_LOG(EXCEPTION) << "Broadcast operation not support dim greater than 7";
@@ -83,22 +77,42 @@ class BroadcastOpGpuKernel : public GpuKernel {
     rhs_shape_.resize(MAX_DIMS, 1);
     output_shape_.resize(MAX_DIMS, 1);
     for (size_t i = 0; i < shape3.size(); i++) {
-      output_shape_[i] = shape3[i];
+      if (need_broadcast_) {
+        output_shape_[i] = shape3[i];
+      }
       output_num_ *= shape3[i];
     }
     int lhs_offset = shape3.size() - shape1.size();
     for (size_t j = 0; j < shape1.size(); j++) {
-      lhs_shape_[j + lhs_offset] = shape1[j];
+      if (need_broadcast_) {
+        lhs_shape_[j + lhs_offset] = shape1[j];
+      }
       input1_num_ *= shape1[j];
     }
     int rhs_offset = shape3.size() - shape2.size();
     for (size_t k = 0; k < shape2.size(); k++) {
-      rhs_shape_[k + rhs_offset] = shape2[k];
+      if (need_broadcast_) {
+        rhs_shape_[k + rhs_offset] = shape2[k];
+      }
       input2_num_ *= shape2[k];
     }
 
     InitSizeLists();
     return true;
+  }
+  void ResetResource() noexcept override {
+    op_type_ = BROADCAST_TYPE_INVALID;
+    need_broadcast_ = false;
+    is_comp_op_ = false;
+    input1_num_ = 1;
+    input2_num_ = 1;
+    output_num_ = 1;
+    lhs_shape_.clear();
+    rhs_shape_.clear();
+    output_shape_.clear();
+    input_size_list_.clear();
+    output_size_list_.clear();
+    workspace_size_list_.clear();
   }
 
  protected:
@@ -118,6 +132,7 @@ class BroadcastOpGpuKernel : public GpuKernel {
     static std::map<std::string, BroadcastOpType> kBroadcastCmpTypeMap = {
       {"Greater", BROADCAST_TYPE_GREATER},
       {"Less", BROADCAST_TYPE_LESS},
+      {"Equal", BROADCAST_TYPE_EQUAL},
     };
 
     auto iter = kBroadcastCmpTypeMap.find(kernel_name);
@@ -131,7 +146,7 @@ class BroadcastOpGpuKernel : public GpuKernel {
       {"Maximum", BROADCAST_TYPE_MAXIMUM}, {"Minimum", BROADCAST_TYPE_MINIMUM},   {"Pow", BROADCAST_TYPE_POWER},
       {"RealDiv", BROADCAST_TYPE_REALDIV}, {"Mul", BROADCAST_TYPE_MUL},           {"Sub", BROADCAST_TYPE_SUB},
       {"TensorAdd", BROADCAST_TYPE_ADD},   {"FloorDiv", BROADCAST_TYPE_FLOORDIV}, {"AbsGrad", BROADCAST_TYPE_ABSGRAD},
-      {"Div", BROADCAST_TYPE_DIV},
+      {"Div", BROADCAST_TYPE_DIV},         {"DivNoNan", BROADCAST_TYPE_DIVNONAN},
     };
 
     iter = kBroadcastArithmetricTypeMap.find(kernel_name);
@@ -159,9 +174,9 @@ class BroadcastOpGpuKernel : public GpuKernel {
   BroadcastOpType op_type_;
   bool need_broadcast_;
   bool is_comp_op_;
-  int input1_num_;
-  int input2_num_;
-  int output_num_;
+  size_t input1_num_;
+  size_t input2_num_;
+  size_t output_num_;
   std::vector<size_t> lhs_shape_;
   std::vector<size_t> rhs_shape_;
   std::vector<size_t> output_shape_;

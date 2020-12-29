@@ -29,9 +29,7 @@
 #include "tools/converter/converter.h"
 #include "include/ms_tensor.h"
 
-namespace mindspore {
-namespace lite {
-namespace quant {
+namespace mindspore::lite::quant {
 class Calibrator;
 
 struct MaxMin {
@@ -42,10 +40,11 @@ struct MaxMin {
 
 const char kMethodMaxMin[] = "MAX_MIN";
 const char kMethodKL[] = "KL";
+const char kMethodOutlier[] = "RemovalOutlier";
 constexpr int kDefaultBinNumber = 2048;
 
 struct ConfigParam {
-  std::string image_path;
+  std::vector<std::string> image_paths;
   uint32_t batch_count{100};
   std::string method_x{kMethodKL};
   uint32_t thread_num{1};
@@ -56,6 +55,7 @@ class PostTrainingQuantizer : public Quantizer {
  public:
   PostTrainingQuantizer(FuncGraphPtr graph, std::string path, int bit_num, TypeId target_type = kNumberTypeInt8,
                         bool per_channel = true);
+  ~PostTrainingQuantizer() = default;
 
   STATUS DoQuantize(FuncGraphPtr func_graph) override;
 
@@ -64,7 +64,7 @@ class PostTrainingQuantizer : public Quantizer {
   int quant_min{INT8_MIN};
 
  private:
-  bool per_channel_;
+  bool per_channel_{true};
 
   TypeId target_type_{kNumberTypeInt8};
 
@@ -89,6 +89,8 @@ class PostTrainingQuantizer : public Quantizer {
 
   const std::string kTypeConv2D = schema::EnumNamePrimitiveType(schema::PrimitiveType_Conv2D);
   const std::string kTypeDepthwiseConv2D = schema::EnumNamePrimitiveType(schema::PrimitiveType_DepthwiseConv2D);
+  const std::string kTypeConcat = schema::EnumNamePrimitiveType(schema::PrimitiveType_Concat);
+  const std::string kTypeAdd = schema::EnumNamePrimitiveType(schema::PrimitiveType_Add);
 
   STATUS PreProcess();
 
@@ -105,14 +107,16 @@ class PostTrainingQuantizer : public Quantizer {
 
   STATUS QuantNode();
 
-  STATUS DoQuantInput(double scale, int32_t zeropoint, struct MaxMin *max_min, std::shared_ptr<PrimitiveC>);
-  STATUS DoQuantOutput(double scale, int32_t zeropoint, struct MaxMin *max_min, std::shared_ptr<PrimitiveC>);
+  STATUS DoQuantInput(double scale, int32_t zeropoint, struct MaxMin *max_min,
+                      const std::shared_ptr<PrimitiveC> &lite_primitive) const;
+  STATUS DoQuantOutput(double scale, int32_t zeropoint, struct MaxMin *max_min,
+                       const std::shared_ptr<PrimitiveC> &) const;
 
-  STATUS DoWeightQuant(AnfNodePtr weight, std::shared_ptr<PrimitiveC> primitive_c, bool perchannel);
+  STATUS DoWeightQuant(const AnfNodePtr &weight, std::shared_ptr<PrimitiveC> primitive_c, bool perchannel) const;
 
-  STATUS DoBiasQuant(AnfNodePtr bias, std::shared_ptr<PrimitiveC> primitive_c);
+  STATUS DoBiasQuant(const AnfNodePtr &bias, const std::shared_ptr<PrimitiveC> &primitive_c);
   STATUS Int8Inference();
-  STATUS BiasCorrection(FuncGraphPtr func_graph);
+  STATUS BiasCorrection(const FuncGraphPtr &func_graph);
 };
 
 struct DivergInfo {
@@ -127,7 +131,11 @@ struct DivergInfo {
   int quant_max = 255;
   int quant_min = 0;
   std::string method_x = kMethodKL;
-
+  std::vector<float> min_datas;
+  std::vector<float> max_datas;
+  std::pair<float, float> percent_result{0.0, 0.0};
+  float scale_tmp = 0;
+  DivergInfo() = default;
   DivergInfo(CNodePtr cnode, int bins, size_t bits, int quant_max, int quant_min, const std::string &method_x) {
     this->method_x = method_x;
     this->cnode = cnode;
@@ -142,6 +150,8 @@ struct DivergInfo {
   }
 
   STATUS RecordMaxValue(const std::vector<float> &datas);
+
+  STATUS RecordMaxValueArray(const std::vector<float> &datas);
 
   void UpdateInterval();
 
@@ -166,9 +176,9 @@ class Calibrator {
 
   STATUS CollectImages();
 
-  STATUS GenerateInputData(int index, mindspore::tensor::MSTensor *tensor) const;
+  STATUS GenerateInputData(size_t input_index, size_t image_index, mindspore::tensor::MSTensor *tensor) const;
 
-  size_t GetBatchNum() const { return images_.size(); }
+  size_t GetBatchNum() const { return config_param_.batch_count; }
 
   uint32_t GetThreadNum() const { return config_param_.thread_num; }
 
@@ -176,49 +186,49 @@ class Calibrator {
 
   bool GetBiasCorrection() const { return config_param_.bias_correction; }
 
-  STATUS AddQuantizedOp(CNodePtr node);
+  size_t GetInputNum() const { return config_param_.image_paths.size(); }
 
-  STATUS RecordMaxValue(const std::string &op_name, const std::vector<float> &data,
-                        std::unordered_map<std::string, std::unique_ptr<DivergInfo>> *diverg_info);
+  STATUS AddQuantizedOp(const CNodePtr &node);
 
-  STATUS UpdateDivergInverval(std::unordered_map<std::string, std::unique_ptr<DivergInfo>> *diverg_info);
+  static STATUS RecordMaxValue(const std::vector<float> &data, const std::unique_ptr<DivergInfo> &diverg_info);
 
-  STATUS UpdateDataFrequency(const std::string &op_name, const std::vector<float> &data,
-                             std::unordered_map<std::string, std::unique_ptr<DivergInfo>> *diverg_info);
+  static STATUS UpdateDivergInverval(
+    std::unordered_map<std::string, std::vector<std::unique_ptr<DivergInfo>>> *diverg_info);
+
+  static STATUS UpdateDataFrequency(const std::vector<float> &data, const std::unique_ptr<DivergInfo> &diverg_info);
   void Dump();
 
   STATUS ComputeThreshold();
 
-  std::unordered_map<CNodePtr, float> GetScale(
+  static std::unordered_map<CNodePtr, float> GetScale(
     std::unordered_map<std::string, std::unique_ptr<DivergInfo>> *diverg_info);
 
-  std::unordered_map<CNodePtr, int32_t> GetZeropoint(
+  static std::unordered_map<CNodePtr, int32_t> GetZeropoint(
     std::unordered_map<std::string, std::unique_ptr<DivergInfo>> *diverg_info);
 
-  std::map<CNodePtr, MaxMin> GetMinMax(std::unordered_map<std::string, std::unique_ptr<DivergInfo>> *diverg_info);
+  static std::map<CNodePtr, MaxMin> GetMinMax(
+    std::unordered_map<std::string, std::unique_ptr<DivergInfo>> *diverg_info);
 
-  std::unordered_map<std::string, std::unique_ptr<DivergInfo>> *GetInputDivergInfo();
+  std::unordered_map<std::string, std::vector<std::unique_ptr<DivergInfo>>> *GetInputDivergInfo();
 
-  std::unordered_map<std::string, std::unique_ptr<DivergInfo>> *GetOutputDivergInfo();
+  std::unordered_map<std::string, std::vector<std::unique_ptr<DivergInfo>>> *GetOutputDivergInfo();
 
  private:
-  std::vector<std::string> images_;
+  std::vector<std::vector<std::string>> images_;  // multi_input, echo input has multi input data
 
   std::string config_path_;
 
   ConfigParam config_param_;
 
-  std::unordered_map<std::string, std::unique_ptr<DivergInfo>> input_diverg_info_;
+  std::unordered_map<std::string, std::vector<std::unique_ptr<DivergInfo>>> inputs_diverg_info_;
 
-  std::unordered_map<std::string, std::unique_ptr<DivergInfo>> output_diverg_info_;
+  std::unordered_map<std::string, std::vector<std::unique_ptr<DivergInfo>>> outputs_diverg_info_;
 
   size_t bit_num_;
   int quant_max_;
   int quant_min_;
 
-  void AddImage(std::string file);
+  void AddImage(const std::string &file, size_t index);
 };
-}  // namespace quant
-}  // namespace lite
-}  // namespace mindspore
+}  // namespace mindspore::lite::quant
 #endif  // MINDSPORE_LITE_TOOLS_CONVERTER_QUANTIZER_POSTRAINING_QUANTIZER_H

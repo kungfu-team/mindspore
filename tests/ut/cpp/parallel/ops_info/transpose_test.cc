@@ -58,7 +58,7 @@ void TestTransposeInfo::SetUp() {
 
   Shapes inputs_shape = {{128, 64}};
   Shapes outputs_shape = {{64, 128}};
-  std::vector<int> axis = {1, 0};
+  std::vector<int64_t> axis = {1, 0};
   ValuePtr val0;
   ValuePtr val1 = MakeValue(axis);
   std::vector<ValuePtr> val = {val0, val1};
@@ -85,7 +85,7 @@ TEST_F(TestTransposeInfo, InferDevMatrixShape2) {
   transpose->Init(strategy);
   Shape dev_matrix_shape = transpose->dev_matrix_shape();
 
-  Shape expect = {8, 4, 1};
+  Shape expect = {4, 1, 8};
   ASSERT_EQ(dev_matrix_shape, expect);
 }
 

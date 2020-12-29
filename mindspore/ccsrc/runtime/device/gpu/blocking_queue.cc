@@ -16,7 +16,7 @@
 
 #include "runtime/device/gpu/blocking_queue.h"
 #include <chrono>
-#include "runtime/device/gpu/gpu_common.h"
+#include "runtime/device/gpu/queue_common.h"
 #include "utils/ms_utils.h"
 
 namespace mindspore {
@@ -58,6 +58,7 @@ BlockQueueStatus_T GpuQueue::Push(const std::vector<DataItemGpu> &data) {
 
   node_info_[tail_].event_.reset(new cudaEvent_t());
   CHECK_CUDA_RET_WITH_ERROR(cudaEventCreate(&(*(node_info_[tail_].event_))), "Cuda Create Event Failed");
+  CHECK_CUDA_RET_WITH_ERROR(cudaEventRecord(*(node_info_[tail_].event_), stream_), "Cuda Create Event Failed");
   node_info_[tail_].data_ = data;
   tail_ = (tail_ + 1) % (capacity_);
   ++size_;
@@ -71,7 +72,7 @@ BlockQueueStatus_T GpuQueue::Front(void **addr, size_t *len) const {
   *len = len_;
 
   for (auto item : node_info_[head_].data_) {
-    host_release_(item.data_ptr_);
+    host_release_(item.data_ptr_, item.worker_id_);
   }
   return SUCCESS;
 }
@@ -104,7 +105,7 @@ BlockQueueStatus_T BlockingQueue::Create(void *addr, const std::vector<size_t> &
   return SUCCESS;
 }
 
-void BlockingQueue::RegisterRelease(const std::function<void(void *)> &func) { queue_->RegisterRelease(func); }
+void BlockingQueue::RegisterRelease(const std::function<void(void *, int32_t)> &func) { queue_->RegisterRelease(func); }
 
 BlockQueueStatus_T BlockingQueue::Push(const std::vector<DataItemGpu> &data, unsigned int) {
   std::unique_lock<std::mutex> locker(mutex_);

@@ -19,25 +19,14 @@
 #include <vector>
 #include <map>
 
-namespace mindspore {
-namespace lite {
-STATUS TfliteArgmaxParser::Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                 const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TfliteArgmaxParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
+namespace mindspore::lite {
+PrimitiveC *TfliteArgmaxParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                   const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  const auto &tflite_subgraph = tflite_model->subgraphs.front();
   std::unique_ptr<schema::ArgMaxT> attr = std::make_unique<schema::ArgMaxT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   attr->outMaxValue = false;
@@ -47,29 +36,23 @@ STATUS TfliteArgmaxParser::Parse(TfliteTensorsInfo *tensors_info, const std::uni
 
   // get axis attr
   auto axis_idx = tflite_op->inputs[1];
-  auto buffer_idx = tflite_model->subgraphs[0]->tensors[axis_idx]->buffer;
+  auto buffer_idx = tflite_subgraph->tensors[axis_idx]->buffer;
   auto &buf_data = tflite_model->buffers[buffer_idx];
   if (buf_data == nullptr) {
     MS_LOG(ERROR) << "the buf data is null";
-    return RET_NULL_PTR;
+    return nullptr;
   }
   auto data_ptr = buf_data->data.data();
   if (data_ptr == nullptr) {
     MS_LOG(ERROR) << "the data is null";
-    return RET_NULL_PTR;
+    return nullptr;
   }
   attr->axis = *(static_cast<int32_t *>(static_cast<void *>(data_ptr)));
-
-  op->primitive->value.type = schema::PrimitiveType_ArgMax;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  primitive->value.type = schema::PrimitiveType_ArgMax;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_TfliteArgmaxParser("Argmax", new TfliteArgmaxParser());
-}  // namespace lite
-}  // namespace mindspore
+TfliteNodeRegister g_tfliteArgmaxParser(tflite::BuiltinOperator_ARG_MAX, new TfliteArgmaxParser());
+}  // namespace mindspore::lite

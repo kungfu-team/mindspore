@@ -29,170 +29,26 @@ class TfliteDoubleInputOpParser : public TfliteNodeParser {
  public:
   TfliteDoubleInputOpParser() : TfliteNodeParser("node_name") {}
 
-  STATUS Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-               const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) override;
-};
-
-class TfliteAddParser : public TfliteDoubleInputOpParser {
- public:
-  TfliteAddParser() : TfliteDoubleInputOpParser() {}
-};
-
-class TfliteSubParser : public TfliteDoubleInputOpParser {
- public:
-  TfliteSubParser() : TfliteDoubleInputOpParser() {}
-};
-
-class TfliteMulParser : public TfliteDoubleInputOpParser {
- public:
-  TfliteMulParser() : TfliteDoubleInputOpParser() {}
-};
-
-class TfliteDivParser : public TfliteDoubleInputOpParser {
- public:
-  TfliteDivParser() : TfliteDoubleInputOpParser() {}
-};
-
-class TfliteFloorDivParser : public TfliteDoubleInputOpParser {
- public:
-  TfliteFloorDivParser() : TfliteDoubleInputOpParser() {}
-};
-
-class TfliteFloorModParser : public TfliteDoubleInputOpParser {
- public:
-  TfliteFloorModParser() : TfliteDoubleInputOpParser() {}
-};
-
-class TfliteSquaredDifferenceParser : public TfliteDoubleInputOpParser {
- public:
-  TfliteSquaredDifferenceParser() : TfliteDoubleInputOpParser() {}
-};
-
-class TfliteRealDivParser : public TfliteDoubleInputOpParser {
- public:
-  TfliteRealDivParser() : TfliteDoubleInputOpParser() {}
-};
-
-class TflitePowParser : public TfliteDoubleInputOpParser {
- public:
-  TflitePowParser() : TfliteDoubleInputOpParser() {}
-};
-
-class TfliteMaximumParser : public TfliteDoubleInputOpParser {
- public:
-  TfliteMaximumParser() : TfliteDoubleInputOpParser() {}
-};
-
-class TfliteMinimumParser : public TfliteDoubleInputOpParser {
- public:
-  TfliteMinimumParser() : TfliteDoubleInputOpParser() {}
+  PrimitiveC *ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                 const std::unique_ptr<tflite::ModelT> &tflite_model) override;
 };
 
 class TfliteSingleInputOpParser : public TfliteNodeParser {
  public:
   TfliteSingleInputOpParser() : TfliteNodeParser("node_name") {}
 
-  STATUS Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-               const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) override;
-};
-
-class TfliteAbsParser : public TfliteSingleInputOpParser {
- public:
-  TfliteAbsParser() : TfliteSingleInputOpParser() {}
-};
-
-class TfliteExpParser : public TfliteSingleInputOpParser {
- public:
-  TfliteExpParser() : TfliteSingleInputOpParser() {}
-};
-
-class TfliteSqrtParser : public TfliteSingleInputOpParser {
- public:
-  TfliteSqrtParser() : TfliteSingleInputOpParser() {}
-};
-
-class TfliteSquareParser : public TfliteSingleInputOpParser {
- public:
-  TfliteSquareParser() : TfliteSingleInputOpParser() {}
-};
-
-class TfliteSinParser : public TfliteSingleInputOpParser {
- public:
-  TfliteSinParser() : TfliteSingleInputOpParser() {}
-};
-
-class TfliteCosParser : public TfliteSingleInputOpParser {
- public:
-  TfliteCosParser() : TfliteSingleInputOpParser() {}
-};
-
-class TfliteRsqrtParser : public TfliteSingleInputOpParser {
- public:
-  TfliteRsqrtParser() : TfliteSingleInputOpParser() {}
-};
-
-class TfliteLogParser : public TfliteSingleInputOpParser {
- public:
-  TfliteLogParser() : TfliteSingleInputOpParser() {}
-};
-
-class TfliteRoundParser : public TfliteSingleInputOpParser {
- public:
-  TfliteRoundParser() : TfliteSingleInputOpParser() {}
-};
-
-class TfliteCeilParser : public TfliteSingleInputOpParser {
- public:
-  TfliteCeilParser() : TfliteSingleInputOpParser() {}
-};
-
-class TfliteFloorParser : public TfliteSingleInputOpParser {
- public:
-  TfliteFloorParser() : TfliteSingleInputOpParser() {}
-};
-
-class TfliteNegParser : public TfliteSingleInputOpParser {
- public:
-  TfliteNegParser() : TfliteSingleInputOpParser() {}
+  PrimitiveC *ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                 const std::unique_ptr<tflite::ModelT> &tflite_model) override;
 };
 
 class TfliteCompareOpParser : public TfliteNodeParser {
  public:
   TfliteCompareOpParser() : TfliteNodeParser("node_name") {}
 
-  STATUS Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-               const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) override;
+  PrimitiveC *ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                 const std::unique_ptr<tflite::ModelT> &tflite_model) override;
 };
 
-class TfliteEqualParser : public TfliteCompareOpParser {
- public:
-  TfliteEqualParser() : TfliteCompareOpParser() {}
-};
-
-class TfliteNotEqualParser : public TfliteCompareOpParser {
- public:
-  TfliteNotEqualParser() : TfliteCompareOpParser() {}
-};
-
-class TfliteGreaterParser : public TfliteCompareOpParser {
- public:
-  TfliteGreaterParser() : TfliteCompareOpParser() {}
-};
-
-class TfliteGreaterEqualParser : public TfliteCompareOpParser {
- public:
-  TfliteGreaterEqualParser() : TfliteCompareOpParser() {}
-};
-
-class TfliteLessParser : public TfliteCompareOpParser {
- public:
-  TfliteLessParser() : TfliteCompareOpParser() {}
-};
-
-class TfliteLessEqualParser : public TfliteCompareOpParser {
- public:
-  TfliteLessEqualParser() : TfliteCompareOpParser() {}
-};
 }  // namespace lite
 }  // namespace mindspore
 

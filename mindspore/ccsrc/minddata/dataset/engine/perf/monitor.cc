@@ -13,10 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-#include <vector>
-#include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/engine/perf/monitor.h"
+#include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/engine/execution_tree.h"
 
 namespace mindspore {
@@ -37,7 +35,7 @@ Status Monitor::operator()() {
   // 2) Iterator has not received EOF
   while (!this_thread::is_interrupted() && !(tree_->isFinished())) {
     if (tree_->IsEpochEnd()) {
-      tree_->GetProfilingManager()->SaveProfilingData();
+      RETURN_IF_NOT_OK(tree_->GetProfilingManager()->SaveProfilingData());
       tree_->SetExecuting();
     }
     for (auto &node : tree_->GetProfilingManager()->GetSamplingNodes()) {
@@ -47,7 +45,8 @@ Status Monitor::operator()() {
   }
 
   // Output all profiling data upon request.
-  tree_->GetProfilingManager()->SaveProfilingData();
+  RETURN_IF_NOT_OK(tree_->GetProfilingManager()->SaveProfilingData());
+  RETURN_IF_NOT_OK(tree_->GetProfilingManager()->ChangeFileMode());
   return Status::OK();
 }
 

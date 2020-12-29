@@ -17,7 +17,7 @@
 #include <math.h>
 #include "src/kernel_registry.h"
 #include "nnacl/softmax_parameter.h"
-#include "nnacl/fp32/softmax.h"
+#include "nnacl/fp32/softmax_fp32.h"
 #include "src/runtime/kernel/arm/fp32_grad/sparse_softmax_cross_entropy_with_logits.h"
 #include "include/errorcode.h"
 #include "src/runtime/runtime_api.h"
@@ -25,7 +25,7 @@
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
-using mindspore::schema::PrimitiveType_SoftmaxCrossEntropy;
+using mindspore::schema::PrimitiveType_SparseSoftmaxCrossEntropy;
 
 namespace mindspore::kernel {
 
@@ -47,14 +47,13 @@ int SparseSoftmaxCrossEntropyWithLogitsCPUKernel::ForwardPostExecute(const int *
       total_loss -= logf(losses[i * param->number_of_classes_ + label]);
     }
   }
-  output[0] = total_loss / param->batch_size_;
+  output[0] = total_loss / static_cast<float>(param->batch_size_);
   return RET_OK;
 }
 
-int SparseSoftmaxCrossEntropyWithLogitsCPUKernel::GradPostExecute(const int *labels, const float *losses, float *grads,
-                                                                  float *output) const {
+int SparseSoftmaxCrossEntropyWithLogitsCPUKernel::GradPostExecute(const int *labels, const float *losses,
+                                                                  float *grads) const {
   size_t row_start = 0;
-  float total_loss = 0;
   for (int i = 0; i < param->batch_size_; ++i) {
     if (labels[i] < 0) {
       MS_LOG(ERROR) << "label value must >= 0";
@@ -65,43 +64,38 @@ int SparseSoftmaxCrossEntropyWithLogitsCPUKernel::GradPostExecute(const int *lab
       MS_LOG(ERROR) << "error label input!";
       return RET_ERROR;
     } else {
-      total_loss -= logf(losses[i * param->number_of_classes_ + label]);
       for (size_t j = 0; j < param->number_of_classes_; ++j) {
         size_t index = row_start + j;
         if (j == label) {
-          grads[index] = (losses[index] - 1) / param->batch_size_;
+          grads[index] = (losses[index] - 1) / static_cast<float>(param->batch_size_);
         } else {
-          grads[index] = losses[index] / param->batch_size_;
+          grads[index] = losses[index] / static_cast<float>(param->batch_size_);
         }
       }
     }
     row_start += param->number_of_classes_;
   }
-  output[0] = total_loss / param->batch_size_;
   return RET_OK;
 }
 
 int SparseSoftmaxCrossEntropyWithLogitsCPUKernel::Execute(int task_id) {
-  auto ins = reinterpret_cast<float *>(in_tensors_.at(0)->MutableData());
-  auto labels = reinterpret_cast<int *>(in_tensors_.at(1)->MutableData());
-  float *out = reinterpret_cast<float *>(out_tensors_.at(0)->MutableData());
-  float *grads = NULL;
-  if (is_train() && out_tensors_.size() > 1) {
-    grads = reinterpret_cast<float *>(out_tensors_.at(1)->MutableData());
-  }
+  auto sce_param = reinterpret_cast<SoftmaxCrossEntropyParameter *>(op_parameter_);
+  auto ins = reinterpret_cast<float *>(in_tensors_.at(0)->data_c());
+  auto labels = reinterpret_cast<int *>(in_tensors_.at(1)->data_c());
+  float *out = reinterpret_cast<float *>(out_tensors_.at(0)->data_c());
   size_t data_size = in_tensors_.at(0)->ElementsNum();
   MS_ASSERT(out != nullptr);
   MS_ASSERT(labels != nullptr);
   MS_ASSERT(ins != nullptr);
 
-  float *losses_ = static_cast<float *>(GetWorkspace());
+  float *losses_ = static_cast<float *>(workspace());
   float *sum_data_ = losses_ + data_size;
   std::fill(losses_, losses_ + data_size, 0.f);
   std::fill(sum_data_, sum_data_ + sm_params_.input_shape_[0], 0.f);
   Softmax(ins, losses_, sum_data_, &sm_params_);
-  if (is_train()) {
-    GradPostExecute(labels, losses_, grads, out);
-  } else if (out != nullptr) {
+  if (sce_param->is_grad) {
+    GradPostExecute(labels, losses_, out);
+  } else {
     ForwardPostExecute(labels, losses_, out);
   }
   return RET_OK;
@@ -118,11 +112,6 @@ int SparseSoftmaxCrossEntropyRun(void *cdata, int task_id) {
 }
 
 int SparseSoftmaxCrossEntropyWithLogitsCPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "SparseSoftmaxCrossEntropyWithLogitsCPUKernel Prepare failed.";
-    return ret;
-  }
   int error_code = ParallelLaunch(this->context_->thread_pool_, SparseSoftmaxCrossEntropyRun, this, 1);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "SparseSoftmaxCrossEntropy function error error_code[" << error_code << "]";
@@ -132,26 +121,26 @@ int SparseSoftmaxCrossEntropyWithLogitsCPUKernel::Run() {
 }
 
 int SparseSoftmaxCrossEntropyWithLogitsCPUKernel::Init() {
-  auto dims = in_tensors_[0]->shape();
+  auto dims = in_tensors_.at(0)->shape();
   param->n_dim_ = 2;
-  param->number_of_classes_ = dims[1];
-  param->batch_size_ = dims[0];
-  for (unsigned int i = 0; i < dims.size(); i++) param->input_shape_[i] = dims[i];
+  param->number_of_classes_ = dims.at(1);
+  param->batch_size_ = dims.at(0);
+  for (unsigned int i = 0; i < dims.size(); i++) param->input_shape_[i] = dims.at(i);
   if (2 != this->in_tensors_.size()) {
-    MS_LOG(ERROR) << "softmax entropy loss should have two inputs";
+    MS_LOG(ERROR) << "sparse softmax entropy loss should have two inputs";
     return RET_ERROR;
   }
   auto *in0 = in_tensors_.front();
   if (in0 == nullptr) {
-    MS_LOG(ERROR) << "softmax etropy loss in0 have no data";
+    MS_LOG(ERROR) << "sparse softmax etropy loss in0 have no data";
     return RET_ERROR;
   }
   size_t data_size = in_tensors_.at(0)->ElementsNum();
-  SetWorkspaceSize((data_size + dims[0]) * sizeof(float));
+  set_workspace_size((data_size + dims.at(0)) * sizeof(float));
   sm_params_.n_dim_ = 2;
-  sm_params_.element_size_ = data_size;
+  sm_params_.element_size_ = static_cast<int>(data_size);
   sm_params_.axis_ = 1;
-  for (size_t i = 0; i < dims.size(); i++) sm_params_.input_shape_[i] = dims[i];
+  for (size_t i = 0; i < dims.size(); i++) sm_params_.input_shape_[i] = dims.at(i);
 
   return RET_OK;
 }
@@ -160,12 +149,16 @@ kernel::LiteKernel *CpuSparseSoftmaxCrossEntropyFp32KernelCreator(
   const std::vector<lite::Tensor *> &inputs, const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
   const lite::InnerContext *ctx, const kernel::KernelKey &desc, const mindspore::lite::PrimitiveC *primitive) {
   MS_ASSERT(opParameter != nullptr);
-  MS_ASSERT(desc.type == schema::PrimitiveType_SoftmaxCrossEntropy);
+  MS_ASSERT(desc.type == schema::PrimitiveType_SparseSoftmaxCrossEntropy);
   auto *kernel =
     new (std::nothrow) SparseSoftmaxCrossEntropyWithLogitsCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  MS_ASSERT(kernel != nullptr);
+  if (kernel == nullptr) {
+    MS_LOG(ERROR) << "new SparseSoftmaxCrossEntropyWithLogitsCPUKernel failed!";
+    free(opParameter);
+    return nullptr;
+  }
   auto ret = kernel->Init();
-  if (RET_OK != ret) {
+  if (ret != RET_OK) {
     MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
                   << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
     delete kernel;
@@ -173,6 +166,6 @@ kernel::LiteKernel *CpuSparseSoftmaxCrossEntropyFp32KernelCreator(
   }
   return kernel;
 }
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_SoftmaxCrossEntropy, CpuSparseSoftmaxCrossEntropyFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_SparseSoftmaxCrossEntropy,
+           CpuSparseSoftmaxCrossEntropyFp32KernelCreator)
 }  // namespace mindspore::kernel

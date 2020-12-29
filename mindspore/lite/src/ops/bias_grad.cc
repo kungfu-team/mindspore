@@ -16,12 +16,13 @@
 
 #include "src/ops/bias_grad.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
-std::vector<int> BiasGrad::GetAxis() const { return this->primitive_->value.AsBiasGrad()->axis; }
-
-void BiasGrad::SetAxis(const std::vector<int> &axis) { this->primitive_->value.AsBiasGrad()->axis = axis; }
 int BiasGrad::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
   if (this->primitive_ == nullptr) {
     this->primitive_ = new (std::nothrow) schema::PrimitiveT;
@@ -41,12 +42,13 @@ int BiasGrad::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &i
       MS_LOG(ERROR) << "new primitiveT value failed";
       return RET_ERROR;
     }
-    attr->axis = {0};  // GetValue<std::vector<int>>(prim.GetAttr("axis"));
+
     this->primitive_->value.value = attr;
     if (this->primitive_->value.value == nullptr) {
       MS_LOG(ERROR) << "primitive value is nullptr";
       return RET_ERROR;
     }
+    this->primitive_->value.value = attr;
   }
   return RET_OK;
 }
@@ -59,29 +61,25 @@ int BiasGrad::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffer
     MS_LOG(ERROR) << "value_as_BiasGrad return nullptr";
     return RET_ERROR;
   }
-  std::vector<int32_t> axis;
-  if (attr->axis() != nullptr) {
-    for (int i = 0; i < static_cast<int>(attr->axis()->size()); i++) {
-      axis.push_back(attr->axis()->data()[i]);
-    }
-  }
-  auto val_offset = schema::CreateBiasGradDirect(*fbb, &axis);
+
+  auto val_offset = schema::CreateBiasGrad(*fbb);
   auto prim_offset = schema::CreatePrimitive(*fbb, schema::PrimitiveType_BiasGrad, val_offset.o);
   fbb->Finish(prim_offset);
   return RET_OK;
 }
-std::vector<int> BiasGrad::GetAxis() const {
-  auto fb_vector = this->primitive_->value_as_BiasGrad()->axis();
-  return std::vector<int>(fb_vector->begin(), fb_vector->end());
+
+PrimitiveC *BiasGradCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<BiasGrad>(primitive);
 }
+Registry BiasGradRegistry(schema::PrimitiveType_BiasGrad, BiasGradCreator);
 #endif
 
 int BiasGrad::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outputs) {
-  if (1 != inputs.size()) {
+  if (inputs.size() != 1) {
     MS_LOG(ERROR) << "BiasGrad should have one input";
     return RET_ERROR;
   }
-  if (1 != outputs.size()) {
+  if (outputs.size() != 1) {
     MS_LOG(ERROR) << "BiasGrad should have one output";
     return RET_ERROR;
   }
@@ -97,7 +95,7 @@ int BiasGrad::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> out
   }
   out->set_shape(inshape);
   out->set_data_type(in0->data_type());
-  out->SetFormat(in0->GetFormat());
+  out->set_format(in0->format());
 
   return RET_OK;
 }

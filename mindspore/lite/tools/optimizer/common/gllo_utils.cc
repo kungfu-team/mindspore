@@ -26,22 +26,6 @@ namespace mindspore {
 namespace opt {
 namespace {
 constexpr auto kAnfPrimitiveIndex = 0;
-bool CheckPrimitiveType(const AnfNodePtr &node, const PrimitivePtr &primitive_type) {
-  if (node == nullptr) {
-    lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(lite::RET_NULL_PTR);
-    return false;
-  }
-  if (!node->isa<CNode>()) {
-    return false;
-  }
-  auto cnode = node->cast<CNodePtr>();
-  if (cnode == nullptr) {
-    lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(lite::RET_NULL_PTR);
-    return false;
-  }
-  return IsPrimitive(cnode->input(kAnfPrimitiveIndex), primitive_type);
-}
-
 bool IsRealKernel(const AnfNodePtr &node) {
   if (node == nullptr) {
     lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(lite::RET_NULL_PTR);
@@ -112,6 +96,10 @@ VarNodePtr CreateVarNodeWithSexp(const BaseRef &sexp, const BaseRef &graph) {
 
 AnfNodePtr HandleSexpVector(const BaseRef &sexp, const BaseRef &graph, PrimitiveVarMap *primitive_vars,
                             bool multigraph) {
+  if (primitive_vars == nullptr) {
+    lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(lite::RET_NULL_PTR);
+    return nullptr;
+  }
   MS_LOG(DEBUG) << "HandleSexpVector sexp: " + sexp.ToString() + ", graph " + graph.ToString();
   std::vector<AnfNodePtr> input_nodes;
   const auto &tuple = utils::cast<VectorRef>(sexp);
@@ -131,6 +119,22 @@ AnfNodePtr HandleSexpVector(const BaseRef &sexp, const BaseRef &graph, Primitive
   return CreateCNodeWithGraph(input_nodes, graph);
 }
 }  // namespace
+
+bool CheckPrimitiveType(const AnfNodePtr &node, const PrimitivePtr &primitive_type) {
+  if (node == nullptr) {
+    lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(lite::RET_NULL_PTR);
+    return false;
+  }
+  if (!node->isa<CNode>()) {
+    return false;
+  }
+  auto cnode = node->cast<CNodePtr>();
+  if (cnode == nullptr) {
+    lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(lite::RET_NULL_PTR);
+    return false;
+  }
+  return IsPrimitive(cnode->input(kAnfPrimitiveIndex), primitive_type);
+}
 
 bool AnfEqual(const BaseRef &a, const BaseRef &b) {
   if (utils::isa<AnfNodePtr>(a) && utils::isa<AnfNodePtr>(b)) {
@@ -318,7 +322,7 @@ int CheckIfVarIsNull(const VarPtr &var) {
 
 int CheckIfNodeIsParam(const AnfNodePtr &node) {
   if (node != nullptr && !utils::isa<ParameterPtr>(node)) {
-    MS_LOG(ERROR) << "The Node is not param.";
+    MS_LOG(DEBUG) << "The Node is not param.";
     lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(lite::RET_INVALID_OP_ATTR);
     return lite::RET_INVALID_OP_ATTR;
   }
@@ -348,13 +352,16 @@ ParameterPtr AddNewBiasNode(float *bias_data, const FuncGraphPtr &func_graph, in
   auto bias_parameter = func_graph->add_parameter();
   MS_ASSERT(bias_parameter != nullptr);
   std::vector<int> shape = {kernel_num};
-  auto abstract_tensor = std::make_shared<abstract::AbstractTensor>(TypeIdToType(weight_tensor->tensor_type()), shape);
+  std::vector<int64_t> shape_vector;
+  (void)std::transform(shape.begin(), shape.end(), std::back_inserter(shape_vector),
+                       [](const int32_t &value) { return static_cast<int64_t>(value); });
+  auto abstract_tensor =
+    std::make_shared<abstract::AbstractTensor>(TypeIdToType(weight_tensor->tensor_type()), shape_vector);
   bias_parameter->set_abstract(abstract_tensor);
 
   ParamValueLitePtr param_value = std::make_shared<ParamValueLite>();
   MS_ASSERT(param_value != nullptr);
-  param_value->set_tensor_addr(bias_data);
-  param_value->set_tensor_size(kernel_num * sizeof(float) / sizeof(uint8_t));
+  param_value->SetTensorData(bias_data, kernel_num * sizeof(float) / sizeof(uint8_t));
   param_value->set_format(weight_tensor->format());
   param_value->set_tensor_type(weight_tensor->tensor_type());
   param_value->set_tensor_shape(shape);
@@ -370,8 +377,7 @@ schema::PrimitiveType GetCNodeType(const BaseRef &n) {
   } else if (utils::isa<ValueNodePtr>(n)) {
     value_node = utils::cast<ValueNodePtr>(n);
   } else {
-    MS_LOG(ERROR) << "only value node or cnode has type";
-    lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(lite::RET_INVALID_OP_ATTR);
+    MS_LOG(INFO) << "only value node or cnode has type";
     return schema::PrimitiveType_NONE;
   }
   if (value_node == nullptr) {
@@ -395,7 +401,14 @@ schema::PrimitiveType GetCNodeType(const BaseRef &n) {
 ParamValueLitePtr GetLiteParamValue(const AnfNodePtr &node) {
   MS_ASSERT(node != nullptr);
   if (!utils::isa<ParameterPtr>(node)) {
-    MS_LOG(ERROR) << "get lite param value node must paramter";
+    if (utils::isa<ValueNodePtr>(node)) {
+      auto valueNode = node->cast<ValueNodePtr>();
+      auto value = std::dynamic_pointer_cast<ParamValueLite>(valueNode->value());
+      if (value != nullptr) {
+        return value;
+      }
+    }
+    MS_LOG(DEBUG) << "get lite param value node neither parameternode or valuenode";
     return nullptr;
   }
   auto param = node->cast<ParameterPtr>();
@@ -403,6 +416,55 @@ ParamValueLitePtr GetLiteParamValue(const AnfNodePtr &node) {
   auto param_value = std::dynamic_pointer_cast<ParamValueLite>(param->default_param());
   return param_value;
 }
+
+AbstractBasePtr GetCNodeInputAbstract(const CNodePtr &cnode, size_t index) {
+  if (cnode == nullptr) {
+    MS_LOG(ERROR) << "CNodePtr is nullptr";
+    return nullptr;
+  }
+  auto inputs = cnode->inputs();
+  if (!(0 < index && index < inputs.size())) {
+    return nullptr;
+  }
+  auto input = inputs[index];
+  if (input == nullptr) {
+    MS_LOG(ERROR) << "CNode input is nullptr";
+    return nullptr;
+  }
+
+  AbstractBasePtr abstract = nullptr;
+  if (utils::isa<ParameterPtr>(input)) {
+    auto parameter = input->cast<ParameterPtr>();
+    abstract = parameter->abstract();
+  } else if (utils::isa<CNodePtr>(input)) {
+    auto input_cnode = input->cast<CNodePtr>();
+    if (GetCNodeType(input_cnode) == schema::PrimitiveType_TupleGetItem) {
+      auto tuple_inputs = input_cnode->inputs();
+      MS_ASSERT(tuple_inputs.size() == kTupleGetItemInputSize);
+      auto get_item_input_cnode = tuple_inputs.at(1);
+      MS_ASSERT(get_item_input_cnode != nullptr);
+      auto idx = GetTupleGetItemOutIndex(input_cnode);
+      if (!utils::isa<abstract::AbstractTuplePtr>(get_item_input_cnode->abstract())) {
+        MS_LOG(ERROR) << "TupleGetItem's abstract is not AbstractTuple";
+        return nullptr;
+      }
+      auto abstract_tuple = utils::cast<abstract::AbstractTuplePtr>(get_item_input_cnode->abstract());
+      auto abstract_list = abstract_tuple->elements();
+      if (abstract_list.size() <= idx) {
+        MS_LOG(ERROR) << "AbstractTuple's size is smaller than expect";
+        return nullptr;
+      }
+      abstract = abstract_list[idx];
+    } else {
+      abstract = input_cnode->abstract();
+    }
+  } else {
+    MS_LOG(ERROR) << "unsupported input node type";
+    return nullptr;
+  }
+  return abstract;
+}
+
 bool IsParamNode(const BaseRef &n) {
   if (!utils::isa<ParameterPtr>(n)) {
     return false;
@@ -431,6 +493,14 @@ bool IsPoolingNode(const BaseRef &n) {
   return false;
 }
 
+bool IsActivationNode(const BaseRef &n) {
+  if (utils::isa<CNodePtr>(n) || utils::isa<ValueNodePtr>(n)) {
+    auto type = opt::GetCNodeType(n);
+    return type == schema::PrimitiveType_Activation;
+  }
+  return false;
+}
+
 bool IsQuantNode(const BaseRef &n) {
   if (utils::isa<CNodePtr>(n) || utils::isa<ValueNodePtr>(n)) {
     auto type = opt::GetCNodeType(n);
@@ -440,10 +510,14 @@ bool IsQuantNode(const BaseRef &n) {
 }
 
 bool CheckIsAllInputsParam(const AnfNodePtr &node) {
+  if (node == nullptr) {
+    lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(lite::RET_NULL_PTR);
+    return 0;
+  }
   if (utils::isa<CNode>(node)) {
     auto cnode = node->cast<CNodePtr>();
     for (size_t i = 1; i < cnode->inputs().size(); i++) {
-      if (!utils::isa<Parameter>(cnode->input(i))) {
+      if (!utils::isa<Parameter>(cnode->input(i)) && !utils::isa<ValueNodePtr>(cnode->input(i))) {
         return false;
       }
     }
@@ -478,7 +552,15 @@ size_t GetOutputTensorNum(const AnfNodePtr &node) {
 }
 
 bool IsMultiOutputTensors(const FuncGraphPtr &graph, const AnfNodePtr &node) {
+  if (node == nullptr || graph == nullptr) {
+    lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(lite::RET_NULL_PTR);
+    return 0;
+  }
   auto output_node_list = GetRealNodeUsedList(graph, node);
+  if (output_node_list == nullptr) {
+    MS_LOG(ERROR) << "output node list is nullptr";
+    return false;
+  }
   if (output_node_list->size() != 1) {
     MS_LOG(DEBUG) << "fusion node has multi output nodes";
     return true;
@@ -489,7 +571,7 @@ bool IsMultiOutputTensors(const FuncGraphPtr &graph, const AnfNodePtr &node) {
 std::shared_ptr<std::vector<std::pair<AnfNodePtr, int>>> GetRealNodeUsedList(const FuncGraphPtr &graph,
                                                                              const AnfNodePtr &node) {
   auto output_node_list = std::make_shared<std::vector<std::pair<AnfNodePtr, int>>>();
-  if (graph == nullptr) {
+  if (graph == nullptr || node == nullptr) {
     lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(lite::RET_NULL_PTR);
     return nullptr;
   }
@@ -501,7 +583,7 @@ std::shared_ptr<std::vector<std::pair<AnfNodePtr, int>>> GetRealNodeUsedList(con
   auto iter = manager->node_users().find(node);
   if (iter == manager->node_users().end()) {
     MS_LOG(ERROR) << "node has no output in manager";
-    lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(lite::RET_NOT_FIND_OP);
+    lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(lite::RET_ERROR);
     return nullptr;
   }
   auto output_info_list = iter->second;
@@ -518,7 +600,7 @@ size_t GetTupleGetItemOutIndex(const CNodePtr &tuple_get_item) {
   MS_ASSERT(output_index_value_node != nullptr);
   auto value_node = output_index_value_node->cast<ValueNodePtr>();
   MS_ASSERT(value_node != nullptr);
-  return IntToSize(GetValue<int>(value_node->value()));
+  return IntToSize(lite::CastToInt(value_node->value()).front());
 }
 std::shared_ptr<std::vector<std::pair<AnfNodePtr, int>>> GetRealNodeUsedListByOutputIdx(const FuncGraphPtr &graph,
                                                                                         const AnfNodePtr &node,
@@ -566,7 +648,7 @@ STATUS GetFilterDim(const std::vector<int32_t> &oriDims, kTransFilterType type, 
     *filterK = oriDims.at(lite::CKHW_K);
     *filterH = oriDims.at(lite::CKHW_H);
     *filterW = oriDims.at(lite::CKHW_W);
-  } else if (type == kHWCK2KCHW || type == kHWCK2CKHW) {
+  } else if (type == kHWCK2KCHW || type == kHWCK2CKHW || type == kHWCK2KHWC) {
     *filterH = oriDims.at(lite::HWCK_H);
     *filterW = oriDims.at(lite::HWCK_W);
     *filterC = oriDims.at(lite::HWCK_C);
@@ -619,7 +701,7 @@ STATUS SetFilterDim(const ParamValueLitePtr &tensor, kTransFilterType type, int3
   }
   return RET_OK;
 }
-template<typename T>
+template <typename T>
 static STATUS TransFilterData(const ParamValueLitePtr &tensor, kTransFilterType type, int32_t filterK, int32_t filterC,
                               int32_t filterH, int32_t filterW) {
   MS_ASSERT(tensor != nullptr);
@@ -628,7 +710,7 @@ static STATUS TransFilterData(const ParamValueLitePtr &tensor, kTransFilterType 
     MS_LOG(ERROR) << "Dim size invalid";
     return RET_ERROR;
   }
-  std::unique_ptr<T[]> buf(new(std::nothrow) T[count]);
+  std::unique_ptr<T[]> buf(new (std::nothrow) T[count]);
   if (buf == nullptr) {
     MS_LOG(ERROR) << "new buf failed";
     return RET_ERROR;
@@ -653,18 +735,17 @@ static STATUS TransFilterData(const ParamValueLitePtr &tensor, kTransFilterType 
               p1Buff = weightData + ((c * filterH * filterW * filterK) + (h * filterW * filterK) + (w * filterK) + (k));
               if (type == kCHWK2HWCK) {
                 p2Buff =
-                    buf.get() + ((h * filterW * filterC * filterK) + (w * filterC * filterK) + (c * filterK) + (k));
+                  buf.get() + ((h * filterW * filterC * filterK) + (w * filterC * filterK) + (c * filterK) + (k));
               } else if (type == kCHWK2KHWC) {
                 p2Buff =
-                    buf.get() + ((k * filterH * filterW * filterC) + (h * filterW * filterC) + (w * filterC) + (c));
+                  buf.get() + ((k * filterH * filterW * filterC) + (h * filterW * filterC) + (w * filterC) + (c));
               }
               *p2Buff = *p1Buff;
             }
           }
         }
       }
-    }
-      break;
+    } break;
     case kKHWC2HWCK: {
       for (int k = 0; k < filterK; ++k) {
         for (int h = 0; h < filterH; ++h) {
@@ -677,8 +758,7 @@ static STATUS TransFilterData(const ParamValueLitePtr &tensor, kTransFilterType 
           }
         }
       }
-    }
-      break;
+    } break;
     case kKCHW2HWCK:
     case kKCHW2CKHW:
     case kKCHW2KHWC:
@@ -690,24 +770,23 @@ static STATUS TransFilterData(const ParamValueLitePtr &tensor, kTransFilterType 
               p1Buff = weightData + ((k * filterC * filterH * filterW) + (c * filterH * filterW) + (h * filterW) + (w));
               if (type == kKCHW2HWCK) {
                 p2Buff =
-                    buf.get() + ((h * filterW * filterC * filterK) + (w * filterC * filterK) + (c * filterK) + (k));
+                  buf.get() + ((h * filterW * filterC * filterK) + (w * filterC * filterK) + (c * filterK) + (k));
               } else if (type == kKCHW2KHWC) {
                 p2Buff =
-                    buf.get() + ((k * filterH * filterW * filterC) + (h * filterW * filterC) + (w * filterC) + (c));
+                  buf.get() + ((k * filterH * filterW * filterC) + (h * filterW * filterC) + (w * filterC) + (c));
               } else if (type == kKCHW2CKHW) {
                 p2Buff =
-                    buf.get() + ((c * filterK * filterH * filterW) + (k * filterH * filterW) + (h * filterW) + (w));
+                  buf.get() + ((c * filterK * filterH * filterW) + (k * filterH * filterW) + (h * filterW) + (w));
               } else {
                 p2Buff =
-                    buf.get() + ((h * filterW * filterK * filterC) + (w * filterK * filterC) + (k * filterC) + (c));
+                  buf.get() + ((h * filterW * filterK * filterC) + (w * filterK * filterC) + (k * filterC) + (c));
               }
               *p2Buff = *p1Buff;
             }
           }
         }
       }
-    }
-      break;
+    } break;
     case kCKHW2HWCK:
     case kCKHW2KHWC:
     case kCKHW2HWKC: {
@@ -718,21 +797,20 @@ static STATUS TransFilterData(const ParamValueLitePtr &tensor, kTransFilterType 
               p1Buff = weightData + ((c * filterK * filterH * filterW) + (k * filterH * filterW) + (h * filterW) + (w));
               if (type == kCKHW2HWCK) {
                 p2Buff =
-                    buf.get() + ((h * filterW * filterC * filterK) + (w * filterC * filterK) + (c * filterK) + (k));
+                  buf.get() + ((h * filterW * filterC * filterK) + (w * filterC * filterK) + (c * filterK) + (k));
               } else if (type == kCKHW2KHWC) {
                 p2Buff =
-                    buf.get() + ((k * filterH * filterW * filterC) + (h * filterW * filterC) + (w * filterC) + (c));
+                  buf.get() + ((k * filterH * filterW * filterC) + (h * filterW * filterC) + (w * filterC) + (c));
               } else {
                 p2Buff =
-                    buf.get() + ((h * filterW * filterK * filterC) + (w * filterK * filterC) + (k * filterC) + (c));
+                  buf.get() + ((h * filterW * filterK * filterC) + (w * filterK * filterC) + (k * filterC) + (c));
               }
               *p2Buff = *p1Buff;
             }
           }
         }
       }
-    }
-      break;
+    } break;
     case kHWCK2KCHW:
     case kHWCK2CKHW: {
       for (int h = 0; h < filterH; ++h) {
@@ -742,18 +820,17 @@ static STATUS TransFilterData(const ParamValueLitePtr &tensor, kTransFilterType 
               p1Buff = weightData + ((h * filterW * filterC * filterK) + (w * filterC * filterK) + (c * filterK) + (k));
               if (type == kHWCK2KCHW) {
                 p2Buff =
-                    buf.get() + ((k * filterC * filterH * filterW) + (c * filterH * filterW) + (h * filterW) + (w));
+                  buf.get() + ((k * filterC * filterH * filterW) + (c * filterH * filterW) + (h * filterW) + (w));
               } else {
                 p2Buff =
-                    buf.get() + ((c * filterK * filterH * filterW) + (k * filterH * filterW) + (h * filterW) + (w));
+                  buf.get() + ((c * filterK * filterH * filterW) + (k * filterH * filterW) + (h * filterW) + (w));
               }
               *p2Buff = *p1Buff;
             }
           }
         }
       }
-    }
-      break;
+    } break;
     case kHWKC2KCHW:
     case kHWKC2CKHW: {
       for (int h = 0; h < filterH; ++h) {
@@ -763,18 +840,17 @@ static STATUS TransFilterData(const ParamValueLitePtr &tensor, kTransFilterType 
               p1Buff = weightData + ((h * filterW * filterC * filterK) + (w * filterC * filterK) + (k * filterC) + (c));
               if (type == kHWKC2KCHW) {
                 p2Buff =
-                    buf.get() + ((k * filterC * filterH * filterW) + (c * filterH * filterW) + (h * filterW) + (w));
+                  buf.get() + ((k * filterC * filterH * filterW) + (c * filterH * filterW) + (h * filterW) + (w));
               } else {
                 p2Buff =
-                    buf.get() + ((c * filterK * filterH * filterW) + (k * filterH * filterW) + (h * filterW) + (w));
+                  buf.get() + ((c * filterK * filterH * filterW) + (k * filterH * filterW) + (h * filterW) + (w));
               }
               *p2Buff = *p1Buff;
             }
           }
         }
       }
-    }
-      break;
+    } break;
     case kNHWC2HWCK:
     case kNHWC2KCHW:
     case kNHWC2CKHW: {
@@ -785,21 +861,20 @@ static STATUS TransFilterData(const ParamValueLitePtr &tensor, kTransFilterType 
               p1Buff = weightData + ((h * filterW * filterC * filterK) + (w * filterC * filterK) + (k * filterC) + (c));
               if (type == kNHWC2HWCK) {
                 p2Buff =
-                    buf.get() + ((h * filterW * filterC * filterK) + (w * filterC * filterK) + (c * filterK) + (k));
+                  buf.get() + ((h * filterW * filterC * filterK) + (w * filterC * filterK) + (c * filterK) + (k));
               } else if (type == kNHWC2CKHW) {
                 p2Buff =
-                    buf.get() + ((c * filterK * filterH * filterW) + (k * filterH * filterW) + (h * filterW) + (w));
+                  buf.get() + ((c * filterK * filterH * filterW) + (k * filterH * filterW) + (h * filterW) + (w));
               } else {
                 p2Buff =
-                    buf.get() + ((k * filterC * filterH * filterW) + (c * filterH * filterW) + (h * filterW) + (w));
+                  buf.get() + ((k * filterC * filterH * filterW) + (c * filterH * filterW) + (h * filterW) + (w));
               }
               *p2Buff = *p1Buff;
             }
           }
         }
       }
-    }
-      break;
+    } break;
     case kKHWC2CHWK: {
       for (int k = 0; k < filterK; ++k) {
         for (int h = 0; h < filterH; ++h) {
@@ -812,8 +887,7 @@ static STATUS TransFilterData(const ParamValueLitePtr &tensor, kTransFilterType 
           }
         }
       }
-    }
-      break;
+    } break;
     default: {
       MS_LOG(ERROR) << "Unsupported transFilterType: " << type;
       return RET_ERROR;
@@ -828,7 +902,7 @@ static STATUS TransFilterData(const ParamValueLitePtr &tensor, kTransFilterType 
   return RET_OK;
 }
 
-template<typename T>
+template <typename T>
 static STATUS TransFilterFormat(const ParamValueLitePtr &tensor, kTransFilterType type) {
   MS_ASSERT(tensor != nullptr);
   auto oriDims = tensor->tensor_shape();
@@ -882,6 +956,8 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kKCHW2KHWC);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kKCHW2KHWC);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kKCHW2KHWC);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return RET_ERROR;
@@ -894,6 +970,8 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kCKHW2KHWC);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kCKHW2KHWC);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kCKHW2KHWC);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return RET_ERROR;
@@ -906,18 +984,34 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kCHWK2KHWC);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kCHWK2KHWC);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kCHWK2KHWC);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return RET_ERROR;
           }
           break;
-        case schema::Format::Format_KHWC:return RET_OK;
-        default:MS_LOG(ERROR) << "Unsupported transform from " << src_format << " to "
-                              << EnumNameFormat(dst_format);
+        case schema::Format::Format_HWCK:
+          if (data_type == kNumberTypeFloat32) {
+            status = TransFilterFormat<float>(tensor, kHWCK2KHWC);
+          } else if (data_type == kNumberTypeUInt8) {
+            status = TransFilterFormat<uint8_t>(tensor, kHWCK2KHWC);
+          } else if (data_type == kNumberTypeInt8) {
+            status = TransFilterFormat<int8_t>(tensor, kHWCK2KHWC);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kHWCK2KHWC);
+          } else {
+            MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
+            return RET_ERROR;
+          }
+          break;
+        case schema::Format::Format_KHWC:
+          return RET_OK;
+        default:
+          MS_LOG(ERROR) << "Unsupported transform from " << src_format << " to " << EnumNameFormat(dst_format);
           return RET_ERROR;
       }
-    }
-      break;
+    } break;
     case schema::Format::Format_HWCK: {
       switch (src_format) {
         case schema::Format::Format_KCHW:
@@ -927,6 +1021,8 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kKCHW2HWCK);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kKCHW2HWCK);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kKCHW2HWCK);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return RET_ERROR;
@@ -939,6 +1035,8 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kKHWC2HWCK);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kKHWC2HWCK);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kKHWC2HWCK);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return RET_ERROR;
@@ -951,6 +1049,8 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kCKHW2HWCK);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kCKHW2HWCK);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kCKHW2HWCK);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return RET_ERROR;
@@ -963,21 +1063,24 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kCHWK2HWCK);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kCHWK2HWCK);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kCHWK2HWCK);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return lite::RET_ERROR;
           }
           break;
-        case schema::Format::Format_HWCK:return RET_OK;
-        default:MS_LOG(ERROR) << "Unsupported transform from " << src_format << " to "
-                              << EnumNameFormat(dst_format);
+        case schema::Format::Format_HWCK:
+          return RET_OK;
+        default:
+          MS_LOG(ERROR) << "Unsupported transform from " << src_format << " to " << EnumNameFormat(dst_format);
           return RET_ERROR;
       }
-    }
-      break;
+    } break;
     case schema::Format::Format_KCHW: {
       switch (src_format) {
-        case schema::Format::Format_KCHW:return RET_OK;
+        case schema::Format::Format_KCHW:
+          return RET_OK;
         case schema::Format::Format_HWCK:
           if (data_type == kNumberTypeFloat32) {
             status = TransFilterFormat<float>(tensor, kHWCK2KCHW);
@@ -985,6 +1088,8 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kHWCK2KCHW);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kHWCK2KCHW);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kHWCK2KCHW);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return RET_ERROR;
@@ -997,6 +1102,8 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kHWKC2KCHW);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kHWKC2KCHW);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kHWCK2KCHW);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return RET_ERROR;
@@ -1009,6 +1116,8 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kKHWC2KCHW);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kKHWC2KCHW);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kKHWC2KCHW);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return RET_ERROR;
@@ -1021,6 +1130,8 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kCKHW2KCHW);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kCKHW2KCHW);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kCKHW2KCHW);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return RET_ERROR;
@@ -1033,17 +1144,18 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kCHWK2KCHW);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kCHWK2KCHW);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kCKHW2KCHW);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return RET_ERROR;
           }
           break;
-        default:MS_LOG(ERROR) << "Unsupported transform from " << src_format << " to "
-                              << EnumNameFormat(dst_format);
+        default:
+          MS_LOG(ERROR) << "Unsupported transform from " << src_format << " to " << EnumNameFormat(dst_format);
           return RET_ERROR;
       }
-    }
-      break;
+    } break;
     case schema::Format::Format_CKHW: {
       switch (src_format) {
         case schema::Format::Format_HWCK:
@@ -1053,6 +1165,8 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kHWCK2CKHW);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kHWCK2CKHW);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kHWCK2CKHW);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return RET_ERROR;
@@ -1065,6 +1179,8 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kHWKC2CKHW);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kHWKC2CKHW);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kHWKC2CKHW);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return RET_ERROR;
@@ -1077,20 +1193,45 @@ STATUS TransFilterFormat(const ParamValueLitePtr &tensor, schema::Format dst_for
             status = TransFilterFormat<uint8_t>(tensor, kKCHW2CKHW);
           } else if (data_type == kNumberTypeInt8) {
             status = TransFilterFormat<int8_t>(tensor, kKCHW2CKHW);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kKCHW2CKHW);
           } else {
             MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
             return RET_ERROR;
           }
           break;
-        case schema::Format::Format_CKHW:return RET_OK;
-        default:MS_LOG(ERROR) << "Unsupported transform from " << src_format << " to "
-                              << EnumNameFormat(dst_format);
+        case schema::Format::Format_CKHW:
+          return RET_OK;
+        default:
+          MS_LOG(ERROR) << "Unsupported transform from " << src_format << " to " << EnumNameFormat(dst_format);
           return RET_ERROR;
       }
-    }
-      break;
-    default:MS_LOG(ERROR) << "Unsupported transform from " << src_format << " to "
-                          << EnumNameFormat(dst_format);
+    } break;
+    case schema::Format::Format_CHWK: {
+      switch (src_format) {
+        case schema::Format::Format_KHWC:
+          if (data_type == kNumberTypeFloat32) {
+            status = TransFilterFormat<float>(tensor, kKHWC2CHWK);
+          } else if (data_type == kNumberTypeUInt8) {
+            status = TransFilterFormat<uint8_t>(tensor, kKHWC2CHWK);
+          } else if (data_type == kNumberTypeInt8) {
+            status = TransFilterFormat<int8_t>(tensor, kKHWC2CHWK);
+          } else if (data_type == kNumberTypeFloat16) {
+            status = TransFilterFormat<float16>(tensor, kKHWC2CHWK);
+          } else {
+            MS_LOG(ERROR) << "Unsupported data_type: " << data_type;
+            return RET_ERROR;
+          }
+          break;
+        case schema::Format::Format_CHWK:
+          return RET_OK;
+        default:
+          MS_LOG(ERROR) << "Unsupported transform from " << src_format << " to " << EnumNameFormat(dst_format);
+          return RET_ERROR;
+      }
+    } break;
+    default:
+      MS_LOG(ERROR) << "Unsupported transform from " << src_format << " to " << EnumNameFormat(dst_format);
       return RET_ERROR;
   }
   if (status != RET_OK) {

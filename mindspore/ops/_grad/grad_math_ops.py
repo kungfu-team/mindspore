@@ -22,7 +22,6 @@ from mindspore.ops import _selected_grad_ops as SG
 from .. import functional as F
 from .. import operations as P
 from ..operations import _grad_ops as G
-from ..operations import _inner_ops as inner
 from ..composite.multitype_ops.zeros_like_impl import zeros_like
 from ..functional import broadcast_gradient_args, reduced_shape, tuple_div
 from .grad_base import bprop_getters
@@ -939,6 +938,19 @@ def get_bprop_asin(self):
     return bprop
 
 
+@bprop_getters.register(G.AsinGrad)
+def get_bprop_asin_grad(self):
+    """Grad definition for `AsinGrad` operation."""
+    input_grad = G.AsinGrad()
+    p_pow = P.Pow()
+
+    def bprop(x, grad, out, dout):
+        d2x = dout * grad * x * p_pow((1 - x * x), - 1.5)
+        ddy = input_grad(x, dout)
+        return (d2x, ddy)
+    return bprop
+
+
 @bprop_getters.register(P.Asinh)
 def get_bprop_asinh(self):
     """Grad definition for `Asinh` operation."""
@@ -985,6 +997,21 @@ def get_bprop_acos(self):
         return (dx,)
 
     return bprop
+
+
+@bprop_getters.register(G.ACosGrad)
+def get_bprop_acos_grad(self):
+    """Grad definition for `ACosGrad` operation."""
+    input_grad = G.ACosGrad()
+    p_pow = P.Pow()
+
+    def bprop(x, grad, out, dout):
+        d2x = -dout * grad * x * p_pow((1 - x * x), - 1.5)
+        ddy = input_grad(x, dout)
+        return (d2x, ddy)
+
+    return bprop
+
 
 
 @bprop_getters.register(P.Acosh)
@@ -1188,11 +1215,11 @@ def get_bprop_inv(self):
     return bprop
 
 
-@bprop_getters.register(inner.LinSpace)
+@bprop_getters.register(P.LinSpace)
 def get_bprop_lin_space(self):
     """Grad definition for `LinSpace` operation."""
 
-    def bprop(assist, start, stop, num, out, dout):
-        return zeros_like(assist), zeros_like(start), zeros_like(stop), zeros_like(num)
+    def bprop(start, stop, num, out, dout):
+        return zeros_like(start), zeros_like(stop), zeros_like(num)
 
     return bprop

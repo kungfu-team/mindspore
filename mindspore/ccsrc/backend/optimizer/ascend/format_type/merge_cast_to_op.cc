@@ -154,7 +154,10 @@ AnfNodePtr MergeCastToNextOp(const FuncGraphPtr &graph, const CNodePtr &node, co
   if (AnfAlgo::IsGraphKernel(next_node)) {
     return nullptr;
   }
-  auto next_op_name = AnfAlgo::GetCNodeName(next_node);
+  auto next_op_name = AnfAlgo::GetCNodeName(next_cnode);
+  if (next_op_name == prim::kPrimSend->name()) {
+    return nullptr;
+  }
   std::vector<std::shared_ptr<kernel::KernelBuildInfo>> kernel_info_list;
   kernel_query->Query(next_cnode, &kernel_info_list);
 
@@ -200,7 +203,7 @@ bool GetPriorOp(const AnfNodePtr &x_node, CNodePtr *prior_op, bool *single_outpu
       MS_EXCEPTION_IF_NULL(input2);
       auto value_ptr = input2->cast<ValueNodePtr>();
       MS_EXCEPTION_IF_NULL(value_ptr);
-      *output_idx = IntToSize(GetValue<int>(value_ptr->value()));
+      *output_idx = LongToSize(GetValue<int64_t>(value_ptr->value()));
       *single_output = false;
     }
     return AnfAlgo::IsRealKernel(*prior_op);
@@ -231,6 +234,9 @@ AnfNodePtr MergeCastToPriorOp(const FuncGraphPtr &graph, const CNodePtr &cur_nod
   }
 
   std::vector<std::shared_ptr<kernel::KernelBuildInfo>> kernel_info_list;
+  if (AnfAlgo::GetCNodeName(prior_op) == prim::kPrimReceive->name()) {
+    return nullptr;
+  }
   kernel_query->Query(prior_op, &kernel_info_list);
   auto kernel_info_it = std::find_if(
     kernel_info_list.begin(), kernel_info_list.end(),

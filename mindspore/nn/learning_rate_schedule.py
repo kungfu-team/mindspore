@@ -20,7 +20,6 @@ from ..common import dtype as mstype
 from ..ops import operations as P
 from .cell import Cell
 from .._checkparam import Validator as validator
-from .._checkparam import Rel
 
 
 class LearningRateSchedule(Cell):
@@ -54,7 +53,7 @@ def _check_inputs(learning_rate, decay_rate, decay_steps, is_stair, cls_name):
 
 class ExponentialDecayLR(LearningRateSchedule):
     r"""
-    Calculate learning rate base on exponential decay function.
+    Calculates learning rate base on exponential decay function.
 
     For the i-th step, the formula of computing decayed_learning_rate[i] is:
 
@@ -88,8 +87,10 @@ class ExponentialDecayLR(LearningRateSchedule):
         >>> decay_rate = 0.9
         >>> decay_steps = 4
         >>> global_step = Tensor(2, mstype.int32)
-        >>> exponential_decay_lr = ExponentialDecayLR(learning_rate, decay_rate, decay_steps)
-        >>> exponential_decay_lr(global_step)
+        >>> exponential_decay_lr = nn.ExponentialDecayLR(learning_rate, decay_rate, decay_steps)
+        >>> result = exponential_decay_lr(global_step)
+        >>> print(result)
+        0.09486833
     """
     def __init__(self, learning_rate, decay_rate, decay_steps, is_stair=False):
         super(ExponentialDecayLR, self).__init__()
@@ -110,7 +111,7 @@ class ExponentialDecayLR(LearningRateSchedule):
 
 class NaturalExpDecayLR(LearningRateSchedule):
     r"""
-    Calculate learning rate base on natural exponential decay function.
+    Calculates learning rate base on natural exponential decay function.
 
     For the i-th step, the formula of computing decayed_learning_rate[i] is:
 
@@ -144,8 +145,10 @@ class NaturalExpDecayLR(LearningRateSchedule):
         >>> decay_rate = 0.9
         >>> decay_steps = 4
         >>> global_step = Tensor(2, mstype.int32)
-        >>> natural_exp_decay_lr = NaturalExpDecayLR(learning_rate, decay_rate, decay_steps, True)
-        >>> natural_exp_decay_lr(global_step)
+        >>> natural_exp_decay_lr = nn.NaturalExpDecayLR(learning_rate, decay_rate, decay_steps, True)
+        >>> result = natural_exp_decay_lr(global_step)
+        >>> print(result)
+        0.1
     """
     def __init__(self, learning_rate, decay_rate, decay_steps, is_stair=False):
         super(NaturalExpDecayLR, self).__init__()
@@ -167,7 +170,7 @@ class NaturalExpDecayLR(LearningRateSchedule):
 
 class InverseDecayLR(LearningRateSchedule):
     r"""
-    Calculate learning rate base on inverse-time decay function.
+    Calculates learning rate base on inverse-time decay function.
 
     For the i-th step, the formula of computing decayed_learning_rate[i] is:
 
@@ -200,9 +203,11 @@ class InverseDecayLR(LearningRateSchedule):
         >>> learning_rate = 0.1
         >>> decay_rate = 0.9
         >>> decay_steps = 4
-        >>> global_step = Tenosr(2, mstype.int32)
-        >>> inverse_decay_lr = InverseDecayLR(learning_rate, decay_rate, decay_steps, True)
-        >>> inverse_decay_lr(global_step)
+        >>> global_step = Tensor(2, mstype.int32)
+        >>> inverse_decay_lr = nn.InverseDecayLR(learning_rate, decay_rate, decay_steps, True)
+        >>> result = inverse_decay_lr(global_step)
+        >>> print(result)
+        0.1
     """
     def __init__(self, learning_rate, decay_rate, decay_steps, is_stair=False):
         super(InverseDecayLR, self).__init__()
@@ -222,7 +227,7 @@ class InverseDecayLR(LearningRateSchedule):
 
 class CosineDecayLR(LearningRateSchedule):
     r"""
-    Calculate learning rate base on cosine decay function.
+    Calculates learning rate base on cosine decay function.
 
     For the i-th step, the formula of computing decayed_learning_rate[i] is:
 
@@ -246,15 +251,17 @@ class CosineDecayLR(LearningRateSchedule):
         >>> min_lr = 0.01
         >>> max_lr = 0.1
         >>> decay_steps = 4
-        >>> global_step = Tensor(2, mstype.int32)
-        >>> cosine_decay_lr = CosineDecayLR(min_lr, max_lr, decay_steps)
-        >>> cosine_decay_lr(global_steps)
+        >>> global_steps = Tensor(2, mstype.int32)
+        >>> cosine_decay_lr = nn.CosineDecayLR(min_lr, max_lr, decay_steps)
+        >>> result = cosine_decay_lr(global_steps)
+        >>> print(result)
+        0.055
     """
     def __init__(self, min_lr, max_lr, decay_steps):
         super(CosineDecayLR, self).__init__()
         if not isinstance(min_lr, float):
             raise TypeError("min_lr must be float.")
-        validator.check_number_range("min_lr", min_lr, 0.0, float("inf"), Rel.INC_LEFT, self.cls_name)
+        validator.check_non_negative_float(min_lr, "min_lr", self.cls_name)
         validator.check_positive_float(max_lr, 'max_lr', self.cls_name)
         validator.check_is_float(max_lr, 'max_lr', self.cls_name)
         validator.check_positive_int(decay_steps, "decay_steps", self.cls_name)
@@ -276,7 +283,7 @@ class CosineDecayLR(LearningRateSchedule):
 
 class PolynomialDecayLR(LearningRateSchedule):
     r"""
-    Calculate learning rate base on polynomial decay function.
+    Calculates learning rate base on polynomial decay function.
 
     For the i-th step, the formula of computing decayed_learning_rate[i] is:
 
@@ -313,8 +320,10 @@ class PolynomialDecayLR(LearningRateSchedule):
         >>> decay_steps = 4
         >>> power = 0.5
         >>> global_step = Tensor(2, mstype.int32)
-        >>> polynomial_decay_lr = PolynomialDecayLR(learning_rate, end_learning_rate, decay_steps, power)
-        >>> polynomial_decay_lr(global_step)
+        >>> polynomial_decay_lr = nn.PolynomialDecayLR(learning_rate, end_learning_rate, decay_steps, power)
+        >>> result = polynomial_decay_lr(global_step)
+        >>> print(result)
+        0.07363961
     """
     def __init__(self, learning_rate, end_learning_rate, decay_steps, power, update_decay_steps=False):
         super(PolynomialDecayLR, self).__init__()
@@ -322,8 +331,7 @@ class PolynomialDecayLR(LearningRateSchedule):
         validator.check_is_float(learning_rate, 'learning_rate')
         if not isinstance(end_learning_rate, float):
             raise TypeError("end_learning_rate must be float.")
-        validator.check_number_range("end_learning_rate", end_learning_rate, 0.0, float("inf"), Rel.INC_LEFT,
-                                     self.cls_name)
+        validator.check_non_negative_float(end_learning_rate, "end_learning_rate", self.cls_name)
         validator.check_positive_int(decay_steps, 'decay_steps', self.cls_name)
         validator.check_value_type('update_decay_steps', update_decay_steps, [bool], self.cls_name)
         validator.check_positive_float(power, 'power', self.cls_name)
@@ -354,7 +362,7 @@ class PolynomialDecayLR(LearningRateSchedule):
 
 class WarmUpLR(LearningRateSchedule):
     r"""
-    Get learning rate warming up.
+    Gets learning rate warming up.
 
     For the i-th step, the formula of computing warmup_learning_rate[i] is:
 
@@ -379,15 +387,17 @@ class WarmUpLR(LearningRateSchedule):
     Examples:
         >>> learning_rate = 0.1
         >>> warmup_steps = 2
-        >>> global_step = Tenosr(2, mstype.int32)
-        >>> warmup_lr = WarmUpLR(learning_rate, warmup_steps)
-        >>> warmup_lr(global_step)
+        >>> global_step = Tensor(2, mstype.int32)
+        >>> warmup_lr = nn.WarmUpLR(learning_rate, warmup_steps)
+        >>> result = warmup_lr(global_step)
+        >>> print(result)
+        0.1
     """
     def __init__(self, learning_rate, warmup_steps):
         super(WarmUpLR, self).__init__()
         if not isinstance(learning_rate, float):
             raise TypeError("learning_rate must be float.")
-        validator.check_number_range("learning_rate", learning_rate, 0.0, float("inf"), Rel.INC_LEFT, self.cls_name)
+        validator.check_non_negative_float(learning_rate, "learning_rate", self.cls_name)
         validator.check_positive_int(warmup_steps, 'warmup_steps', self.cls_name)
         self.warmup_steps = warmup_steps
         self.learning_rate = learning_rate

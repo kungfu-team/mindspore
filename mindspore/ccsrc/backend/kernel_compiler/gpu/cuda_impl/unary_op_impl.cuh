@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2020 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,28 +19,46 @@
 
 #include "runtime/device/gpu/cuda_common.h"
 template <typename T>
-void Exponential(T *input, T *output, size_t count, cudaStream_t cuda_stream);
+void Exponential(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
 template <typename T>
-void Logarithm(T *input, T *output, size_t count, cudaStream_t cuda_stream);
+void Expm1(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
 template <typename T>
-void Negative(T *input, T *output, size_t count, cudaStream_t cuda_stream);
+void Logarithm(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
 template <typename T>
-void Reciprocal(T *input, T *output, size_t count, cudaStream_t cuda_stream);
+void Log1p(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
 template <typename T>
-void Square(T *input, T *output, size_t count, cudaStream_t cuda_stream);
+void Erf(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
 template <typename T>
-void Sqrt(T *input, T *output, size_t count, cudaStream_t cuda_stream);
+void Erfc(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
 template <typename T>
-void Rsqrt(T *input, T *output, size_t count, cudaStream_t cuda_stream);
+void Negative(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
 template <typename T>
-void Sin(T *input, T *output, size_t count, cudaStream_t cuda_stream);
+void Reciprocal(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
 template <typename T>
-void Cos(T *input, T *output, size_t count, cudaStream_t cuda_stream);
+void Square(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
 template <typename T>
-void Zeroslike(T *output, size_t count, cudaStream_t cuda_stream);
+void Sqrt(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
 template <typename T>
-void Abs(T *input, T *output, size_t count, cudaStream_t cuda_stream);
+void Rsqrt(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
 template <typename T>
-void Floor(T *input, T *output, size_t count, cudaStream_t cuda_stream);
+void Sin(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
+template <typename T>
+void Cos(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
+template <typename T>
+void Asin(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
+template <typename T>
+void ACos(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
+template <typename T>
+void Atan(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
+template <typename T>
+void Asinh(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
+template <typename T>
+void Acosh(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
+template <typename T>
+void Zeroslike(T *output, const size_t count, cudaStream_t cuda_stream);
+template <typename T>
+void Abs(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
+template <typename T>
+void Floor(const T *input, T *output, const size_t count, cudaStream_t cuda_stream);
 
 #endif  // MINDSPORE_CCSRC_KERNEL_GPU_CUDA_IMPL_UNARYOPIMPL_H_

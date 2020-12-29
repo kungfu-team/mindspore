@@ -19,24 +19,26 @@
 
 #include <vector>
 #include "src/ops/primitive_c.h"
+#include "nnacl/arithmetic_self_parameter.h"
 
 namespace mindspore {
 namespace lite {
 class ArithmeticSelf : public PrimitiveC {
  public:
+  ArithmeticSelf() = default;
+  ~ArithmeticSelf() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(ArithmeticSelf, PrimitiveC);
-  ArithmeticSelf() = default;
   explicit ArithmeticSelf(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
 #else
   //  explicit ArithmeticSelf(schema::Primitive *primitive) : PrimitiveC(primitive) {}
-  ArithmeticSelf() = default;
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override {
     return RET_ERROR;
   }
 #endif
   int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
 };
+OpParameter *PopulateArithmeticSelf(const mindspore::lite::PrimitiveC *primitive);
 }  // namespace lite
 }  // namespace mindspore
 

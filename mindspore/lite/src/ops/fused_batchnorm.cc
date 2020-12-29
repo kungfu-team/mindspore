@@ -16,6 +16,10 @@
 
 #include "src/ops/fused_batchnorm.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -42,13 +46,13 @@ int FusedBatchNorm::UnPackAttr(const Primitive &prim, const std::vector<AnfNodeP
   }
   if (this->primitive_->value.value == nullptr) {
     auto attr = new (std::nothrow) schema::FusedBatchNormT();
+    if (attr == nullptr) {
+      MS_LOG(ERROR) << "new attr value failed";
+      return RET_ERROR;
+    }
     attr->epsilon = GetValue<float>(prim.GetAttr("epsilon"));
     attr->momentum = GetValue<float>(prim.GetAttr("momentum"));
     this->primitive_->value.value = attr;
-    if (this->primitive_->value.value == nullptr) {
-      MS_LOG(ERROR) << "new primitiveT value failed";
-      return RET_ERROR;
-    }
   }
   return RET_OK;
 }
@@ -72,17 +76,24 @@ float FusedBatchNorm::GetEpsilon() const { return this->primitive_->value_as_Fus
 float FusedBatchNorm::GetMomentum() const { return this->primitive_->value_as_FusedBatchNorm()->momentum(); }
 int FusedBatchNorm::GetSpatial() const { return this->primitive_->value_as_FusedBatchNorm()->spatial(); }
 
+PrimitiveC *FusedBatchNormCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<FusedBatchNorm>(primitive);
+}
+Registry FusedBatchNormRegistry(schema::PrimitiveType_FusedBatchNorm, FusedBatchNormCreator);
 #endif
+
 int FusedBatchNorm::InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) {
   for (size_t i = 0; i < inputs_.size(); i++) {
-    if (outputs_.size() <= i) break;
+    if (outputs_.size() <= i) {
+      break;
+    }
     outputs_.at(i)->set_shape(inputs_.at(i)->shape());
     outputs_.at(i)->set_data_type(inputs_.at(i)->data_type());
-    outputs_.at(i)->SetFormat(inputs_.at(i)->GetFormat());
+    outputs_.at(i)->set_format(inputs_.at(i)->format());
   }
   if (outputs_.size() > 5) {
     outputs_.at(5)->set_data_type(inputs_.at(0)->data_type());
-    outputs_.at(5)->SetFormat(inputs_.at(0)->GetFormat());
+    outputs_.at(5)->set_format(inputs_.at(0)->format());
     outputs_.at(5)->set_shape({1});
   }
   return 0;

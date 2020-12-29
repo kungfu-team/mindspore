@@ -15,6 +15,12 @@
  */
 #include "src/ops/hashtable_lookup.h"
 
+#include "src/common/string_util.h"
+
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -28,10 +34,36 @@ int HashtableLookup::UnPackToFlatBuilder(const schema::Primitive *primitive, fla
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+PrimitiveC *HashtableLookupCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<HashtableLookup>(primitive);
+}
+Registry HashtableLookupRegistry(schema::PrimitiveType_HashtableLookup, HashtableLookupCreator);
 #endif
+
 int HashtableLookup::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
-  PrimitiveC::InferShape(inputs_, outputs_);
-  return RET_INFER_INVALID;
+  auto input = inputs_.at(0);
+  auto values = inputs_.at(2);
+  auto output = outputs_.at(0);
+  auto hits = outputs_.at(1);
+  MS_ASSERT(input != nullptr);
+  MS_ASSERT(values != nullptr);
+  MS_ASSERT(output != nullptr);
+  MS_ASSERT(hits != nullptr);
+
+  std::vector<int> hits_shape;
+  hits_shape.push_back(input->DimensionSize(0));
+
+  output->set_data_type(values->data_type());
+  output->set_format(input->format());
+  hits->set_shape(hits_shape);
+  hits->set_data_type(kNumberTypeUInt8);
+  hits->set_format(input->format());
+
+  if (input->data_c() == nullptr) {
+    MS_LOG(INFO) << "Do infer shape in runtime.";
+    return RET_INFER_INVALID;
+  }
+  return RET_OK;
 }
 }  // namespace lite
 }  // namespace mindspore

@@ -144,8 +144,10 @@ class WideDeepModel(nn.Cell):
         if is_auto_parallel:
             self.batch_size = self.batch_size * get_group_size()
         is_field_slice = config.field_slice
+        sparse = config.sparse
         self.field_size = config.field_size
         self.vocab_size = config.vocab_size
+        self.vocab_cache_size = config.vocab_cache_size
         self.emb_dim = config.emb_dim
         self.deep_layer_dims_list = config.deep_layer_dim
         self.deep_layer_act = config.deep_layer_act
@@ -197,16 +199,27 @@ class WideDeepModel(nn.Cell):
         self.tile = P.Tile()
         self.concat = P.Concat(axis=1)
         self.cast = P.Cast()
-        if is_auto_parallel and host_device_mix and not is_field_slice:
-            self.dense_layer_1.dropout.dropout_do_mask.shard(((1, get_group_size()),))
-            self.dense_layer_1.dropout.dropout.shard(((1, get_group_size()),))
-            self.dense_layer_1.matmul.shard(((1, get_group_size()), (get_group_size(), 1)))
-            self.deep_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, self.emb_dim,
-                                                           slice_mode=nn.EmbeddingLookup.TABLE_COLUMN_SLICE)
-            self.wide_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, 1,
+        self.unique = P.Unique().shard(((1,),))
+        self.wide_gatherv2 = P.GatherV2()
+        self.deep_gatherv2 = P.GatherV2()
+        if is_auto_parallel and sparse and not is_field_slice:
+            target = 'DEVICE'
+            if host_device_mix:
+                target = 'CPU'
+            self.wide_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, 1, target=target,
                                                            slice_mode=nn.EmbeddingLookup.TABLE_ROW_SLICE)
-            self.deep_mul.shard(((1, 1, get_group_size()), (1, 1, 1)))
-            self.deep_reshape.add_prim_attr("skip_redistribution", True)
+            if config.deep_table_slice_mode == "column_slice":
+                self.deep_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, self.emb_dim, target=target,
+                                                               slice_mode=nn.EmbeddingLookup.TABLE_COLUMN_SLICE)
+                self.dense_layer_1.dropout.dropout.shard(((1, get_group_size()),))
+                self.dense_layer_1.dropout.dropout_do_mask.shard(((1, get_group_size()),))
+                self.dense_layer_1.matmul.shard(((1, get_group_size()), (get_group_size(), 1)))
+                self.dense_layer_1.matmul.add_prim_attr("field_size", self.field_size)
+                self.deep_mul.shard(((1, 1, get_group_size()), (1, 1, 1)))
+                self.deep_reshape.add_prim_attr("skip_redistribution", True)
+            else:
+                self.deep_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, self.emb_dim, target=target,
+                                                               slice_mode=nn.EmbeddingLookup.TABLE_ROW_SLICE)
             self.reduce_sum.add_prim_attr("cross_batch", True)
             self.embedding_table = self.deep_embeddinglookup.embedding_table
         elif is_auto_parallel and host_device_mix and is_field_slice and config.full_batch and config.manual_shape:
@@ -220,19 +233,35 @@ class WideDeepModel(nn.Cell):
             self.deep_mul.shard(((1, get_group_size(), 1), (1, get_group_size(), 1)))
             self.wide_mul.shard(((1, get_group_size(), 1), (1, get_group_size(), 1)))
             self.reduce_sum.shard(((1, get_group_size(), 1),))
-            self.dense_layer_1.dropout.dropout_do_mask.shard(((1, get_group_size()),))
             self.dense_layer_1.dropout.dropout.shard(((1, get_group_size()),))
+            self.dense_layer_1.dropout.dropout_do_mask.shard(((1, get_group_size()),))
             self.dense_layer_1.matmul.shard(((1, get_group_size()), (get_group_size(), 1)))
             self.embedding_table = self.deep_embeddinglookup.embedding_table
         elif parameter_server:
-            self.deep_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, self.emb_dim)
-            self.wide_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, 1)
+            cache_enable = self.vocab_cache_size > 0
+            target = 'DEVICE' if cache_enable else 'CPU'
+            if not cache_enable:
+                sparse = True
+            if is_auto_parallel and config.full_batch and cache_enable:
+                self.deep_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, self.emb_dim, target=target,
+                                                               slice_mode=nn.EmbeddingLookup.TABLE_ROW_SLICE,
+                                                               sparse=sparse, vocab_cache_size=self.vocab_cache_size)
+                self.wide_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, 1, target=target,
+                                                               slice_mode=nn.EmbeddingLookup.TABLE_ROW_SLICE,
+                                                               sparse=sparse, vocab_cache_size=self.vocab_cache_size)
+            else:
+                self.deep_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, self.emb_dim, target=target,
+                                                               sparse=sparse, vocab_cache_size=self.vocab_cache_size)
+                self.wide_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, 1, target=target, sparse=sparse,
+                                                               vocab_cache_size=self.vocab_cache_size)
             self.embedding_table = self.deep_embeddinglookup.embedding_table
             self.deep_embeddinglookup.embedding_table.set_param_ps()
             self.wide_embeddinglookup.embedding_table.set_param_ps()
         else:
-            self.deep_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, self.emb_dim, target='DEVICE')
-            self.wide_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, 1, target='DEVICE')
+            self.deep_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, self.emb_dim,
+                                                           target='DEVICE', sparse=sparse)
+            self.wide_embeddinglookup = nn.EmbeddingLookup(self.vocab_size, 1,
+                                                           target='DEVICE', sparse=sparse)
             self.embedding_table = self.deep_embeddinglookup.embedding_table
 
     def construct(self, id_hldr, wt_hldr):
@@ -241,13 +270,15 @@ class WideDeepModel(nn.Cell):
             id_hldr: batch ids;
             wt_hldr: batch weights;
         """
-        mask = self.reshape(wt_hldr, (self.batch_size, self.field_size, 1))
         # Wide layer
         wide_id_weight = self.wide_embeddinglookup(id_hldr)
+        # Deep layer
+        deep_id_embs = self.deep_embeddinglookup(id_hldr)
+        mask = self.reshape(wt_hldr, (self.batch_size, self.field_size, 1))
+        # Wide layer
         wx = self.wide_mul(wide_id_weight, mask)
         wide_out = self.reshape(self.reduce_sum(wx, 1) + self.wide_b, (-1, 1))
         # Deep layer
-        deep_id_embs = self.deep_embeddinglookup(id_hldr)
         vx = self.deep_mul(deep_id_embs, mask)
         deep_in = self.deep_reshape(vx, (-1, self.field_size * self.emb_dim))
         deep_in = self.dense_layer_1(deep_in)
@@ -272,9 +303,13 @@ class NetWithLossClass(nn.Cell):
         super(NetWithLossClass, self).__init__(auto_prefix=False)
         host_device_mix = bool(config.host_device_mix)
         parameter_server = bool(config.parameter_server)
+        sparse = config.sparse
         parallel_mode = context.get_auto_parallel_context("parallel_mode")
         is_auto_parallel = parallel_mode in (ParallelMode.SEMI_AUTO_PARALLEL, ParallelMode.AUTO_PARALLEL)
-        self.no_l2loss = (is_auto_parallel if (host_device_mix or config.field_slice) else parameter_server)
+        self.no_l2loss = (is_auto_parallel if (host_device_mix or config.field_slice)
+                          else parameter_server)
+        if sparse:
+            self.no_l2loss = True
         self.network = network
         self.l2_coef = config.l2_coef
         self.loss = P.SigmoidCrossEntropyWithLogits()
@@ -323,7 +358,8 @@ class TrainStepWrap(nn.Cell):
         parameter_server (Bool): Whether run in parameter server mode. Default: False
     """
 
-    def __init__(self, network, sens=1024.0, host_device_mix=False, parameter_server=False):
+    def __init__(self, network, sens=1024.0, host_device_mix=False, parameter_server=False,
+                 sparse=False, cache_enable=False):
         super(TrainStepWrap, self).__init__()
         parallel_mode = context.get_auto_parallel_context("parallel_mode")
         is_auto_parallel = parallel_mode in (ParallelMode.SEMI_AUTO_PARALLEL, ParallelMode.AUTO_PARALLEL)
@@ -340,13 +376,14 @@ class TrainStepWrap(nn.Cell):
         self.weights_w = ParameterTuple(weights_w)
         self.weights_d = ParameterTuple(weights_d)
 
-        if (host_device_mix and is_auto_parallel) or parameter_server:
+        if (sparse and is_auto_parallel) or (parameter_server and not cache_enable):
             self.optimizer_d = LazyAdam(
                 self.weights_d, learning_rate=3.5e-4, eps=1e-8, loss_scale=sens)
             self.optimizer_w = FTRL(learning_rate=5e-2, params=self.weights_w,
                                     l1=1e-8, l2=1e-8, initial_accum=1.0, loss_scale=sens)
-            self.optimizer_w.sparse_opt.add_prim_attr("primitive_target", "CPU")
-            self.optimizer_d.sparse_opt.add_prim_attr("primitive_target", "CPU")
+            if host_device_mix or parameter_server:
+                self.optimizer_w.target = "CPU"
+                self.optimizer_d.target = "CPU"
         else:
             self.optimizer_d = Adam(
                 self.weights_d, learning_rate=3.5e-4, eps=1e-8, loss_scale=sens)
@@ -395,10 +432,18 @@ class TrainStepWrap(nn.Cell):
 
 
 class PredictWithSigmoid(nn.Cell):
+    """
+    Predict definition
+    """
     def __init__(self, network):
         super(PredictWithSigmoid, self).__init__()
         self.network = network
         self.sigmoid = P.Sigmoid()
+        parallel_mode = context.get_auto_parallel_context("parallel_mode")
+        full_batch = context.get_auto_parallel_context("full_batch")
+        is_auto_parallel = parallel_mode in (ParallelMode.SEMI_AUTO_PARALLEL, ParallelMode.AUTO_PARALLEL)
+        if is_auto_parallel and full_batch:
+            self.sigmoid.shard(((1, 1),))
 
     def construct(self, batch_ids, batch_wts, labels):
         logits, _, = self.network(batch_ids, batch_wts)

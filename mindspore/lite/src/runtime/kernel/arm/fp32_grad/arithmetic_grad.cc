@@ -42,7 +42,6 @@ int ArithmeticGradCPUKernel::Init() {
         arithmetic_grad_ = &ArithmeticGradCPUKernel::ArithmeticGradMul2L;
       else if (Type() == PrimitiveType_DivGrad)
         arithmetic_grad_ = &ArithmeticGradCPUKernel::ArithmeticGradDiv2L;
-
     } else if (dx2->ElementsNum() < dx1->ElementsNum()) {
       if (Type() == PrimitiveType_MulGrad)
         arithmetic_grad_ = &ArithmeticGradCPUKernel::ArithmeticGradMul1L;
@@ -75,25 +74,28 @@ int ArithmeticGradCPUKernel::Init() {
 
 void ArithmeticGradCPUKernel::ArithmeticGradAdd(float *dy, int dy_size, float *dx1, int dx1_size, float *dx2,
                                                 int dx2_size) {
-  if (dx1_size == dy_size)
+  if (dx1_size == dy_size) {
     memcpy(dx1, dy, dy_size * sizeof(float));
-  else
+  } else {
     ReduceSumByAxes(dy, arithmeticParameter_->out_shape_, dx1, arithmeticParameter_->in_shape0_,
                     arithmeticParameter_->ndim_);
-  if (dx2_size == dy_size)
+  }
+  if (dx2_size == dy_size) {
     memcpy(dx2, dy, dy_size * sizeof(float));
-  else
+  } else {
     ReduceSumByAxes(dy, arithmeticParameter_->out_shape_, dx2, arithmeticParameter_->in_shape1_,
                     arithmeticParameter_->ndim_);
+  }
 }
 
 void ArithmeticGradCPUKernel::ArithmeticGradSub(float *dy, int dy_size, float *dx1, int dx1_size, float *dx2,
                                                 int dx2_size) {
-  if (dx1_size == dy_size)
+  if (dx1_size == dy_size) {
     memcpy(dx1, dy, dy_size * sizeof(float));
-  else
+  } else {
     ReduceSumByAxes(dy, arithmeticParameter_->out_shape_, dx1, arithmeticParameter_->in_shape0_,
                     arithmeticParameter_->ndim_);
+  }
   if (dx2_size == dy_size) {
     for (int i = 0; i < dx2_size; i++) {
       dx2[i] = -dy[i];
@@ -156,7 +158,9 @@ void ArithmeticGradCPUKernel::ArithmeticGradDiv1L(float *dy, int dy_size, float 
                arithmeticParameter_);  // broadcast directly to dx1
   ReduceSumByAxes(tile_data2, arithmeticParameter_->in_shape0_, dx2, arithmeticParameter_->in_shape1_,
                   arithmeticParameter_->ndim_);
-  for (int i = 0; i < dx2_size; i++) dx2[i] = -dx2[i];
+  for (int i = 0; i < dx2_size; i++) {
+    dx2[i] = -dx2[i];
+  }
 
   // broadcasting x2
   BroadcastDiv(dy, x2_data, tile_data0, tile_data1, dx1, dy_size, arithmeticParameter_);  // broadcast directly to dx1
@@ -177,6 +181,26 @@ void ArithmeticGradCPUKernel::ArithmeticGradDiv2L(float *dy, int dy_size, float 
   ElementDivNegSquare(tile_data2, x2_data, dx2, dy_size);
 }
 
+void ArithmeticGradCPUKernel::ArithmeticGradMaximum(float *dy, int dy_size, float *dx1, int dx1_size, float *dx2,
+                                                    int dx2_size) {
+  auto x1 = reinterpret_cast<float *>(in_tensors_[0]->MutableData());
+  auto x2 = reinterpret_cast<float *>(in_tensors_[1]->MutableData());
+  dy = reinterpret_cast<float *>(in_tensors_[2]->MutableData());
+
+  MaximumByAxes(x1, x2, dy, arithmeticParameter_->in_shape0_, arithmeticParameter_->in_shape1_,
+                arithmeticParameter_->out_shape_, dx1, dx2, arithmeticParameter_->ndim_);
+}
+
+void ArithmeticGradCPUKernel::ArithmeticGradMinimum(float *dy, int dy_size, float *dx1, int dx1_size, float *dx2,
+                                                    int dx2_size) {
+  auto x1 = reinterpret_cast<float *>(in_tensors_[0]->MutableData());
+  auto x2 = reinterpret_cast<float *>(in_tensors_[1]->MutableData());
+  dy = reinterpret_cast<float *>(in_tensors_[2]->MutableData());
+
+  MinimumByAxes(x1, x2, dy, arithmeticParameter_->in_shape0_, arithmeticParameter_->in_shape1_,
+                arithmeticParameter_->out_shape_, dx1, dx2, arithmeticParameter_->ndim_);
+}
+
 int ArithmeticGradCPUKernel::ReSize() { return RET_OK; }
 
 int ArithmeticGradCPUKernel::Execute(int task_id) {
@@ -186,12 +210,13 @@ int ArithmeticGradCPUKernel::Execute(int task_id) {
 
   size_t dy_size = in_tensors_.at(0)->ElementsNum();
   size_t dx1_size = out_tensors_.at(0)->ElementsNum();
-  size_t dx2_size = out_tensors_[1]->ElementsNum();
+  size_t dx2_size = out_tensors_.at(1)->ElementsNum();
   (this->*arithmetic_grad_)(dy, dy_size, dx1, dx1_size, dx2, dx2_size);
   return RET_OK;
 }
 
 int ArithmeticGradRun(void *cdata, int task_id) {
+  MS_ASSERT(cdata != nullptr);
   auto Arithmetic_kernel = reinterpret_cast<ArithmeticGradCPUKernel *>(cdata);
   auto error_code = Arithmetic_kernel->Execute(task_id);
   if (error_code != RET_OK) {
@@ -202,11 +227,6 @@ int ArithmeticGradRun(void *cdata, int task_id) {
 }
 
 int ArithmeticGradCPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "ArithmeticGradCPUKernel Prepare failed.";
-    return ret;
-  }
   int error_code = ParallelLaunch(this->context_->thread_pool_, ArithmeticGradRun, this, 1);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "Arithmetic Grad function error error_code[" << error_code << "]";
@@ -227,6 +247,7 @@ kernel::LiteKernel *CpuArithmeticGradFp32KernelCreator(const std::vector<lite::T
   auto *kernel = new (std::nothrow) ArithmeticGradCPUKernel(opParameter, inputs, outputs, ctx, primitive);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "new ArithmeticGradCPUKernel fail!";
+    free(opParameter);
     return nullptr;
   }
 
@@ -244,4 +265,6 @@ REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_MulGrad, CpuArithmeticGradFp3
 REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_AddGrad, CpuArithmeticGradFp32KernelCreator)
 REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_SubGrad, CpuArithmeticGradFp32KernelCreator)
 REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_DivGrad, CpuArithmeticGradFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_MaximumGrad, CpuArithmeticGradFp32KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_MinimumGrad, CpuArithmeticGradFp32KernelCreator)
 }  // namespace mindspore::kernel

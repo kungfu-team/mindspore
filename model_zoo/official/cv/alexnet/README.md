@@ -30,6 +30,8 @@ AlexNet composition consists of 5 convolutional layers and 3 fully connected lay
 
 # [Dataset](#contents)
 
+Note that you can run the scripts based on the dataset mentioned in original paper or widely used in relevant domain/network architecture. In the following sections, we will introduce how to run the scripts using the related dataset below.
+
 Dataset used: [CIFAR-10](<http://www.cs.toronto.edu/~kriz/cifar.html>)
 
 - Dataset size：175M，60,000 32*32 colorful images in 10 classes
@@ -110,7 +112,7 @@ Major parameters in train.py and config.py as follows:
 - running on Ascend
 
   ```
-  python train.py --data_path cifar-10-batches-bin --ckpt_path ckpt > log.txt 2>&1 &
+  python train.py --data_path cifar-10-batches-bin --ckpt_path ckpt > log 2>&1 &
   # or enter script dir, and run the script
   sh run_standalone_train_ascend.sh cifar-10-batches-bin ckpt
   ```
@@ -118,7 +120,7 @@ Major parameters in train.py and config.py as follows:
   After training, the loss value will be achieved as follows:
 
   ```
-  # grep "loss is " train.log
+  # grep "loss is " log
   epoch: 1 step: 1, loss is 2.2791853
   ...
   epoch: 1 step: 1536, loss is 1.9366643
@@ -132,7 +134,7 @@ Major parameters in train.py and config.py as follows:
 - running on GPU
 
   ```
-  python train.py --device_target "GPU" --data_path cifar-10-batches-bin --ckpt_path ckpt > log.txt 2>&1 &
+  python train.py --device_target "GPU" --data_path cifar-10-batches-bin --ckpt_path ckpt > log 2>&1 &
   # or enter script dir, and run the script
   sh run_standalone_train_for_gpu.sh cifar-10-batches-bin ckpt
   ```
@@ -140,7 +142,7 @@ Major parameters in train.py and config.py as follows:
   After training, the loss value will be achieved as follows:
 
   ```
-  # grep "loss is " train.log
+  # grep "loss is " log
   epoch: 1 step: 1, loss is 2.3125906
   ...
   epoch: 30 step: 1560, loss is 0.6687547
@@ -158,30 +160,30 @@ Before running the command below, please check the checkpoint path used for eval
 - running on Ascend
 
   ```
-  python eval.py --data_path cifar-10-verify-bin --ckpt_path ckpt/checkpoint_alexnet-1_1562.ckpt > log.txt 2>&1 &
+  python eval.py --data_path cifar-10-verify-bin --ckpt_path ckpt/checkpoint_alexnet-1_1562.ckpt > eval_log.txt 2>&1 &
   # or enter script dir, and run the script
   sh run_standalone_eval_ascend.sh cifar-10-verify-bin ckpt/checkpoint_alexnet-1_1562.ckpt
   ```
 
-  You can view the results through the file "log.txt". The accuracy of the test dataset will be as follows:
+  You can view the results through the file "eval_log". The accuracy of the test dataset will be as follows:
 
   ```
-  # grep "Accuracy: " log.txt
+  # grep "Accuracy: " eval_log
   'Accuracy': 0.8832
   ```
 
 - running on GPU
 
   ```
-  python eval.py --device_target "GPU" --data_path cifar-10-verify-bin --ckpt_path ckpt/checkpoint_alexnet-30_1562.ckpt > log.txt 2>&1 &
+  python eval.py --device_target "GPU" --data_path cifar-10-verify-bin --ckpt_path ckpt/checkpoint_alexnet-30_1562.ckpt > eval_log 2>&1 &
   # or enter script dir, and run the script
   sh run_standalone_eval_for_gpu.sh cifar-10-verify-bin ckpt/checkpoint_alexnet-30_1562.ckpt
   ```
 
-  You can view the results through the file "log.txt". The accuracy of the test dataset will be as follows:
+  You can view the results through the file "eval_log". The accuracy of the test dataset will be as follows:
 
   ```
-  # grep "Accuracy: " log.txt
+  # grep "Accuracy: " eval_log
   'Accuracy': 0.88512
   ```
 
@@ -195,15 +197,15 @@ Before running the command below, please check the checkpoint path used for eval
 | -------------------------- | ------------------------------------------------------------| -------------------------------------------------|
 | Resource                   | Ascend 910; CPU 2.60GHz, 192cores; Memory, 755G              | NV SMX2 V100-32G                                 |
 | uploaded Date              | 06/09/2020 (month/day/year)                                 | 17/09/2020 (month/day/year)                      |
-| MindSpore Version          | 0.5.0-beta                                                  | 0.7.0-beta                                       |
+| MindSpore Version          | 1.0.0                                                  | 0.7.0-beta                                       |
 | Dataset                    | CIFAR-10                                                    | CIFAR-10                                         |
 | Training Parameters        | epoch=30, steps=1562, batch_size = 32, lr=0.002             | epoch=30, steps=1562, batch_size = 32, lr=0.002  |
 | Optimizer                  | Momentum                                                    | Momentum                                         |
 | Loss Function              | Softmax Cross Entropy                                       | Softmax Cross Entropy                            |
 | outputs                    | probability                                                 | probability                                      |
-| Loss                       | 0.0016                                                      | 0.01                                             |
-| Speed                      | 21 ms/step                                                  | 16.8 ms/step                                     |
-| Total time                 | 17 mins                                                     | 14 mins                                          |
+| Loss                       | 0.08                                                      | 0.01                                             |
+| Speed                      | 7.3 ms/step                                                  | 16.8 ms/step                                     |
+| Total time                 | 6 mins                                                     | 14 mins                                          |
 | Checkpoint for Fine tuning | 445M (.ckpt file)                                           | 445M (.ckpt file)                                |
 | Scripts                    | https://gitee.com/mindspore/mindspore/tree/master/model_zoo/official/cv/alexnet | https://gitee.com/mindspore/mindspore/tree/master/model_zoo/official/cv/alexnet |
 

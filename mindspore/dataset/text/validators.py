@@ -402,7 +402,7 @@ def check_to_number(method):
         type_check(data_type, (typing.Type,), "data_type")
 
         if data_type not in mstype.number_type:
-            raise TypeError("data_type is not numeric data type.")
+            raise TypeError("data_type: " + str(data_type) + " is not numeric data type.")
 
         return method(self, *args, **kwargs)
 
@@ -417,7 +417,7 @@ def check_python_tokenizer(method):
         [tokenizer], _ = parse_user_args(method, *args, **kwargs)
 
         if not callable(tokenizer):
-            raise TypeError("tokenizer is not a callable Python function")
+            raise TypeError("tokenizer is not a callable Python function.")
 
         return method(self, *args, **kwargs)
 
@@ -432,10 +432,12 @@ def check_from_dataset_sentencepiece(method):
         [_, col_names, vocab_size, character_coverage, model_type, params], _ = parse_user_args(method, *args, **kwargs)
 
         if col_names is not None:
-            type_check(col_names, (list,), "col_names")
+            type_check_list(col_names, (str,), "col_names")
 
         if vocab_size is not None:
             check_uint32(vocab_size, "vocab_size")
+        else:
+            raise TypeError("vocab_size must be provided.")
 
         if character_coverage is not None:
             type_check(character_coverage, (float,), "character_coverage")

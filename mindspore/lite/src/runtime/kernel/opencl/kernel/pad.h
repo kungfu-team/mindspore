@@ -28,25 +28,20 @@ namespace mindspore::kernel {
 
 class PadOpenCLKernel : public OpenCLKernel {
  public:
-  explicit PadOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                           const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs) {}
-  ~PadOpenCLKernel() override{};
+  PadOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
+                  const std::vector<lite::Tensor *> &outputs)
+      : OpenCLKernel(parameter, inputs, outputs), param_(reinterpret_cast<PadParameter *>(op_parameter_)) {}
+  ~PadOpenCLKernel() override = default;
 
-  int Init() override;
+  int CheckSpecs() override;
+
+  int Prepare() override;
+  void SetConstArgs() override;
+
   int Run() override;
-  int GetImageSize(size_t idx, std::vector<size_t> *img_size) override;
 
  private:
-  int CI_{};
-  int IH_{};
-  int IW_{};
-  int CO_{};
-  int OH_{};
-  int OW_{};
-  int CI_SLICES_{};
-  int CO_SLICES_{};
-  cl::Kernel kernel_;
+  PadParameter *param_;
 };
 }  // namespace mindspore::kernel
 

@@ -26,9 +26,9 @@ namespace lite {
 class CaffeInterpParser : public CaffeNodeParser {
  public:
   CaffeInterpParser() : CaffeNodeParser("Interp") {}
+  ~CaffeInterpParser() override = default;
 
-  STATUS Parse(const caffe::LayerParameter &proto, const caffe::LayerParameter &weight, schema::CNodeT *op,
-               std::vector<schema::TensorT *> *weightVec) override;
+  PrimitiveC *ParseLitePrimitive(const caffe::LayerParameter &proto, const caffe::LayerParameter &weight) override;
 };
 }  // namespace lite
 }  // namespace mindspore

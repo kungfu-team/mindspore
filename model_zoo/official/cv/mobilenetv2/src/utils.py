@@ -16,7 +16,7 @@
 from mindspore import context
 from mindspore import nn
 from mindspore.common import dtype as mstype
-from mindspore.train.model import ParallelMode
+from mindspore.context import ParallelMode
 from mindspore.train.callback import ModelCheckpoint, CheckpointConfig
 from mindspore.communication.management import get_rank, init, get_group_size
 
@@ -38,7 +38,7 @@ def context_device_init(config):
     elif config.platform == "GPU":
         context.set_context(mode=context.GRAPH_MODE, device_target=config.platform, save_graphs=False)
         if config.run_distribute:
-            init("nccl")
+            init()
             context.set_auto_parallel_context(device_num=get_group_size(),
                                               parallel_mode=ParallelMode.DATA_PARALLEL,
                                               gradients_mean=True)

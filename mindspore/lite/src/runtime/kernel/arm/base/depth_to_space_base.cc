@@ -15,8 +15,7 @@
  */
 #include "src/runtime/kernel/arm/base/depth_to_space_base.h"
 #include "nnacl/depth_to_space.h"
-#include "src/runtime/kernel/arm/fp32/depth_to_space.h"
-#include "src/runtime/kernel/arm/int8/depth_to_space_int8.h"
+#include "src/runtime/kernel/arm/fp32/depth_to_space_fp32.h"
 #include "nnacl/arithmetic_common.h"
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
@@ -31,88 +30,30 @@ using mindspore::lite::RET_PARAM_INVALID;
 using mindspore::schema::PrimitiveType_DepthToSpace;
 
 namespace mindspore::kernel {
-int DepthToSpaceBaseCPUKernel::Init() { return RET_OK; }
-
 int DepthToSpaceBaseCPUKernel::ReSize() {
-  if (in_tensors_[0]->GetFormat() != schema::Format::Format_NHWC) {
+  if (in_tensors_.at(0)->format() != schema::Format::Format_NHWC) {
     MS_LOG(ERROR) << "depth_to_space only support NHWC now!";
     return RET_FORMAT_ERR;
   }
-  DepthToSpaceParameter *param = reinterpret_cast<DepthToSpaceParameter *>(op_parameter_);
-  if (param->block_size_ <= 0) {
+  if (param_->block_size_ <= 0) {
     MS_LOG(ERROR) << "Input block_size should > 0!";
     return RET_PARAM_INVALID;
   }
-  auto shape_size = in_tensors_[0]->shape().size();
+  auto shape_size = in_tensors_.at(0)->shape().size();
   if (shape_size != DIMENSION_4D) {
     MS_LOG(ERROR) << "Input shape size should be " << DIMENSION_4D;
     return RET_PARAM_INVALID;
   }
   int32_t in_strides[DIMENSION_4D];
-  ComputeStrides(const_cast<int *>(in_tensors_[0]->shape().data()), in_strides, shape_size);
-  param->in_stride_dim0_ = in_strides[0];
-  param->in_stride_dim1_ = in_strides[1];
-  param->in_stride_dim2_ = in_strides[2];
+  ComputeStrides(const_cast<int *>(in_tensors_.at(0)->shape().data()), in_strides, shape_size);
+  param_->in_stride_dim0_ = in_strides[0];
+  param_->in_stride_dim1_ = in_strides[1];
+  param_->in_stride_dim2_ = in_strides[2];
   int32_t out_strides[DIMENSION_4D];
-  ComputeStrides(const_cast<int *>(out_tensors_[0]->shape().data()), out_strides, shape_size);
-  param->out_stride_dim0_ = out_strides[0];
-  param->out_stride_dim1_ = out_strides[1];
-  param->out_stride_dim2_ = out_strides[2];
+  ComputeStrides(const_cast<int *>(out_tensors_.at(0)->shape().data()), out_strides, shape_size);
+  param_->out_stride_dim0_ = out_strides[0];
+  param_->out_stride_dim1_ = out_strides[1];
+  param_->out_stride_dim2_ = out_strides[2];
   return RET_OK;
 }
-
-kernel::LiteKernel *CpuDepthToSpaceInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                     const std::vector<lite::Tensor *> &outputs,
-                                                     OpParameter *op_parameter, const lite::InnerContext *ctx,
-                                                     const kernel::KernelKey &desc,
-                                                     const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(desc.type == schema::PrimitiveType_DepthToSpace);
-  if (op_parameter == nullptr) {
-    MS_LOG(ERROR) << "Input op_parameter is nullptr!";
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) DepthToSpaceInt8CPUKernel(op_parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new BatchToSpaceInt8CPUKernel fail!";
-    return nullptr;
-  }
-
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    delete kernel;
-    MS_LOG(ERROR) << "Init kernel failed, name: " << op_parameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(op_parameter->type_));
-    return nullptr;
-  }
-  return kernel;
-}
-
-kernel::LiteKernel *CpuDepthToSpaceFp32KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                     const std::vector<lite::Tensor *> &outputs,
-                                                     OpParameter *op_parameter, const lite::InnerContext *ctx,
-                                                     const kernel::KernelKey &desc,
-                                                     const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(desc.type == schema::PrimitiveType_DepthToSpace);
-  if (op_parameter == nullptr) {
-    MS_LOG(ERROR) << "Input op_parameter is nullptr!";
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) DepthToSpaceCPUKernel(op_parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new DepthToSpaceCPUKernel fail!";
-    return nullptr;
-  }
-
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    delete kernel;
-    MS_LOG(ERROR) << "Init kernel failed, name: " << op_parameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(op_parameter->type_));
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_DepthToSpace, CpuDepthToSpaceFp32KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_DepthToSpace, CpuDepthToSpaceInt8KernelCreator)
 }  // namespace mindspore::kernel

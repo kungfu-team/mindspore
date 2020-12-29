@@ -19,7 +19,7 @@
 
 #include <vector>
 #include "src/lite_kernel.h"
-#include "nnacl/fp32/activation.h"
+#include "nnacl/fp32/activation_fp32.h"
 
 namespace mindspore::kernel {
 class ActivationGradCPUKernel : public LiteKernel {
@@ -27,7 +27,7 @@ class ActivationGradCPUKernel : public LiteKernel {
   explicit ActivationGradCPUKernel(OpParameter *param, const std::vector<lite::Tensor *> &inputs,
                                    const std::vector<lite::Tensor *> &outputs, const lite::InnerContext *ctx,
                                    const mindspore::lite::PrimitiveC *primitive)
-      : LiteKernel(param, inputs, outputs, ctx, primitive), thread_count_(ctx->thread_num_) {
+      : LiteKernel(param, inputs, outputs, ctx, primitive) {
     param_act_grad_ = reinterpret_cast<ActivationParameter *>(param);
   }
   ~ActivationGradCPUKernel() override = default;
@@ -38,10 +38,8 @@ class ActivationGradCPUKernel : public LiteKernel {
   int DoActivation(int task_id);
 
  private:
-  int thread_count_;
   ActivationParameter *param_act_grad_;
 };
-
 }  // namespace mindspore::kernel
 
 #endif  // MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_FP32_GRAD_ACTIVATION_GRAD_H_

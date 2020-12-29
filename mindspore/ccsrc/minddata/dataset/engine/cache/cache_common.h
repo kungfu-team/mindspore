@@ -20,11 +20,6 @@
 /// both client and server side codes. Do not put code that is not common here.
 /// There are client and server specific header files.
 
-// On platform like Windows, we may support only tcp/ip clients
-#if !defined(_WIN32) && !defined(_WIN64)
-#define CACHE_LOCAL_CLIENT 1
-#endif
-
 #ifdef ENABLE_CACHE
 #include <grpcpp/grpcpp.h>
 #endif
@@ -42,6 +37,10 @@ namespace dataset {
 /// For too small amount, we won't get any benefit using shared memory method because we need
 /// two rpc requests to use shared memory method.
 constexpr static int32_t kLocalByPassThreshold = 64 * 1024;
+/// \brief Default size (in GB) of shared memory we are going to create
+constexpr static int32_t kDefaultSharedMemorySize = 4;
+/// \brief Memory Cap ratio used by the server
+constexpr static float kDefaultMemoryCapRatio = 0.8;
 /// \brief A flag used by the BatchFetch request (client side) if it can support local bypass
 constexpr static uint32_t kLocalClientSupport = 1;
 /// \brief A flag used by CacheRow request (client side) and BatchFetch (server side) reply to indicate if the data is
@@ -49,6 +48,19 @@ constexpr static uint32_t kLocalClientSupport = 1;
 constexpr static uint32_t kDataIsInSharedMemory = 2;
 /// \brief Size of each message used in message queue.
 constexpr static int32_t kSharedMessageSize = 2048;
+/// \brief Prefix for default cache spilling path and log path
+const char kDefaultPathPrefix[] = "/tmp/mindspore/cache";
+
+/// \brief State of CacheService at the server.
+enum class CacheServiceState : int8_t {
+  kNone = 0,
+  kBuildPhase = 1,
+  kFetchPhase = 2,
+  kNoLocking = 3,
+  kOutOfMemory = 4,
+  kNoSpace = 5,
+  kError = 127
+};
 
 /// \brief Convert a Status object into a protobuf
 /// \param rc[in] Status object
@@ -60,7 +72,31 @@ inline void Status2CacheReply(const Status &rc, CacheReply *reply) {
 /// \brief Generate the unix socket file we use on both client/server side given a tcp/ip port number
 /// \param port
 /// \return unix socket url
-inline std::string PortToUnixSocketPath(int port) { return "/tmp/cache_server_p" + std::to_string(port); }
+inline std::string PortToUnixSocketPath(int port) {
+  return kDefaultPathPrefix + std::string("/cache_server_p") + std::to_string(port);
+}
+
+/// \brief Round up to the next 4k
+inline int64_t round_up_4K(int64_t sz) {
+  // Since 4096 is a power of 2, a simple way to round up is add 4095 and mask off all the
+  // bits of 4095
+  return static_cast<uint64_t>(sz + 4095) & ~static_cast<uint64_t>(4095);
+}
+
+/// Memory policy
+enum CachePoolPolicy : int8_t { kOnNode, kPreferred, kLocal, kInterleave, kNone };
+
+/// Misc typedef
+using worker_id_t = int32_t;
+using numa_id_t = int32_t;
+using cpu_id_t = int32_t;
+
+/// Return the default spill dir for cache
+inline std::string DefaultSpillDir() { return kDefaultPathPrefix; }
+
+/// Return the default log dir for cache
+inline std::string DefaultLogDir() { return kDefaultPathPrefix + std::string("/log"); }
+
 }  // namespace dataset
 }  // namespace mindspore
 #endif  // MINDSPORE_CCSRC_MINDDATA_DATASET_ENGINE_CACHE_COMMON_H_

@@ -56,6 +56,7 @@ void CostModelContext::ResetCostModel() {
   costmodel_allreduce_fusion_allreduce_bandwidth_ = DEFAULT_COST_MODEL_ALLREDUCE_FUSION_ALLREDUCE_BANDWIDTH;
   costmodel_allreduce_fusion_computation_time_parameter_ =
     DEFAULT_COST_MODEL_ALLREDUCE_FUSION_COMPUTATION_TIME_PARAMETER;
+  dp_algo_single_loop_ = DEFAULT_DP_ALGO_SINGLE_LOOP;
 }
 
 void CostModelContext::ResetAlgoParameters() {
@@ -64,7 +65,9 @@ void CostModelContext::ResetAlgoParameters() {
   tensor_slice_alignment_size_ = DEFAULT_TENSOR_SLICE_ALIGNMENT_SIZE;
   fully_use_device_ = DEFAULT_FULLY_USE_DEVICES;
   elementwise_stra_follow_ = DEFAULT_ELEMENTWISE_OP_STRA_FOLLOW;
-  triangle_strategy_overwrite_ = DEFAULT_TRIANGLE_STRATEGY_OVERWRITE;
+  triangle_star_strategy_overwrite_ = DEFAULT_TRIANGLE_STAR_STRATEGY_OVERWRITE;
+  dp_algo_enable_approxi_ = DEFAULT_DP_ALGO_ENABLE_APPROX;
+  dp_algo_approxi_epsilon_ = DEFAULT_DP_ALGO_APPROX_EPSILON;
 }
 
 void CostModelContext::set_costmodel_context_for_device(const std::string &device_target) {
@@ -72,6 +75,10 @@ void CostModelContext::set_costmodel_context_for_device(const std::string &devic
     costmodel_beta_ = DEFAULT_COST_MODEL_BETA_GPU;
   }
 }
+
+void CostModelContext::set_dp_algo_approxi_epsilon(double epsilon) { dp_algo_approxi_epsilon_ = epsilon; }
+
+void CostModelContext::set_dp_algo_enable_approxi(bool approxi) { dp_algo_enable_approxi_ = approxi; }
 
 void CostModelContext::set_device_memory_capacity(double dm_capacity) { device_memory_capacity_ = dm_capacity; }
 
@@ -94,11 +101,11 @@ void CostModelContext::set_costmodel_communi_const(double cm_communi_const) {
 void CostModelContext::set_costmodel_communi_bias(double cm_communi_bias) { costmodel_communi_bias_ = cm_communi_bias; }
 
 void CostModelContext::set_multi_subgraphs(bool multi_graphs) { is_multi_subgraphs_ = multi_graphs; }
-void CostModelContext::set_costmodel_allreduce_fusion_algorithm(int32_t algorithm) {
+void CostModelContext::set_costmodel_allreduce_fusion_algorithm(int64_t algorithm) {
   costmodel_allreduce_fusion_algorithm_ = algorithm;
 }
 
-void CostModelContext::set_costmodel_allreduce_fusion_times(int32_t allreduce_fusion_times) {
+void CostModelContext::set_costmodel_allreduce_fusion_times(int64_t allreduce_fusion_times) {
   costmodel_allreduce_fusion_times_ = allreduce_fusion_times;
 }
 
@@ -134,9 +141,13 @@ void CostModelContext::set_elementwise_stra_follow(bool elementwise_follow) {
   elementwise_stra_follow_ = elementwise_follow;
 }
 
-void CostModelContext::set_triangle_strategy_overwrite(bool overwrite) { triangle_strategy_overwrite_ = overwrite; }
+void CostModelContext::set_triangle_star_strategy_overwrite(bool overwrite) {
+  triangle_star_strategy_overwrite_ = overwrite;
+}
 
-void CostModelContext::set_run_phase(int32_t phase) { run_phase_ = phase; }
+void CostModelContext::set_run_phase(int64_t phase) { run_phase_ = phase; }
+
+void CostModelContext::set_dp_algo_single_loop(bool single_loop) { dp_algo_single_loop_ = single_loop; }
 
 struct CostRegister {
   CostRegister() {

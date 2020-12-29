@@ -25,8 +25,6 @@ build_in_impl_path = get_build_in_impl_path()
 
 # op function list
 op_build = "compile"
-fusion_pattern_start_flag = "fusion_pattern_start"
-fusion_pattern_end_flag = "fusion_pattern_end"
 
 def _initialize(impl_path):
     """Initialize"""
@@ -107,9 +105,6 @@ def build_op(build_type, json_str):
             raise ValueError("Op:{} function {} is not supported by Tbe.".format(op_name, build_type))
 
         # call function
-        if op_name == "bounding_box_encode":
-            return op_func(*inputs_args, *outputs_args, *attrs_args, kernel_name_val=kernel_name)
-
         if is_dynamic_shape:
             with te.op.dynamic():
                 op_func(*inputs_args, *outputs_args, *attrs_args, kernel_name=kernel_name)
@@ -157,5 +152,6 @@ def compile_with_json(json_str):
 if __name__ == "__main__":
     in_args = sys.stdin.readline()
     result = compile_with_json(in_args)
-    sys.stdout.write(fusion_pattern_start_flag + str(result) + fusion_pattern_end_flag)
-    sys.stdout.flush()
+    if isinstance(result, dict):
+        sys.stderr.write(json.dumps(result))
+        sys.stderr.flush()

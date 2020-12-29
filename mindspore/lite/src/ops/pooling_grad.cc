@@ -16,6 +16,10 @@
 
 #include "src/ops/pooling_grad.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -80,10 +84,15 @@ int PoolingGrad::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr>
     } else {
       attr->format = schema::Format_NUM_OF_FORMAT;
     }
+
     if (prim.instance_name() == "MaxPoolGrad") {
       attr->poolingMode = schema::PoolMode_MAX_POOLING;
-    } else if (prim.instance_name() == "MeanPoolGrad") {
+    } else if (prim.instance_name() == "AvgPoolGrad") {
       attr->poolingMode = schema::PoolMode_MEAN_POOLING;
+    } else if (prim.instance_name() == "AvgPoolGradGpu") {
+      attr->poolingMode = schema::PoolMode_MEAN_POOLING;
+    } else {
+      attr->poolingMode = schema::PoolMode_MAX_POOLING;
     }
 
     auto pad_mode = GetValue<std::string>(prim.GetAttr("padding"));
@@ -95,13 +104,13 @@ int PoolingGrad::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr>
       attr->padMode = schema::PadMode_NOTSET;
     }
 
-    auto kernel_size = GetValue<std::vector<int>>(prim.GetAttr("ksize"));
-    attr->windowH = kernel_size[2];
-    attr->windowW = kernel_size[3];
+    auto kernel_size = CastToInt(prim.GetAttr("ksize"));
+    attr->windowH = kernel_size.at(2);
+    attr->windowW = kernel_size.at(3);
 
-    auto stride = GetValue<std::vector<int>>(prim.GetAttr("strides"));
-    attr->strideH = stride[2];
-    attr->strideW = stride[3];
+    auto stride = CastToInt(prim.GetAttr("strides"));
+    attr->strideH = stride.at(2);
+    attr->strideW = stride.at(3);
     this->primitive_->value.value = attr;
     if (this->primitive_->value.value == nullptr) {
       MS_LOG(ERROR) << "primitive value is nullptr";
@@ -142,6 +151,11 @@ int PoolingGrad::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuf
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *PoolingGradCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<PoolingGrad>(primitive);
+}
+Registry PoolingGradRegistry(schema::PrimitiveType_PoolingGrad, PoolingGradCreator);
 #endif
 
 int PoolingGrad::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
@@ -189,12 +203,10 @@ int PoolingGrad::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *>
     }
   }
   auto grad_output = outputs_.at(0);
-  // todo: fmk type
   auto output_shape = input->shape();
   grad_output->set_shape(output_shape);
   grad_output->set_data_type(input->data_type());
-  // todo: temp fix
-  grad_output->SetFormat(input->GetFormat());
+  grad_output->set_format(input->format());
   return RET_OK;
 }
 }  // namespace lite

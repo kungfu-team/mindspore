@@ -20,7 +20,7 @@
 #include <vector>
 #include "src/train/loss_kernel.h"
 #include "nnacl/fp32_grad/softmax_grad.h"
-#include "nnacl/fp32/arithmetic.h"
+#include "nnacl/fp32/arithmetic_fp32.h"
 #include "nnacl/softmax_parameter.h"
 
 namespace mindspore::kernel {
@@ -38,7 +38,7 @@ class SparseSoftmaxCrossEntropyWithLogitsCPUKernel : public LossKernel {
   ~SparseSoftmaxCrossEntropyWithLogitsCPUKernel() override {}
 
   int ForwardPostExecute(const int *labels, const float *losses, float *output) const;
-  int GradPostExecute(const int *labels, const float *losses, float *grads, float *output) const;
+  int GradPostExecute(const int *labels, const float *losses, float *grads) const;
 
   int Init() override;
   int ReSize() override;

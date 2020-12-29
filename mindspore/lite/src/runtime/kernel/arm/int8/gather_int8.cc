@@ -34,8 +34,8 @@ namespace mindspore::kernel {
 int GatherInt8CPUKernel::Init() {
   axis_ = (reinterpret_cast<GatherParameter *>(op_parameter_))->axis_;
   batchDims_ = (reinterpret_cast<GatherParameter *>(op_parameter_))->batchDims_;
-  auto in_quant_args = in_tensors_.at(0)->GetQuantParams();
-  auto out_quant_args = out_tensors_.at(0)->GetQuantParams();
+  auto in_quant_args = in_tensors_.at(0)->quant_params();
+  auto out_quant_args = out_tensors_.at(0)->quant_params();
   param_.alpha_ = in_quant_args.front().scale / out_quant_args.front().scale;
   param_.zp_in_ = in_quant_args.front().zeroPoint;
   param_.zp_out_ = out_quant_args.front().zeroPoint;
@@ -61,7 +61,7 @@ int GatherInt8CPUKernel::DoGather(int task_id) {
   int in_rank = in_shape.size();
   int indices_element_size = indices_tensor->ElementsNum();
 
-  const int limit = in_shape[axis_];
+  const int limit = in_shape.at(axis_);
   for (int i = 0; i < indices_element_size; ++i) {
     if (indices_ptr[i] >= limit) {
       MS_LOG(ERROR) << " indice data: " << indices_ptr[i] << " is not in [ 0, " << limit - 1 << " ]";
@@ -71,27 +71,21 @@ int GatherInt8CPUKernel::DoGather(int task_id) {
 
   int outer_size = 1;
   for (int i = 0; i < axis_; ++i) {
-    outer_size *= in_shape[i];
+    outer_size *= in_shape.at(i);
   }
 
   int inner_size = 1;
   for (int i = axis_ + 1; i < in_rank; ++i) {
-    inner_size *= in_shape[i];
+    inner_size *= in_shape.at(i);
   }
 
   int stride = UP_DIV(outer_size, thread_count_);
   int count = MSMIN(stride, outer_size - stride * task_id);
   auto thread_stride = stride * task_id;
 
-  int error_code;
   input_ptr += thread_stride * limit;
   output_ptr += thread_stride * indices_element_size;
-  error_code = GatherInt8(input_ptr, output_ptr, count, inner_size, limit, indices_ptr, indices_element_size, param_);
-
-  if (error_code != RET_OK) {
-    return RET_ERROR;
-  }
-  return RET_OK;
+  return GatherInt8(input_ptr, output_ptr, count, inner_size, limit, indices_ptr, indices_element_size, param_);
 }
 
 int GatherInt8Run(void *cdata, int task_id) {
@@ -105,12 +99,6 @@ int GatherInt8Run(void *cdata, int task_id) {
 }
 
 int GatherInt8CPUKernel::Run() {
-  auto prepare_ret = Prepare();
-  if (prepare_ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << prepare_ret;
-    return prepare_ret;
-  }
-
   int error_code = ParallelLaunch(this->context_->thread_pool_, GatherInt8Run, this, thread_count_);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "Gather function error error_code[" << error_code << "]";
@@ -119,28 +107,5 @@ int GatherInt8CPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuGatherInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                               const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                               const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                               const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(desc.type == schema::PrimitiveType_Gather);
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "input parameter is nullptr!";
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) GatherInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Gather, CpuGatherInt8KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Gather, LiteKernelCreator<GatherInt8CPUKernel>)
 }  // namespace mindspore::kernel

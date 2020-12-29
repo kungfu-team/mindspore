@@ -37,7 +37,7 @@ int BiasGradCPUKernel::Init() {
     bias_param->out_shape_[i] = 1;  // 1 dimension for N,H,W,
   }
   bias_param->out_shape_[bias_param->ndim_ - 1] = dims[bias_param->ndim_ - 1];
-  for (int i = bias_param->ndim_; i < 4; i++) {
+  for (auto i = bias_param->ndim_; i < 4; i++) {
     bias_param->in_shape0_[i] = 0;
     bias_param->out_shape_[i] = 0;
   }
@@ -52,7 +52,9 @@ int BiasGradCPUKernel::Execute(int task_id) {
 
   size_t nhw_size = 1;
   size_t channels = bias_param->in_shape0_[bias_param->ndim_ - 1];  // C in NHWC
-  for (unsigned int i = 0; i < bias_param->ndim_ - 1; i++) nhw_size *= bias_param->in_shape0_[i];
+  for (unsigned int i = 0; i < bias_param->ndim_ - 1; i++) {
+    nhw_size *= bias_param->in_shape0_[i];
+  }
 
   size_t total_size = channels * nhw_size;
   for (size_t c = 0; c < channels; ++c) {
@@ -76,11 +78,6 @@ int BiasGradRun(void *cdata, int task_id) {
 }
 
 int BiasGradCPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "BiasGradCPUKernel Prepare failed.";
-    return RET_ERROR;
-  }
   int error_code = ParallelLaunch(this->context_->thread_pool_, BiasGradRun, this, 1);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "bias function error error_code[" << error_code << "]";
@@ -98,11 +95,12 @@ kernel::LiteKernel *CpuBiasGradFp32KernelCreator(const std::vector<lite::Tensor 
   auto *kernel = new (std::nothrow) BiasGradCPUKernel(opParameter, inputs, outputs, ctx, primitive);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "new BiasGradCPUKernel fail!";
+    free(opParameter);
     return nullptr;
   }
 
   auto ret = kernel->Init();
-  if (RET_OK != ret) {
+  if (ret != RET_OK) {
     MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
                   << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
     delete kernel;

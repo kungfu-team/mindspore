@@ -17,12 +17,14 @@
 #include "src/runtime/opencl/opencl_runtime.h"
 #include <vector>
 #include <numeric>
+#include <utility>
 #ifdef SHARING_MEM_WITH_OPENGL
 #include <EGL/egl.h>
 #endif
 #include "include/errorcode.h"
 #include "src/runtime/kernel/opencl/utils.h"
 #include "src/runtime/opencl/opencl_allocator.h"
+#include "src/common/file_utils.h"
 #ifdef PROGRAM_WITH_IL
 #include "src/backend/opencl/cl/program.inc"
 #endif
@@ -100,8 +102,14 @@ int OpenCLRuntime::Init() {
   std::vector<cl::Device> devices;
   for (auto it = platforms.begin(); it != platforms.end(); ++it) {
     std::string platform_name;
-    it->getInfo(CL_PLATFORM_NAME, &platform_name);
-    it->getDevices(CL_DEVICE_TYPE_GPU, &devices);
+    ret = it->getInfo(CL_PLATFORM_NAME, &platform_name);
+    if (ret != CL_SUCCESS) {
+      MS_LOG(WARNING) << CLErrorCode(ret);
+    }
+    ret = it->getDevices(CL_DEVICE_TYPE_GPU, &devices);
+    if (ret != CL_SUCCESS) {
+      MS_LOG(WARNING) << CLErrorCode(ret);
+    }
     MS_LOG(INFO) << "Platform (" << platform_name << ") has " << devices.size() << " GPUs";
 
     if (devices.size() > 0) {
@@ -125,6 +133,7 @@ int OpenCLRuntime::Init() {
   }
   *device_ = devices[0];
   max_work_item_sizes_ = device_->getInfo<CL_DEVICE_MAX_WORK_ITEM_SIZES>();
+  max_work_group_size_ = max_work_item_sizes_[0];
   const std::string device_name = device_->getInfo<CL_DEVICE_NAME>();
   const std::string device_version = device_->getInfo<CL_DEVICE_VERSION>();
   const std::string opencl_version = device_->getInfo<CL_DEVICE_OPENCL_C_VERSION>();
@@ -145,27 +154,50 @@ int OpenCLRuntime::Init() {
                                           CL_EGL_DISPLAY_KHR, (cl_context_properties)eglGetCurrentDisplay(), 0};
   context_ = new (std::nothrow) cl::Context(std::vector<cl::Device>{*device_}, context_prop, nullptr, nullptr, &ret);
 
-  if (ret != CL_SUCCESS || context_ == nullptr) {
+  if (ret != CL_SUCCESS) {
     MS_LOG(ERROR) << "Create special OpenCL context failed, Create common OpenCL context then.";
     context_ = new (std::nothrow) cl::Context(std::vector<cl::Device>{*device_}, nullptr, nullptr, nullptr, &ret);
     if (context_ == nullptr) {
+      delete device_;
       MS_LOG(ERROR) << "Create OpenCL context failed!";
       return RET_ERROR;
     }
   }
 #else
   MS_LOG(INFO) << "Create common opencl context";
+#ifdef Debug
+  std::vector<cl_context_properties> ctx_properties = {CL_CONTEXT_PLATFORM,
+                                                       (cl_context_properties)platforms[0](),
+                                                       CL_PRINTF_CALLBACK_ARM,
+                                                       (cl_context_properties)printf_callback,
+                                                       CL_PRINTF_BUFFERSIZE_ARM,
+                                                       0x1000000,
+                                                       0};
+  context_ =
+    new (std::nothrow) cl::Context(std::vector<cl::Device>{*device_}, ctx_properties.data(), nullptr, nullptr, &ret);
+#else
   context_ = new (std::nothrow) cl::Context(std::vector<cl::Device>{*device_}, nullptr, nullptr, nullptr, &ret);
 #endif
-  if (ret != CL_SUCCESS || context_ == nullptr) {
+#endif
+  if (ret != CL_SUCCESS) {
+    delete device_;
     MS_LOG(ERROR) << "Context create failed: " << CLErrorCode(ret);
     return RET_ERROR;
   }
 
   // get cache size, compute units and frequency.
-  device_->getInfo(CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, &global_memery_cachesize_);
-  device_->getInfo(CL_DEVICE_MAX_COMPUTE_UNITS, &compute_units_);
-  device_->getInfo(CL_DEVICE_MAX_CLOCK_FREQUENCY, &max_freq_);
+  ret = device_->getInfo(CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, &global_memery_cachesize_);
+  if (ret != CL_SUCCESS) {
+    MS_LOG(WARNING) << CLErrorCode(ret);
+  }
+  ret = device_->getInfo(CL_DEVICE_MAX_COMPUTE_UNITS, &compute_units_);
+  if (ret != CL_SUCCESS) {
+    MS_LOG(WARNING) << CLErrorCode(ret);
+  }
+  ret = device_->getInfo(CL_DEVICE_MAX_CLOCK_FREQUENCY, &max_freq_);
+  if (ret != CL_SUCCESS) {
+    MS_LOG(WARNING) << CLErrorCode(ret);
+  }
   cl_device_fp_config fp_config;
   auto success = device_->getInfo(CL_DEVICE_HALF_FP_CONFIG, &fp_config);
   support_fp16_ = CL_SUCCESS == success && fp_config > 0;
@@ -193,24 +225,38 @@ int OpenCLRuntime::Init() {
                    << "SVM_ATOMICS";
     }
   }
-
+  global_memery_size_ = device_->getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>();
+  max_alloc_size_ = device_->getInfo<CL_DEVICE_MAX_MEM_ALLOC_SIZE>();
+  MS_LOG(INFO) << "Address space bits: " << device_->getInfo<CL_DEVICE_ADDRESS_BITS>();
+  MS_LOG(INFO) << "Global Mem Size: " << global_memery_size_;
   MS_LOG(INFO) << "Global Mem Cache Size: " << global_memery_cachesize_;
+  MS_LOG(INFO) << "Max Alloc Size: " << max_alloc_size_;
   MS_LOG(INFO) << "Compute Unit: " << compute_units_;
   MS_LOG(INFO) << "Clock Frequency: " << max_freq_ << " MHz";
 
-  const cl_command_queue_properties properties = 0;
-#if MS_OPENCL_PROFILE
-  properties |= CL_QUEUE_PROFILING_ENABLE;
-#endif
-
-  default_command_queue_ = new (std::nothrow) cl::CommandQueue(*context_, *device_, properties, &ret);
-  if (ret != CL_SUCCESS || default_command_queue_ == nullptr) {
+  default_command_queue_ = new (std::nothrow) cl::CommandQueue(*context_, *device_, 0, &ret);
+  if (ret != CL_SUCCESS) {
+    delete device_;
+    delete context_;
     MS_LOG(ERROR) << "Command Queue create failed: " << CLErrorCode(ret);
+    return RET_ERROR;
+  }
+
+  profiling_command_queue_ = new (std::nothrow) cl::CommandQueue(*context_, *device_, CL_QUEUE_PROFILING_ENABLE, &ret);
+  if (ret != CL_SUCCESS) {
+    delete device_;
+    delete context_;
+    delete default_command_queue_;
+    MS_LOG(ERROR) << "Profiling command Queue create failed: " << CLErrorCode(ret);
     return RET_ERROR;
   }
 
   allocator_ = new (std::nothrow) OpenCLAllocator(this);
   if (allocator_ == nullptr) {
+    delete device_;
+    delete context_;
+    delete default_command_queue_;
+    delete profiling_command_queue_;
     MS_LOG(ERROR) << "Command OpenCL allocator failed!";
     return RET_ERROR;
   }
@@ -218,6 +264,9 @@ int OpenCLRuntime::Init() {
   std::string flag = "";
   binary_program_ = CreateProgramFromIL(g_program_binary, flag);
 #endif
+  if (enable_cache_) {
+    InitGpuCache();
+  }
   init_done_ = true;
   MS_LOG(INFO) << "OpenCLRuntime init done!";
 
@@ -225,13 +274,22 @@ int OpenCLRuntime::Init() {
 }
 
 int OpenCLRuntime::Uninit() {
+  if (!init_done_) {
+    return RET_OK;
+  }
+  if (enable_cache_ && !binary_map_.empty()) {
+    StoreCache();
+  }
+  binary_map_.clear();
   program_map_.clear();
   delete allocator_;
   delete default_command_queue_;
+  delete profiling_command_queue_;
   delete context_;
   delete device_;
   allocator_ = nullptr;
   default_command_queue_ = nullptr;
+  profiling_command_queue_ = nullptr;
   context_ = nullptr;
   device_ = nullptr;
 #ifdef USE_OPENCL_WRAPPER
@@ -250,7 +308,7 @@ cl::Device *OpenCLRuntime::Device() { return device_; }
 
 uint64_t OpenCLRuntime::DeviceGlobalMemoryCacheSize() const { return global_memery_cachesize_; }
 
-int OpenCLRuntime::DeviceMaxWorkGroupSize() const { return max_work_group_size; }
+int OpenCLRuntime::DeviceMaxWorkGroupSize() const { return max_work_group_size_; }
 
 uint32_t OpenCLRuntime::DeviceComputeUnits() const { return compute_units_; }
 
@@ -260,7 +318,9 @@ uint32_t OpenCLRuntime::DeviceMaxFreq() const { return max_freq_; }
 uint64_t OpenCLRuntime::GetMaxWorkGroupSize(const cl::Kernel &kernel) {
   uint64_t max_workgroup_size = 0;
   int ret = kernel.getWorkGroupInfo(*device_, CL_KERNEL_WORK_GROUP_SIZE, &max_workgroup_size);
-  if (ret != 0) max_workgroup_size = 0;
+  if (ret != CL_SUCCESS) {
+    max_workgroup_size = 0;
+  }
   return max_workgroup_size;
 }
 
@@ -336,6 +396,12 @@ int OpenCLRuntime::BuildKernel(cl::Kernel &kernel, const std::string &program_na
       MS_LOG(ERROR) << program_name << " build failed!";
       return RET_ERROR;
     }
+    if (enable_cache_) {
+      need_write_ = true;
+      auto bin = GetProgramBinaries(program);
+      MS_ASSERT(bin.size() >= 1);
+      binary_map_.emplace(build_program_key, bin[0]);
+    }
     program_map_.emplace(build_program_key, program);
   }
 
@@ -349,50 +415,18 @@ int OpenCLRuntime::BuildKernel(cl::Kernel &kernel, const std::string &program_na
 }
 
 // Run Kernel with 1D, 2D, 3D group size, and local size can be empty.
-int OpenCLRuntime::RunKernel(const cl::Kernel &kernel, const std::vector<size_t> &global,
-                             const std::vector<size_t> &local, cl::CommandQueue *command_queue) {
+int OpenCLRuntime::RunKernel(const cl::Kernel &kernel, const cl::NDRange &global, const cl::NDRange &local,
+                             cl::CommandQueue *command_queue, cl::Event *event) {
   if (command_queue == nullptr) {
-    command_queue = default_command_queue_;
+    if (profiling_) {
+      command_queue = profiling_command_queue_;
+    } else {
+      command_queue = default_command_queue_;
+    }
   }
   MS_ASSERT(local.size() == 0 || local.size() == global.size());
-  std::vector<size_t> internal_global_ws = global;
-  for (size_t i = 0; i < local.size(); ++i) {
-    internal_global_ws[i] = ROUND_UP(global[i], local[i]);
-  }
-
-  MS_LOG(DEBUG) << "global size: " << global.size() << ", local size: " << local.size();
-  for (size_t i = 0; i < global.size(); i++) {
-    MS_LOG(DEBUG) << "global[" << i << "] = " << global[i];
-  }
-  for (size_t i = 0; i < local.size(); i++) {
-    MS_LOG(DEBUG) << "local[" << i << "] = " << local[i];
-  }
-
-  cl::NDRange global_range = cl::NullRange;
-  cl::NDRange local_range = cl::NullRange;
-  if (global.size() == 1) {
-    global_range = cl::NDRange(internal_global_ws[0]);
-    if (!local.empty()) {
-      local_range = cl::NDRange(local[0]);
-    }
-  } else if (global.size() == 2) {
-    global_range = cl::NDRange(internal_global_ws[0], internal_global_ws[1]);
-    if (!local.empty()) {
-      local_range = cl::NDRange(local[0], local[1]);
-    }
-  } else if (global.size() == 3) {
-    global_range = cl::NDRange(internal_global_ws[0], internal_global_ws[1], internal_global_ws[2]);
-    if (!local.empty()) {
-      local_range = cl::NDRange(local[0], local[1], local[2]);
-    }
-  } else {
-    MS_LOG(ERROR) << "Not supported NDRange!";
-    return RET_ERROR;
-  }
-
-  cl::Event event;
   cl_int ret = CL_SUCCESS;
-  ret = command_queue->enqueueNDRangeKernel(kernel, cl::NullRange, global_range, local_range, nullptr, &event);
+  ret = command_queue->enqueueNDRangeKernel(kernel, cl::NullRange, global, local, nullptr, event);
   if (ret != CL_SUCCESS) {
     MS_LOG(ERROR) << "Kernel execute failed:" << CLErrorCode(ret);
     return RET_ERROR;
@@ -400,22 +434,18 @@ int OpenCLRuntime::RunKernel(const cl::Kernel &kernel, const std::vector<size_t>
   static int cnt = 0;
   const int flush_period = 10;
   if (cnt % flush_period == 0) {
-    command_queue->flush();
+    auto flush_ret = command_queue->flush();
+    if (flush_ret != CL_SUCCESS) {
+      MS_LOG(WARNING) << "CL Flush failed:" << CLErrorCode(ret);
+    }
   }
   cnt++;
   MS_LOG(DEBUG) << "RunKernel success!";
-#if MS_OPENCL_PROFILE
-  event.wait();
-  cl_ulong time_start;
-  cl_ulong time_end;
-  event.getProfilingInfo(CL_PROFILING_COMMAND_START, &time_start);
-  event.getProfilingInfo(CL_PROFILING_COMMAND_END, &time_end);
-  double nanoSeconds = time_end - time_start;
-  MS_LOG(INFO) << "OpenCl Execution time is: " << nanoSeconds / 1000000.0 << "ms";
-#endif
+  if (profiling_) {
+    event->wait();
+  }
   return RET_OK;
 }
-
 // get gpu divce type
 GpuInfo OpenCLRuntime::ParseGpuInfo(std::string device_name, std::string device_version) {
   GpuInfo info;
@@ -597,9 +627,8 @@ cl::Program OpenCLRuntime::CreateProgramFromIL(const std::vector<char> &binary, 
 }
 
 // build program with binary
-cl::Program OpenCLRuntime::CreateProgramFromBinary(const std::vector<std::vector<unsigned char>> &binary,
-                                                   const std::string &flag) {
-  cl::Program program = cl::Program(*context_, {*device_}, binary);
+cl::Program OpenCLRuntime::CreateProgramFromBinary(const std::vector<unsigned char> &binary, const std::string &flag) {
+  cl::Program program = cl::Program(*context_, {*device_}, {binary});
   bool status = BuildProgram(default_build_opts_, program);
   if (!status) {
     MS_LOG(ERROR) << "Build program with binary failed!";
@@ -614,5 +643,76 @@ std::vector<std::vector<unsigned char>> OpenCLRuntime::GetProgramBinaries(const 
     MS_LOG(ERROR) << "Get program binary failed: " << CLErrorCode(ret);
   }
   return binary;
+}
+void OpenCLRuntime::InitGpuCache() {
+  size_t len;
+  char *buf = lite::ReadFile(cache_path_.c_str(), &len);
+  if (LoadCache(buf) != RET_OK) {
+    MS_LOG(ERROR) << "Load opencl cache fail";
+  }
+  delete buf;
+  MS_LOG(INFO) << "Init opencl cache success";
+}
+int OpenCLRuntime::LoadCache(const void *buf) {
+  if (buf == nullptr) {
+    return RET_ERROR;
+  }
+  auto gpu_cache = schema::GetGpuCache(buf);
+  if (gpu_cache == nullptr) {
+    return RET_ERROR;
+  }
+  auto *bins = gpu_cache->allBins();
+  if (bins == nullptr) {
+    return RET_ERROR;
+  }
+  auto n = bins->size();
+  for (auto i = 0; i < n; ++i) {
+    auto *kernel_bin = bins->template GetAs<schema::KernelBin>(i);
+    if (kernel_bin == nullptr) {
+      MS_LOG(ERROR) << "kernel_bin[" << i << "] null";
+      return RET_ERROR;
+    }
+    auto *pdata = kernel_bin->data();
+    MS_ASSERT(pdata);
+    if (pdata->size() == 0) {
+      continue;
+    }
+    std::vector<unsigned char> bin(pdata->begin(), pdata->end());
+    auto program = CreateProgramFromBinary(bin, kernel_bin->name()->str());
+    program_map_.emplace(kernel_bin->name()->str(), program);
+    binary_map_.emplace(kernel_bin->name()->str(), bin);
+    MS_LOG(INFO) << "LoadCache " << kernel_bin->name()->str() << " success, size=" << pdata->size();
+  }
+  return RET_OK;
+}
+void OpenCLRuntime::StoreCache() {
+  if (need_write_) {
+    auto fbb_ = new (std::nothrow) flatbuffers::FlatBufferBuilder;
+    if (fbb_ == nullptr) {
+      MS_LOG(ERROR) << "new opencl FlatBufferBuilder fail";
+      return;
+    }
+    std::vector<flatbuffers::Offset<schema::KernelBin>> vec_kernel_bin;
+    for (auto iv : binary_map_) {
+      auto name = fbb_->CreateString(iv.first);
+      auto data = fbb_->CreateVector<uint8_t>(iv.second);
+      std::vector<int32_t> shape;
+      auto tune = schema::CreateTuneParam(*fbb_, fbb_->CreateVector<int32_t>(shape), fbb_->CreateVector<int32_t>(shape),
+                                          fbb_->CreateVector<int32_t>(shape), fbb_->CreateVector<int32_t>(shape));
+      auto kbin = schema::CreateKernelBin(*fbb_, name, tune, data);
+      vec_kernel_bin.emplace_back(kbin);
+      MS_LOG(INFO) << "StoreCache " << iv.first << " success, size=" << iv.second.size();
+    }
+
+    auto data = fbb_->CreateVector<flatbuffers::Offset<schema::KernelBin>>(vec_kernel_bin);
+    auto name = fbb_->CreateString("OpenCLCache");
+    auto version = fbb_->CreateString(version_);
+    auto gpu_cache = schema::CreateGpuCache(*fbb_, name, version, data);
+    fbb_->Finish(gpu_cache);
+    uint8_t *buf = fbb_->GetBufferPointer();
+    lite::WriteToBin(cache_path_, reinterpret_cast<void *>(buf), fbb_->GetSize());
+    MS_LOG(INFO) << "store opencl cache ok, size=" << fbb_->GetSize();
+    delete fbb_;
+  }
 }
 }  // namespace mindspore::lite::opencl

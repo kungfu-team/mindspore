@@ -34,12 +34,14 @@ class TopKCategoricalAccuracy(Metric):
 
     Examples:
         >>> x = Tensor(np.array([[0.2, 0.5, 0.3, 0.6, 0.2], [0.1, 0.35, 0.5, 0.2, 0.],
-        >>>         [0.9, 0.6, 0.2, 0.01, 0.3]]), mindspore.float32)
+        ...         [0.9, 0.6, 0.2, 0.01, 0.3]]), mindspore.float32)
         >>> y = Tensor(np.array([2, 0, 1]), mindspore.float32)
         >>> topk = nn.TopKCategoricalAccuracy(3)
         >>> topk.clear()
         >>> topk.update(x, y)
-        >>> result = topk.eval()
+        >>> output = topk.eval()
+        >>> print(output)
+        0.6666666666666666
     """
     def __init__(self, k):
         super(TopKCategoricalAccuracy, self).__init__()
@@ -98,12 +100,14 @@ class Top1CategoricalAccuracy(TopKCategoricalAccuracy):
 
     Examples:
         >>> x = Tensor(np.array([[0.2, 0.5, 0.3, 0.6, 0.2], [0.1, 0.35, 0.5, 0.2, 0.],
-        >>>         [0.9, 0.6, 0.2, 0.01, 0.3]]), mindspore.float32)
+        ...         [0.9, 0.6, 0.2, 0.01, 0.3]]), mindspore.float32)
         >>> y = Tensor(np.array([2, 0, 1]), mindspore.float32)
         >>> topk = nn.Top1CategoricalAccuracy()
         >>> topk.clear()
         >>> topk.update(x, y)
-        >>> result = topk.eval()
+        >>> output = topk.eval()
+        >>> print(output)
+        0.0
     """
     def __init__(self):
         super(Top1CategoricalAccuracy, self).__init__(1)
@@ -116,12 +120,14 @@ class Top5CategoricalAccuracy(TopKCategoricalAccuracy):
 
     Examples:
         >>> x = Tensor(np.array([[0.2, 0.5, 0.3, 0.6, 0.2], [0.1, 0.35, 0.5, 0.2, 0.],
-        >>>            [0.9, 0.6, 0.2, 0.01, 0.3]]), mindspore.float32)
+        ...            [0.9, 0.6, 0.2, 0.01, 0.3]]), mindspore.float32)
         >>> y = Tensor(np.array([2, 0, 1]), mindspore.float32)
         >>> topk = nn.Top5CategoricalAccuracy()
         >>> topk.clear()
         >>> topk.update(x, y)
-        >>> result = topk.eval()
+        >>> output = topk.eval()
+        >>> print(output)
+        1.0
     """
     def __init__(self):
         super(Top5CategoricalAccuracy, self).__init__(5)

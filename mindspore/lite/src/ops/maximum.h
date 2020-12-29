@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef LITE_MINDSPORE_LITE_C_OPS_MAXIMUM_H_
-#define LITE_MINDSPORE_LITE_C_OPS_MAXIMUM_H_
+#ifndef MINDSPORE_LITE_SRC_OPS_MAXIMUM_H_
+#define MINDSPORE_LITE_SRC_OPS_MAXIMUM_H_
 
 #include <vector>
 #include <set>
@@ -28,18 +28,17 @@ namespace mindspore {
 namespace lite {
 class Maximum : public Arithmetic {
  public:
+  Maximum() = default;
+  ~Maximum() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(Arithmetic, Arithmetic);
-  Maximum() = default;
   explicit Maximum(schema::PrimitiveT *primitive) : Arithmetic(primitive) {}
   int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
 #else
-  Maximum() = default;
-
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
 };
 }  // namespace lite
 }  // namespace mindspore
 
-#endif  // LITE_MINDSPORE_LITE_C_OPS_MAXIMUM_H_
+#endif  // MINDSPORE_LITE_SRC_OPS_MAXIMUM_H_

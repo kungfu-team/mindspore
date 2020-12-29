@@ -18,7 +18,7 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_OPENCL_KERNEL_REDUCE_H_
 
 #include <vector>
-
+#include <string>
 #include "src/lite_kernel.h"
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
 #include "nnacl/reduce_parameter.h"
@@ -26,21 +26,25 @@
 namespace mindspore::kernel {
 class ReduceOpenCLKernel : public OpenCLKernel {
  public:
-  explicit ReduceOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                              const std::vector<lite::Tensor *> &outputs)
+  ReduceOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
+                     const std::vector<lite::Tensor *> &outputs)
       : OpenCLKernel(parameter, inputs, outputs) {}
-  ~ReduceOpenCLKernel() override{};
+  ~ReduceOpenCLKernel() override = default;
 
-  int Init() override;
-  int ReSize() override;
   int Run() override;
-  int GetImageSize(size_t idx, std::vector<size_t> *img_size) override;
-  void InitNHWCShape();
+  int Prepare() override;
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
+  int Tune() override;
 
  private:
-  cl::Kernel kernel_;
-  bool enable_fp16_{false};
-  std::vector<size_t> nhwc_shape_;
+  cl_float4 GenC4Mask();
+  static std::string GetReduceTypeStr(int type);
+  GpuTensorInfo outShape = GpuTensorInfo(nullptr);
+  bool use_local_{false};
+  bool wc_reduce_{false};
+  static const size_t LOCAL_CACHE_THREAD{16};
 };
 }  // namespace mindspore::kernel
 

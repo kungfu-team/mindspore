@@ -21,16 +21,17 @@
 namespace mindspore {
 namespace device {
 namespace ascend {
-constexpr uint64_t kAscendDeviceMemGB = 30;
+constexpr uint64_t kAscendInitDeviceMemGB = 30;
+constexpr uint64_t kAscendMaxDeviceMemGB = 31;
 constexpr uint64_t kMemSizeGB = 30;
-constexpr uint64_t kAscendDeviceMemSize = (kAscendDeviceMemGB << kMemSizeGB);
+constexpr uint64_t kAscendDeviceMemSize = (kAscendInitDeviceMemGB << kMemSizeGB);
 
 void AscendMemoryManager::MallocDeviceMemory() {
   auto context_mem = GetDeviceMemSizeFromContext();
   device_mem_size_ = context_mem == 0 ? kAscendDeviceMemSize : context_mem;
   auto ret = rtMalloc(reinterpret_cast<void **>(&device_mem_base_), device_mem_size_, RT_MEMORY_HBM);
-  if (ret != RT_ERROR_NONE) {
-    if (ret == RT_ERROR_DRV_ERR) {
+  if (ret != ACL_RT_SUCCESS) {
+    if (ret == ACL_ERROR_RT_MEMORY_ALLOCATION) {
       auto context_ptr = MsContext::GetInstance();
       MS_EXCEPTION_IF_NULL(context_ptr);
       unsigned int device_id = context_ptr->get_param<uint32_t>(MS_CTX_DEVICE_ID);
@@ -40,7 +41,6 @@ void AscendMemoryManager::MallocDeviceMemory() {
       MS_EXCEPTION(DeviceProcessError) << "rtMalloc mem size[" << device_mem_size_ << "] fail, ret[" << ret << "]";
     }
   }
-
   AscendMemoryPool::GetInstance().Init(device_mem_base_, device_mem_size_, dynamic_mem_offset_);
 }
 
@@ -59,8 +59,8 @@ uint64_t AscendMemoryManager::GetDeviceMemSizeFromContext() {
   auto gb_str = variable_memory_max_size.substr(0, pos);
   auto gb_var = std::stoull(gb_str);
   MS_LOG(INFO) << "variable_memory_max_size(GB):" << gb_var;
-  if (gb_var > kAscendDeviceMemGB || gb_var == 0) {
-    MS_LOG(EXCEPTION) << "Invalid allocate memory size:" << gb_var << " which should be in (0-30]GB";
+  if (gb_var > kAscendMaxDeviceMemGB || gb_var == 0) {
+    MS_LOG(EXCEPTION) << "Invalid allocate memory size:" << gb_var << " which should be in (0-31]GB";
   }
   return gb_var << kMemSizeGB;
 }

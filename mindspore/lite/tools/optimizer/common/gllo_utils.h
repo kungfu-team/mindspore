@@ -34,6 +34,8 @@ using mindspore::lite::RET_OK;
 using mindspore::lite::STATUS;
 namespace mindspore {
 namespace opt {
+bool CheckPrimitiveType(const AnfNodePtr &node, const PrimitivePtr &primitive_type);
+
 bool IsRealCNodeKernel(const AnfNodePtr &node);
 
 bool IsGraphKernel(const AnfNodePtr &node);
@@ -65,6 +67,8 @@ bool IsPoolingNode(const BaseRef &n);
 
 bool IsQuantNode(const BaseRef &n);
 
+bool IsActivationNode(const BaseRef &n);
+
 bool CheckIsAllInputsParam(const AnfNodePtr &node);
 
 size_t GetOutputTensorNum(const AnfNodePtr &node);
@@ -74,6 +78,8 @@ bool IsMultiOutputTensors(const FuncGraphPtr &graph, const AnfNodePtr &node);
 size_t GetTupleGetItemOutIndex(const CNodePtr &tuple_get_item);
 
 ParamValueLitePtr GetLiteParamValue(const AnfNodePtr &node);
+
+AbstractBasePtr GetCNodeInputAbstract(const CNodePtr &cnode, size_t index);
 
 enum kTransFilterType {
   kKCHW2HWCK,  // 0
@@ -96,7 +102,8 @@ enum kTransFilterType {
   kKHWC2KCHW,
   kCKHW2KCHW,
   kCHWK2KCHW,
-  kKCHW2CKHW  // 20
+  kKCHW2CKHW,  // 20
+  kHWCK2KHWC
 };
 
 STATUS GetFilterDim(const std::vector<int32_t> &oriDims, kTransFilterType type, int32_t *filterK, int32_t *filterC,

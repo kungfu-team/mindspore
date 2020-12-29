@@ -26,7 +26,7 @@ from mindspore._checkparam import Validator as validator
 from mindspore._checkparam import Rel
 from .optimizer import Optimizer
 from .. import layer
-from .. import graph_kernels as G
+from .. import _graph_kernels as G
 
 num_one = Tensor(np.ones([1]), mstype.float32)
 
@@ -177,9 +177,9 @@ def _check_param_value(beta1, beta2, eps, prim_name):
     validator.check_value_type("beta1", beta1, [float], prim_name)
     validator.check_value_type("beta2", beta2, [float], prim_name)
     validator.check_value_type("eps", eps, [float], prim_name)
-    validator.check_number_range("beta1", beta1, 0.0, 1.0, Rel.INC_NEITHER, prim_name)
-    validator.check_number_range("beta2", beta2, 0.0, 1.0, Rel.INC_NEITHER, prim_name)
-    validator.check_number_range("eps", eps, 0.0, float("inf"), Rel.INC_NEITHER, prim_name)
+    validator.check_float_range(beta1, 0.0, 1.0, Rel.INC_NEITHER, "beta1", prim_name)
+    validator.check_float_range(beta2, 0.0, 1.0, Rel.INC_NEITHER, "beta2", prim_name)
+    validator.check_positive_float(eps, "eps", prim_name)
 
 
 class Lamb(Optimizer):
@@ -235,18 +235,22 @@ class Lamb(Optimizer):
     Outputs:
         tuple[bool], all elements are True.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> net = Net()
         >>> #1) All parameters use the same learning rate and weight decay
-        >>> optim = nn.Lamb(params=net.trainable_params())
+        >>> optim = nn.Lamb(params=net.trainable_params(), learning_rate=0.1)
         >>>
         >>> #2) Use parameter groups and set different values
-        >>> poly_decay_lr = learning_rate_schedule.PolynomialDecayLR()
+        >>> poly_decay_lr = learning_rate_schedule.PolynomialDecayLR(learning_rate=0.1, end_learning_rate=0.01,
+        ...                                                    decay_steps=4, power = 0.5)
         >>> conv_params = list(filter(lambda x: 'conv' in x.name, net.trainable_params()))
         >>> no_conv_params = list(filter(lambda x: 'conv' not in x.name, net.trainable_params()))
         >>> group_params = [{'params': conv_params, 'weight_decay': 0.01},
-        >>>                 {'params': no_conv_params, 'lr': poly_decay_lr},
-        >>>                 {'order_params': net.trainable_params(0.01, 0.0001, 10, 0.5)}]
+        ...                 {'params': no_conv_params, 'lr': poly_decay_lr},
+        ...                 {'order_params': net.trainable_params(0.01)}]
         >>> optim = nn.Lamb(group_params, learning_rate=0.1, weight_decay=0.0)
         >>> # The conv_params's parameters will use default learning rate of 0.1 and weight decay of 0.01.
         >>> # The no_conv_params's parameters will use dynamic learning rate of poly decay learning rate and default

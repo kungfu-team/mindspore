@@ -19,11 +19,13 @@
 #include "common/common_test.h"
 #include "mindspore/lite/src/runtime/opencl/opencl_runtime.h"
 #include "mindspore/lite/src/common/file_utils.h"
-#include "mindspore/lite/src/runtime/kernel/opencl/subgraph_opencl_kernel.h"
+#include "mindspore/lite/src/runtime/kernel/opencl/opencl_subgraph.h"
 #include "mindspore/lite/src/runtime/kernel/opencl/kernel/cast.h"
 
-namespace mindspore {
-class TestCastSelfOpenCL : public mindspore::CommonTest {
+// PrimitiveType_Cast: src/ops/populate/cast_populate.cc
+
+namespace mindspore::lite::opencl::test {
+class TestCastSelfOpenCL : public CommonTest {
  public:
   TestCastSelfOpenCL() {}
 };
@@ -61,7 +63,7 @@ TEST_F(TestCastSelfOpenCL, Castfp32tofp16) {
 
   MS_LOG(INFO) << " init tensors ";
   std::vector<int> shape = {1, 23, 39, 47};
-  auto tensor_type = lite::TensorCategory(schema::NodeType_ValueNode);
+  auto tensor_type = lite::Tensor::CONST_TENSOR;
   auto *input_tensor = new (std::nothrow) lite::Tensor(kNumberTypeFloat32, shape, schema::Format_NHWC, tensor_type);
   auto *output_tensor = new (std::nothrow) lite::Tensor(kNumberTypeFloat16, shape, schema::Format_NHWC, tensor_type);
   if (input_tensor == nullptr || output_tensor == nullptr) {
@@ -84,7 +86,6 @@ TEST_F(TestCastSelfOpenCL, Castfp32tofp16) {
     delete param;
     return;
   }
-  cast_kernel->SetFormatType(schema::Format_NC4HW4);
   cast_kernel->Init();
   // to do allocate memory for inputs and outputs
   for (auto &input_tensor : inputs) {
@@ -92,9 +93,9 @@ TEST_F(TestCastSelfOpenCL, Castfp32tofp16) {
   }
   MS_LOG(INFO) << " initialize sub_graph ";
   std::vector<kernel::LiteKernel *> kernels{cast_kernel};
-  auto *sub_graph = new (std::nothrow) kernel::SubGraphOpenCLKernel(inputs, outputs, kernels, kernels, kernels);
+  auto *sub_graph = new (std::nothrow) kernel::OpenCLSubGraph(inputs, outputs, kernels, kernels, kernels);
   if (sub_graph == nullptr) {
-    MS_LOG(INFO) << " new kernel::SubGraphOpenCLKernel failed ";
+    MS_LOG(INFO) << " new kernel::OpenCLSubGraph failed ";
     for (auto tensor : inputs) {
       delete tensor;
     }
@@ -114,11 +115,11 @@ TEST_F(TestCastSelfOpenCL, Castfp32tofp16) {
   auto *output_data_gpu = reinterpret_cast<float16_t *>(output_tensor->data_c());
   CompareOutputData1(output_data_gpu, correctOutput, output_tensor->ElementsNum(), 0.000001);
   for (auto tensor : inputs) {
-    tensor->SetData(nullptr);
+    tensor->set_data(nullptr);
     delete tensor;
   }
   for (auto tensor : outputs) {
-    tensor->SetData(nullptr);
+    tensor->set_data(nullptr);
     delete tensor;
   }
   delete sub_graph;
@@ -148,7 +149,7 @@ TEST_F(TestCastSelfOpenCL, Castfp16tofp32) {
 
   MS_LOG(INFO) << " init tensors ";
   std::vector<int> shape = {1, 23, 39, 47};
-  auto tensor_type = lite::TensorCategory(schema::NodeType_ValueNode);
+  auto tensor_type = lite::Tensor::CONST_TENSOR;
   auto *input_tensor = new (std::nothrow) lite::Tensor(kNumberTypeFloat16, shape, schema::Format_NHWC, tensor_type);
   auto *output_tensor = new (std::nothrow) lite::Tensor(kNumberTypeFloat32, shape, schema::Format_NHWC, tensor_type);
   if (input_tensor == nullptr || output_tensor == nullptr) {
@@ -171,7 +172,6 @@ TEST_F(TestCastSelfOpenCL, Castfp16tofp32) {
     delete param;
     return;
   }
-  cast_kernel->SetFormatType(schema::Format_NC4HW4);
   cast_kernel->Init();
   // to do allocate memory for inputs and outputs
   for (auto &input_tensor : inputs) {
@@ -179,9 +179,9 @@ TEST_F(TestCastSelfOpenCL, Castfp16tofp32) {
   }
   MS_LOG(INFO) << " initialize sub_graph ";
   std::vector<kernel::LiteKernel *> kernels{cast_kernel};
-  auto *sub_graph = new (std::nothrow) kernel::SubGraphOpenCLKernel(inputs, outputs, kernels, kernels, kernels);
+  auto *sub_graph = new (std::nothrow) kernel::OpenCLSubGraph(inputs, outputs, kernels, kernels, kernels);
   if (sub_graph == nullptr) {
-    MS_LOG(INFO) << " new kernel::SubGraphOpenCLKernel failed ";
+    MS_LOG(INFO) << " new kernel::OpenCLSubGraph failed ";
     for (auto tensor : inputs) {
       delete tensor;
     }
@@ -201,13 +201,13 @@ TEST_F(TestCastSelfOpenCL, Castfp16tofp32) {
   auto *output_data_gpu = reinterpret_cast<float *>(output_tensor->data_c());
   CompareOutputData1(output_data_gpu, correctOutput, output_tensor->ElementsNum(), 0.000001);
   for (auto tensor : inputs) {
-    tensor->SetData(nullptr);
+    tensor->set_data(nullptr);
     delete tensor;
   }
   for (auto tensor : outputs) {
-    tensor->SetData(nullptr);
+    tensor->set_data(nullptr);
     delete tensor;
   }
   delete sub_graph;
 }
-}  // namespace mindspore
+}  // namespace mindspore::lite::opencl::test

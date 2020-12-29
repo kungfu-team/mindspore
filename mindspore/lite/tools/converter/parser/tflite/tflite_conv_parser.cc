@@ -17,33 +17,21 @@
 #include "tools/converter/parser/tflite/tflite_conv_parser.h"
 #include <vector>
 #include <memory>
-#include <map>
 
-namespace mindspore {
-namespace lite {
-STATUS TfliteConvParser::Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                               const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TfliteConvParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
+namespace mindspore::lite {
+lite::PrimitiveC *TfliteConvParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                       const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  const auto &tflite_subgraph = tflite_model->subgraphs.front();
   std::unique_ptr<schema::Conv2DT> attr = std::make_unique<schema::Conv2DT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   const auto &tflite_attr = tflite_op->builtin_options.AsConv2DOptions();
   if (tflite_attr == nullptr) {
-    MS_LOG(ERROR) << "get op: " << op->name.c_str() << " attr failed";
-    return RET_NULL_PTR;
+    MS_LOG(ERROR) << "get conv attr failed";
+    return nullptr;
   }
   attr->group = 1;
   attr->strideW = tflite_attr->stride_w;
@@ -53,14 +41,13 @@ STATUS TfliteConvParser::Parse(TfliteTensorsInfo *tensors_info, const std::uniqu
   attr->padMode = GetPadMode(tflite_attr->padding);
   attr->format = schema::Format::Format_NHWC;
   attr->activationType = GetActivationFunctionType(tflite_attr->fused_activation_function);
-  attr->hasBias = true;
 
   // get the conv op weight tensor
   auto weight_index = tflite_op->inputs[1];
-  const auto &weight_tensor = tflite_model->subgraphs[0]->tensors[weight_index];
+  const auto &weight_tensor = tflite_subgraph->tensors[weight_index];
   if (weight_tensor == nullptr) {
     MS_LOG(ERROR) << "the weight tensor is null";
-    return RET_NULL_PTR;
+    return nullptr;
   }
   auto weight_shape = weight_tensor->shape;
   attr->channelIn = weight_shape[3];
@@ -70,33 +57,24 @@ STATUS TfliteConvParser::Parse(TfliteTensorsInfo *tensors_info, const std::uniqu
 
   // calculate pad params
   auto data_index = tflite_op->inputs[0];
-  const auto &data_tensor = tflite_model->subgraphs[0]->tensors[data_index];
-  std::vector<int> params;
-  if (getPaddingParam(data_tensor, attr->padMode, attr->strideH, attr->strideW, attr->kernelH, attr->kernelW,
-                      &params) != RET_OK) {
+  const auto &data_tensor = tflite_subgraph->tensors[data_index];
+  std::vector<int64_t> params;
+  int status =
+    getPaddingParam(data_tensor, attr->padMode, attr->strideH, attr->strideW, attr->kernelH, attr->kernelW, &params);
+  if (status != RET_OK && status != RET_NO_CHANGE) {
     MS_LOG(ERROR) << "get padding params failed";
-    return RET_ERROR;
-  } else {
+    return nullptr;
+  } else if (status == RET_OK) {
     attr->padUp = params.at(0);
     attr->padDown = params.at(1);
     attr->padLeft = params.at(2);
     attr->padRight = params.at(3);
   }
-
-  op->primitive->value.type = schema::PrimitiveType_Conv2D;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpInput(op, tensors_info, tflite_op->inputs[1], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_KHWC);
-  AddOpInput(op, tensors_info, tflite_op->inputs[2], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  primitive->value.type = schema::PrimitiveType_Conv2D;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteConv2DParser("Conv2D", new TfliteConvParser());
-}  // namespace lite
-}  // namespace mindspore
+TfliteNodeRegister g_tfliteConv2DParser(tflite::BuiltinOperator_CONV_2D, new TfliteConvParser());
+}  // namespace mindspore::lite

@@ -15,23 +15,24 @@
  */
 
 #include "backend/kernel_compiler/tbe/tbe_kernel_select/tbe_kernel_select.h"
-#include <memory>
+
 #include <map>
+#include <memory>
 #include <set>
 #include <utility>
-#include "backend/session/anf_runtime_algorithm.h"
 #include "backend/kernel_compiler/oplib/oplib.h"
-#include "backend/kernel_compiler/tbe/tbe_kernel_build.h"
-#include "nlohmann/json.hpp"
-#include "backend/optimizer/common/helper.h"
 #include "backend/kernel_compiler/tbe/tbe_convert_utils.h"
-#include "frontend/parallel/ops_info/ops_utils.h"
+#include "backend/kernel_compiler/tbe/tbe_dynaminc_shape_util.h"
+#include "backend/kernel_compiler/tbe/tbe_kernel_build.h"
+#include "backend/kernel_compiler/tbe/tbe_kernel_select/common_utils.h"
 #include "backend/kernel_compiler/tbe/tbe_kernel_select/tbe_kernel_broadcast_selecter.h"
 #include "backend/kernel_compiler/tbe/tbe_kernel_select/tbe_kernel_reduce_selecter.h"
-#include "backend/kernel_compiler/tbe/tbe_kernel_select/common_utils.h"
 #include "backend/kernel_compiler/tbe/tbe_kernel_select/tbe_property_checker.h"
-#include "backend/kernel_compiler/tbe/tbe_dynaminc_shape_util.h"
+#include "backend/optimizer/common/helper.h"
+#include "backend/session/anf_runtime_algorithm.h"
 #include "backend/session/kernel_build_client.h"
+#include "frontend/parallel/ops_info/ops_utils.h"
+#include "nlohmann/json.hpp"
 
 namespace mindspore {
 namespace kernel {
@@ -91,9 +92,9 @@ void TbeKernelSelect::GetCommonPatternKernelInfo(const OpInfo &op_info) {
   // get dynamic inputs
   auto primitive = AnfAlgo::GetCNodePrimitive(cnode_ptr_);
   MS_EXCEPTION_IF_NULL(primitive);
-  std::vector<int> dyn_input_sizes;
+  std::vector<int64_t> dyn_input_sizes;
   if (primitive->HasAttr(kAttrDynInputSizes)) {
-    dyn_input_sizes = GetValue<std::vector<int>>(primitive->GetAttr(kAttrDynInputSizes));
+    dyn_input_sizes = GetValue<std::vector<int64_t>>(primitive->GetAttr(kAttrDynInputSizes));
   }
   // get real input/output num
   size_t real_input_tensor_num = AnfAlgo::GetInputTensorNum(cnode_ptr_);
@@ -186,6 +187,9 @@ void TbeKernelSelect::GetBroadcastPatternKernelInfo(const OpInfo &op_info) {
   if (!broadcast_selecter.IsBroadCastSupportFracNZ(&support_format)) {
     MS_LOG(INFO) << "Node(" << node_name_ << ") does not support FracNZ.";
   }
+  if (!broadcast_selecter.IsBroadCastSupportNDC1HWC0(&support_format)) {
+    MS_LOG(INFO) << "Node(" << node_name_ << ") does not support NDC1HWC0.";
+  }
   PrintSupportedFormat(support_format);
   OpInfo op_info_new;
   CreateNewOpInfo(op_info, support_format, &op_info_new);
@@ -276,13 +280,12 @@ bool TbeKernelSelect::IsShapeMatchFormat(const std::vector<size_t> &shape, const
     MS_LOG(INFO) << "Warning: Server not support format with C04 suffix.";
     return false;
   }
+  if (format == kOpFormat_FRAC_NZ && shape.size() > kShape2dDims) {
+    return true;
+  }
   // not support format:
-  // 1 NDHWC with shape size != 5
-  // 2 FRAC_NZ with shape size < 2
-  // 3 !NDHWC with shape size > 4
-  if ((format == kOpFormat_NDHWC && shape.size() != kShape5dDims) ||
-      (format == kOpFormat_FRAC_NZ && shape.size() < kShape2dDims) ||
-      (format != kOpFormat_NDHWC && shape.size() > kShape4dDims)) {
+  // 1 NCDHW with shape size != 5
+  if (format == kOpFormat_NCDHW && shape.size() != kShape5dDims) {
     MS_LOG(INFO) << "Warning: Shape format check failed, format: " << format << ", size: " << shape.size();
     return false;
   }
@@ -333,7 +336,7 @@ void TbeKernelSelect::SetTbeBuildCommonInfo(const mindspore::kernel::OpInfo &op_
 
 bool TbeKernelSelect::GenBuilderItem(bool is_input, size_t kernel_build_info_index, size_t real_io_tensor_num,
                                      const std::vector<std::shared_ptr<OpIOInfo>> &ios_info,
-                                     const std::vector<int> &dyn_input_sizes, std::vector<std::string> *formats,
+                                     const std::vector<int64_t> &dyn_input_sizes, std::vector<std::string> *formats,
                                      std::vector<TypeId> *device_types, std::vector<std::vector<Axis>> *reshape_types) {
   MS_EXCEPTION_IF_NULL(formats);
   MS_EXCEPTION_IF_NULL(device_types);
@@ -359,8 +362,8 @@ bool TbeKernelSelect::GenBuilderItem(bool is_input, size_t kernel_build_info_ind
           MS_LOG(EXCEPTION) << "dyn_input_sizes attr set error, dynamic_input_index: " << dynamic_input_index
                             << ", dyn_input_sizes size: " << dyn_input_sizes.size();
         }
-        int dynamic_input_size = dyn_input_sizes[dynamic_input_index];
-        for (int i = 0; i < dynamic_input_size; ++i) {
+        int64_t dynamic_input_size = dyn_input_sizes[dynamic_input_index];
+        for (int64_t i = 0; i < dynamic_input_size; ++i) {
           device_types->emplace_back(tbe::DtypeToTypeId(kernel_build_info_dtype));
           formats->emplace_back(kernel_build_info_format);
           reshape_types->emplace_back(reshape_type);
@@ -489,7 +492,10 @@ std::string TbeKernelSelect::OpSelectFormat() {
   }
   res_json_str = AscendKernelBuildClient::Instance().SelectFormat(kernel_json.dump());
   if (res_json_str.empty()) {
-    MS_LOG(EXCEPTION) << "op select format error.";
+    MS_LOG(EXCEPTION) << "Op select format error, input args: " << kernel_json.dump();
+  }
+  if (res_json_str.find("TBEException") != std::string::npos) {
+    MS_LOG(EXCEPTION) << "Dynamic op select failed: " << res_json_str << ", input args: " << kernel_json.dump();
   }
   MS_LOG(INFO) << "Dynamic select foramt response result:" << res_json_str;
   return res_json_str;

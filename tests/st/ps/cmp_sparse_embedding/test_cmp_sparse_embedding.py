@@ -24,8 +24,8 @@ from mindspore import Tensor
 from mindspore.common import dtype as mstype
 from mindspore.nn import TrainOneStepCell, WithLossCell
 from mindspore.nn.optim import Adam
+from mindspore.common import set_seed
 from mindspore.ops import operations as P
-from mindspore.common.initializer import TruncatedNormal
 from mindspore.parallel._ps_context import _is_role_pserver, _is_role_worker
 
 parser = argparse.ArgumentParser(description="test_sparse_embedding")
@@ -38,18 +38,6 @@ context.set_context(
 context.set_ps_context(enable_ps=True)
 
 
-def fc_with_initialize(input_channels, out_channels):
-    """weight initial for fc layer"""
-    weight = weight_variable()
-    bias = weight_variable()
-    return nn.Dense(input_channels, out_channels, weight, bias)
-
-
-def weight_variable():
-    """weight initial"""
-    return TruncatedNormal(0.02)
-
-
 class LeNet5(nn.Cell):
     def __init__(self, num_class=10):
         super(LeNet5, self).__init__()
@@ -57,7 +45,7 @@ class LeNet5(nn.Cell):
         self.flatten = nn.Flatten()
         self.embedding = nn.EmbeddingLookup(16, 4)
         self.relu = nn.ReLU()
-        self.fc = fc_with_initialize(12, num_class)
+        self.fc = nn.Dense(12, num_class)
 
     def construct(self, x):
         x = self.cast(x, mstype.int32)
@@ -74,14 +62,14 @@ def do_sparse_embedding(ps=False):
         net.embedding.embedding_table.set_param_ps()
 
     optimizer = Adam(filter(lambda x: x.requires_grad, net.get_parameters()))
-    optimizer.sparse_opt.add_prim_attr("primitive_target", "CPU")
+    optimizer.target = 'CPU'
     criterion = nn.SoftmaxCrossEntropyWithLogits(sparse=True, reduction="mean")
     net_with_criterion = WithLossCell(net, criterion)
     train_network = TrainOneStepCell(net_with_criterion, optimizer)
     train_network.set_train()
     losses = []
     for _ in range(epoch):
-        data = Tensor(np.random.randint(0, 15, (32, 3), np.int32))
+        data = Tensor(np.random.randint(-5, 15, (32, 3), np.int32))
         label = Tensor(np.random.randint(0, 9, (32), np.int32))
         if _is_role_pserver():
             train_network(data, label)
@@ -95,12 +83,12 @@ def do_sparse_embedding(ps=False):
 
 envs = os.environ
 if __name__ == "__main__":
-    np.random.seed(0)
+    set_seed(0)
     ps_loss = do_sparse_embedding(True)
 
     if _is_role_worker():
         context.reset_ps_context()
-        np.random.seed(0)
+        set_seed(0)
         no_ps_loss = do_sparse_embedding()
         context.set_ps_context(enable_ps=True)
 

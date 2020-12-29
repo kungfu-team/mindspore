@@ -23,7 +23,7 @@ from mindspore import context
 from mindspore import Tensor
 from mindspore import nn
 from mindspore.train.model import Model
-from mindspore.train.quant import quant
+from mindspore.compression.quant import QuantizationAwareTraining
 from mindspore.common import set_seed
 
 from dataset import create_dataset
@@ -50,16 +50,15 @@ config_ascend_quant = ed({
     "save_checkpoint_epochs": 1,
     "keep_checkpoint_max": 300,
     "save_checkpoint_path": "./checkpoint",
-    "quantization_aware": True,
 })
 
 dataset_path = "/home/workspace/mindspore_dataset/cifar-10-batches-bin/"
 
 
-@pytest.mark.level1
+@pytest.mark.level0
 @pytest.mark.platform_arm_ascend_training
 @pytest.mark.platform_x86_ascend_training
-@pytest.mark.env_onecard
+@pytest.mark.env_single
 def test_mobilenetv2_quant():
     set_seed(1)
     context.set_context(mode=context.GRAPH_MODE, device_target="Ascend")
@@ -84,10 +83,10 @@ def test_mobilenetv2_quant():
     step_size = dataset.get_dataset_size()
 
     # convert fusion network to quantization aware network
-    network = quant.convert_quant_network(network,
-                                          bn_fold=True,
+    quantizer = QuantizationAwareTraining(bn_fold=True,
                                           per_channel=[True, False],
                                           symmetric=[True, False])
+    network = quantizer.quantize(network)
 
     # get learning rate
     lr = Tensor(get_lr(global_step=config.start_epoch * step_size,
@@ -112,9 +111,12 @@ def test_mobilenetv2_quant():
                 dataset_sink_mode=False)
     print("============== End Training ==============")
 
+    export_time_used = 650
+    train_time = monitor.step_mseconds
+    print('train_time_used:{}'.format(train_time))
+    assert train_time < export_time_used
     expect_avg_step_loss = 2.32
     avg_step_loss = np.mean(np.array(monitor.losses))
-
     print("average step loss:{}".format(avg_step_loss))
     assert avg_step_loss < expect_avg_step_loss
 

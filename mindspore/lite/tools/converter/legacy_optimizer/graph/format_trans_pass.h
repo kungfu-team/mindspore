@@ -23,7 +23,7 @@
 
 namespace mindspore {
 namespace lite {
-enum FormatTransNodeType { kNCHW2NHWC, kNHWC2NCHW };
+enum FormatTransNodeType { kNCHW2NHWC, kNHWC2NCHW, kNONE };
 
 class FormatTransPass : public GraphPass {
  public:
@@ -55,5 +55,4 @@ class FormatTransPass : public GraphPass {
 };
 }  // namespace lite
 }  // namespace mindspore
-
 #endif  // MINDSPORE_PREDICT_FORMAT_TRANS_PASS_H

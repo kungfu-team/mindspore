@@ -18,7 +18,7 @@
 
 namespace mindspore {
 namespace lite {
-TfliteNodeParserRegistry::TfliteNodeParserRegistry() {}
+TfliteNodeParserRegistry::TfliteNodeParserRegistry() = default;
 
 TfliteNodeParserRegistry::~TfliteNodeParserRegistry() {
   for (auto ite : parsers) {
@@ -34,8 +34,8 @@ TfliteNodeParserRegistry *TfliteNodeParserRegistry::GetInstance() {
   return &instance;
 }
 
-TfliteNodeParser *TfliteNodeParserRegistry::GetNodeParser(const std::string &name) {
-  auto it = parsers.find(name);
+TfliteNodeParser *TfliteNodeParserRegistry::GetNodeParser(const tflite::BuiltinOperator &type) {
+  auto it = parsers.find(type);
   if (it != parsers.end()) {
     return it->second;
   }

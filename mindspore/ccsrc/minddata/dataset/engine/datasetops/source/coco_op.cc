@@ -60,7 +60,7 @@ Status CocoOp::Builder::Build(std::shared_ptr<CocoOp> *ptr) {
   if (builder_sampler_ == nullptr) {
     const int64_t num_samples = 0;
     const int64_t start_index = 0;
-    builder_sampler_ = std::make_shared<SequentialSampler>(start_index, num_samples);
+    builder_sampler_ = std::make_shared<SequentialSamplerRT>(start_index, num_samples);
   }
   builder_schema_ = std::make_unique<DataSchema>();
   RETURN_IF_NOT_OK(builder_schema_->AddColumn(
@@ -123,7 +123,7 @@ Status CocoOp::Builder::SanityCheck() {
 
 CocoOp::CocoOp(const TaskType &task_type, const std::string &image_folder_path, const std::string &annotation_path,
                int32_t num_workers, int32_t rows_per_buffer, int32_t queue_size, bool decode,
-               std::unique_ptr<DataSchema> data_schema, std::shared_ptr<Sampler> sampler)
+               std::unique_ptr<DataSchema> data_schema, std::shared_ptr<SamplerRT> sampler)
     : ParallelOp(num_workers, queue_size, std::move(sampler)),
       decode_(decode),
       row_cnt_(0),
@@ -210,7 +210,8 @@ void CocoOp::Print(std::ostream &out, bool show_all) const {
     // Call the super class for displaying any common detailed info
     ParallelOp::Print(out, show_all);
     // Then show any custom derived-internal stuff
-    out << "\nNumber of rows: " << num_rows_ << "\nCOCO Directory: " << image_folder_path_ << "\n\n";
+    out << "\nNumber of rows: " << num_rows_ << "\nCOCO Directory: " << image_folder_path_
+        << "\nDecode: " << (decode_ ? "yes" : "no") << "\n\n";
   }
 }
 
@@ -676,6 +677,31 @@ Status CocoOp::ComputeColMap() {
     }
   } else {
     MS_LOG(WARNING) << "Column name map is already set!";
+  }
+  return Status::OK();
+}
+
+Status CocoOp::GetClassIndexing(std::vector<std::pair<std::string, std::vector<int32_t>>> *output_class_indexing) {
+  if ((*output_class_indexing).empty()) {
+    if ((task_type_ != TaskType::Detection) && (task_type_ != TaskType::Panoptic)) {
+      MS_LOG(ERROR) << "Class index only valid in \"Detection\" and \"Panoptic\" task.";
+      RETURN_STATUS_UNEXPECTED("GetClassIndexing: Get Class Index failed in CocoOp.");
+    }
+    std::shared_ptr<CocoOp> op;
+    std::string task_type;
+    switch (task_type_) {
+      case TaskType::Detection:
+        task_type = "Detection";
+        break;
+      case TaskType::Panoptic:
+        task_type = "Panoptic";
+        break;
+    }
+    RETURN_IF_NOT_OK(Builder().SetDir(image_folder_path_).SetFile(annotation_path_).SetTask(task_type).Build(&op));
+    RETURN_IF_NOT_OK(op->ParseAnnotationIds());
+    for (const auto label : op->label_index_) {
+      (*output_class_indexing).emplace_back(std::make_pair(label.first, label.second));
+    }
   }
   return Status::OK();
 }

@@ -1,3 +1,4 @@
+
 /**
  * Copyright 2020 Huawei Technologies Co., Ltd
  *
@@ -16,7 +17,7 @@
 #include "common/common.h"
 #include "minddata/dataset/include/datasets.h"
 
-using namespace mindspore::dataset::api;
+using namespace mindspore::dataset;
 using mindspore::dataset::Tensor;
 using mindspore::dataset::TensorShape;
 

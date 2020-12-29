@@ -23,7 +23,6 @@
 #include "common/common_test.h"
 #include "src/common/utils.h"
 #include "src/common/file_utils.h"
-#include "src/common/file_utils_ext.h"
 #include "mindspore/lite/src/runtime/kernel/arm/fp32_grad/softmax_grad.h"
 #include "mindspore/lite/nnacl/fp32_grad/softmax_grad.h"
 #include "mindspore/lite/src/kernel_registry.h"
@@ -56,6 +55,7 @@ void InitSoftMaxParam(SoftmaxParameter *softmax_param, int axis, int n, int c, i
 
 TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis0) {
   auto softmax_param = new SoftmaxParameter();
+  ASSERT_NE(softmax_param, nullptr);
   // set parameters
   InitSoftMaxParam(softmax_param, 0);
 
@@ -65,21 +65,23 @@ TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis0) {
     inner_size *= softmax_param->input_shape_[i];
   }
   float *sum_data = new (std::nothrow) float[inner_size];
+  ASSERT_NE(sum_data, nullptr);
   float *sum_mul = new (std::nothrow) float[inner_size * softmax_param->input_shape_[softmax_param->axis_]];
+  ASSERT_NE(sum_mul, nullptr);
   std::vector<int> shape = {1, 9, 11, 12};
   size_t input_size;
   std::string input_path = "./test_data/softmax/softmaxgrad_yinput.bin";
   auto input_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(input_path.c_str(), &input_size));
-
+  ASSERT_NE(input_data, nullptr);
   std::string yt_path = "./test_data/softmax/softmaxgrad_yt_input.bin";
   auto yt_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(yt_path.c_str(), &input_size));
-
+  ASSERT_NE(yt_data, nullptr);
   // runtime part
   printf("Calculating runtime cost...\n");
   uint64_t time_avg = 0;
 
   auto out_data = new float[softmax_param->element_size_];
-
+  ASSERT_NE(out_data, nullptr);
   // warm up loop
   for (int i = 0; i < 3; i++) {
     SoftmaxGrad(input_data, yt_data, out_data, sum_data, sum_mul, softmax_param);
@@ -97,7 +99,7 @@ TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis0) {
 
   std::string output_path = "./test_data/softmax/softmaxgrad_out.bin";
 
-  auto res = lite::CompareRelativeOutput(out_data, output_path);
+  auto res = CompareRelativeOutput(out_data, output_path);
   EXPECT_EQ(res, 0);
 
   delete[] input_data;
@@ -113,6 +115,7 @@ TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis0) {
 
 TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis1) {
   auto softmax_param = new SoftmaxParameter();
+  ASSERT_NE(softmax_param, nullptr);
   // set parameters
   InitSoftMaxParam(softmax_param, 1);
 
@@ -122,21 +125,26 @@ TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis1) {
     inner_size *= softmax_param->input_shape_[i];
   }
   float *sum_data = new (std::nothrow) float[inner_size];
+  ASSERT_NE(sum_data, nullptr);
   float *sum_mul = new (std::nothrow) float[inner_size * softmax_param->input_shape_[softmax_param->axis_]];
+  ASSERT_NE(sum_mul, nullptr);
 
   std::vector<int> shape = {1, 9, 11, 12};
   size_t input_size;
   std::string input_path = "./test_data/softmax/softmaxgrad_1_yinput.bin";
   auto input_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(input_path.c_str(), &input_size));
+  ASSERT_NE(input_data, nullptr);
 
   std::string yt_path = "./test_data/softmax/softmaxgrad_1_yt_input.bin";
   auto yt_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(yt_path.c_str(), &input_size));
+  ASSERT_NE(yt_data, nullptr);
 
   // runtime part
   printf("Calculating runtime cost...\n");
   uint64_t time_avg = 0;
 
   auto out_data = new float[softmax_param->element_size_];
+  ASSERT_NE(out_data, nullptr);
 
   // warm up loop
   for (int i = 0; i < 3; i++) {
@@ -156,7 +164,7 @@ TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis1) {
   std::string output_path = "./test_data/softmax/softmaxgrad_1_out.bin";
   // auto output_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(input_path.c_str(), &input_size));
 
-  auto res = lite::CompareRelativeOutput(out_data, output_path);
+  auto res = CompareRelativeOutput(out_data, output_path);
   EXPECT_EQ(res, 0);
 
   delete[] input_data;
@@ -172,6 +180,7 @@ TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis1) {
 
 TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis2) {
   auto softmax_param = new SoftmaxParameter();
+  ASSERT_NE(softmax_param, nullptr);
   // set parameters
   InitSoftMaxParam(softmax_param, 2);
 
@@ -181,21 +190,26 @@ TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis2) {
     inner_size *= softmax_param->input_shape_[i];
   }
   float *sum_data = new (std::nothrow) float[inner_size];
+  ASSERT_NE(sum_data, nullptr);
   float *sum_mul = new (std::nothrow) float[inner_size * softmax_param->input_shape_[softmax_param->axis_]];
+  ASSERT_NE(sum_mul, nullptr);
 
   std::vector<int> shape = {1, 9, 11, 12};
   size_t input_size;
   std::string input_path = "./test_data/softmax/softmaxgrad_2_yinput.bin";
   auto input_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(input_path.c_str(), &input_size));
+  ASSERT_NE(input_data, nullptr);
 
   std::string yt_path = "./test_data/softmax/softmaxgrad_2_yt_input.bin";
   auto yt_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(yt_path.c_str(), &input_size));
+  ASSERT_NE(yt_data, nullptr);
 
   // runtime part
   printf("Calculating runtime cost...\n");
   uint64_t time_avg = 0;
 
   auto out_data = new float[softmax_param->element_size_];
+  ASSERT_NE(out_data, nullptr);
 
   // warm up loop
   for (int i = 0; i < 3; i++) {
@@ -215,7 +229,7 @@ TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis2) {
   std::string output_path = "./test_data/softmax/softmaxgrad_2_out.bin";
   // auto output_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(input_path.c_str(), &input_size));
 
-  auto res = lite::CompareRelativeOutput(out_data, output_path);
+  auto res = CompareRelativeOutput(out_data, output_path);
   EXPECT_EQ(res, 0);
 
   delete[] input_data;
@@ -231,6 +245,7 @@ TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis2) {
 
 TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis3) {
   auto softmax_param = new SoftmaxParameter();
+  ASSERT_NE(softmax_param, nullptr);
   // set parameters
   InitSoftMaxParam(softmax_param, 3);
 
@@ -240,21 +255,25 @@ TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis3) {
     inner_size *= softmax_param->input_shape_[i];
   }
   float *sum_data = new (std::nothrow) float[inner_size];
+  ASSERT_NE(sum_data, nullptr);
   float *sum_mul = new (std::nothrow) float[inner_size * softmax_param->input_shape_[softmax_param->axis_]];
+  ASSERT_NE(sum_mul, nullptr);
 
   std::vector<int> shape = {1, 9, 11, 12};
   size_t input_size;
   std::string input_path = "./test_data/softmax/softmaxgrad_3_yinput.bin";
   auto input_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(input_path.c_str(), &input_size));
-
+  ASSERT_NE(input_data, nullptr);
   std::string yt_path = "./test_data/softmax/softmaxgrad_3_yt_input.bin";
   auto yt_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(yt_path.c_str(), &input_size));
+  ASSERT_NE(yt_data, nullptr);
 
   // runtime part
   printf("Calculating runtime cost...\n");
   uint64_t time_avg = 0;
 
   auto out_data = new float[softmax_param->element_size_];
+  ASSERT_NE(out_data, nullptr);
 
   // warm up loop
   for (int i = 0; i < 3; i++) {
@@ -274,7 +293,7 @@ TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis3) {
   std::string output_path = "./test_data/softmax/softmaxgrad_3_out.bin";
   // auto output_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(input_path.c_str(), &input_size));
 
-  auto res = lite::CompareRelativeOutput(out_data, output_path);
+  auto res = CompareRelativeOutput(out_data, output_path);
   EXPECT_EQ(res, 0);
 
   delete[] input_data;
@@ -290,6 +309,8 @@ TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxis3) {
 
 TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxisMinus1) {
   auto softmax_param = new SoftmaxParameter();
+  ASSERT_NE(softmax_param, nullptr);
+
   // set parameters
   InitSoftMaxParam(softmax_param, -1);
 
@@ -299,21 +320,25 @@ TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxisMinus1) {
     inner_size *= softmax_param->input_shape_[i];
   }
   float *sum_data = new (std::nothrow) float[inner_size];
+  ASSERT_NE(sum_data, nullptr);
   float *sum_mul = new (std::nothrow) float[inner_size * softmax_param->input_shape_[softmax_param->axis_]];
+  ASSERT_NE(sum_mul, nullptr);
 
   std::vector<int> shape = {1, 9, 11, 12};
   size_t input_size;
   std::string input_path = "./test_data/softmax/softmaxgrad_-1_yinput.bin";
   auto input_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(input_path.c_str(), &input_size));
+  ASSERT_NE(input_data, nullptr);
 
   std::string yt_path = "./test_data/softmax/softmaxgrad_-1_yt_input.bin";
   auto yt_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(yt_path.c_str(), &input_size));
-
+  ASSERT_NE(yt_data, nullptr);
   // runtime part
   printf("Calculating runtime cost...\n");
   uint64_t time_avg = 0;
 
   auto out_data = new float[softmax_param->element_size_];
+  ASSERT_NE(out_data, nullptr);
 
   // warm up loop
   for (int i = 0; i < 3; i++) {
@@ -333,7 +358,7 @@ TEST_F(TestSoftmaxGradFp32, SoftmaxGradAxisMinus1) {
   std::string output_path = "./test_data/softmax/softmaxgrad_-1_out.bin";
   // auto output_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(input_path.c_str(), &input_size));
 
-  auto res = lite::CompareRelativeOutput(out_data, output_path);
+  auto res = CompareRelativeOutput(out_data, output_path);
   EXPECT_EQ(res, 0);
 
   delete[] input_data;

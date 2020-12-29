@@ -87,7 +87,7 @@ std::shared_ptr<FuncGraphSpecializer> ProgramSpecializer::GetFuncGraphSpecialize
 }
 
 std::string GetNextCounter() {
-  static int g_CloneCounter = 1;
+  static int64_t g_CloneCounter = 1;
   std::string str_count = std::to_string(g_CloneCounter);
   g_CloneCounter++;
   return str_count;
@@ -134,12 +134,7 @@ AnfNodePtr FuncGraphSpecializer::ReplicateDisconnectedNode(const AnfNodePtr &nod
     auto inputs = c_node->inputs();
     std::vector<AnfNodePtr> new_inputs;
     (void)std::transform(inputs.begin(), inputs.end(), std::back_inserter(new_inputs),
-                         [this](const AnfNodePtr &inp) -> AnfNodePtr {
-                           if (inp->isa<ValueNode>()) {
-                             return inp;
-                           }
-                           return ReplicateDisconnectedNode(inp);
-                         });
+                         [this](const AnfNodePtr &inp) -> AnfNodePtr { return ReplicateDisconnectedNode(inp); });
     auto c_new_node = new_node->cast<CNodePtr>();
     MS_EXCEPTION_IF_NULL(c_new_node);
     c_new_node->set_inputs(new_inputs);
@@ -571,7 +566,7 @@ void FuncGraphSpecializer::ProcessCNode(const CNodePtr &new_node) {
 namespace {
 void DumpEvaluatorCache(const EvaluatorCacheMap &evaluator_cache_map, const AbstractBasePtrList &argvals) {
   MS_LOG(DEBUG) << "Find unique argvals failed: " << argvals.size() << ", " << argvals << ". Check cache all items.";
-  int i = 0;
+  int64_t i = 0;
   for (const auto &item : evaluator_cache_map) {
     MS_LOG(DEBUG) << "evaluator_cache_map[" << i++ << "]: " << item.first;
   }

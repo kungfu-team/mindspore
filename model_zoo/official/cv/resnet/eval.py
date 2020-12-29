@@ -28,7 +28,8 @@ parser.add_argument('--dataset', type=str, default=None, help='Dataset, either c
 
 parser.add_argument('--checkpoint_path', type=str, default=None, help='Checkpoint file path')
 parser.add_argument('--dataset_path', type=str, default=None, help='Dataset path')
-parser.add_argument('--device_target', type=str, default='Ascend', help='Device target')
+parser.add_argument('--device_target', type=str, default='Ascend', choices=("Ascend", "GPU", "CPU"),
+                    help="Device target, support Ascend, GPU and CPU.")
 args_opt = parser.parse_args()
 
 set_seed(1)
@@ -55,7 +56,7 @@ if __name__ == '__main__':
 
     # init context
     context.set_context(mode=context.GRAPH_MODE, device_target=target, save_graphs=False)
-    if target != "GPU":
+    if target == "Ascend":
         device_id = int(os.getenv('DEVICE_ID'))
         context.set_context(device_id=device_id)
 

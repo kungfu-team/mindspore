@@ -18,6 +18,7 @@
 #define MINDSPORE_PREDICT_ELTWISE_FORMAT_TRANS_PASS_H
 
 #include <memory>
+#include <vector>
 #include "tools/common/graph_util.h"
 #include "tools/converter/converter_flags.h"
 #include "tools/converter/legacy_optimizer/graph/format_trans_pass.h"
@@ -37,13 +38,17 @@ class TransOpInsertPass : public FormatTransPass {
 
   STATUS FindOutTransType();
 
-  STATUS ChangeOpAxis(schema::MetaGraphT *graph, const std::unique_ptr<CNodeT> &node);
+  void TransformAttrByAxes(int *origin_attr, int *axes, int element_size);
+
+  STATUS ChangeOpAttrForSlice(schema::MetaGraphT *graph, const std::unique_ptr<CNodeT> &node);
 
  private:
   FormatTransNodeType pre_insert_trans_type_ = kNHWC2NCHW;
   FormatTransNodeType post_insert_trans_type_ = kNHWC2NCHW;
-  schema::PrimitiveType pre_type_ = schema::PrimitiveType_NONE;
-  schema::PrimitiveType post_type_ = schema::PrimitiveType_NONE;
+  FormatTransNodeType pre_type_ = kNONE;
+  std::vector<int> pre_perm_;
+  FormatTransNodeType post_type_ = kNONE;
+  std::vector<int> post_perm_;
 };
 }  // namespace lite
 }  // namespace mindspore

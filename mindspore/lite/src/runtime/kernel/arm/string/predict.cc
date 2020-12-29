@@ -19,6 +19,8 @@
 #include "src/kernel_registry.h"
 
 using mindspore::lite::KernelRegistrar;
+using mindspore::lite::RET_ERROR;
+using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_CustomPredict;
 
 namespace mindspore::kernel {
@@ -68,14 +70,9 @@ std::vector<LabelInfo> PredictCPUKernel::GetLabelInfo() {
   return label_info_vec;
 }
 
-bool LabelInfoCmp(const LabelInfo &lhs, const LabelInfo &rhs) { return lhs.weight > rhs.weight; }
+static bool LabelInfoCmp(const LabelInfo &lhs, const LabelInfo &rhs) { return lhs.weight > rhs.weight; }
 
 int PredictCPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail! Ret error code: " << ret;
-    return ret;
-  }
   std::vector<LabelInfo> label_info_vec = GetLabelInfo();
   std::sort(label_info_vec.begin(), label_info_vec.end(), LabelInfoCmp);
 
@@ -88,9 +85,10 @@ int PredictCPUKernel::Run() {
     if (static_cast<size_t>(i) >= label_info_vec.size() || label_info_vec[i].weight < param->weight_threshold) {
       output_label[i] = -1;
       output_weight[i] = 0.0f;
+    } else {
+      output_label[i] = label_info_vec[i].label;
+      output_weight[i] = label_info_vec[i].weight;
     }
-    output_label[i] = label_info_vec[i].label;
-    output_weight[i] = label_info_vec[i].weight;
   }
   return RET_OK;
 }
@@ -102,6 +100,7 @@ kernel::LiteKernel *CpuPredictKernelCreator(const std::vector<lite::Tensor *> &i
   auto *kernel = new (std::nothrow) PredictCPUKernel(parameter, inputs, outputs, ctx, primitive);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "new PredictCPUKernel fail!";
+    free(parameter);
     return nullptr;
   }
   auto ret = kernel->Init();
@@ -114,5 +113,5 @@ kernel::LiteKernel *CpuPredictKernelCreator(const std::vector<lite::Tensor *> &i
   return kernel;
 }
 
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_CustomPredict, CpuPredictKernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_CustomPredict, CpuPredictKernelCreator)
 }  // namespace mindspore::kernel

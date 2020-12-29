@@ -13,8 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef PREDICT_SRC_RUNTIME_RUNTIME_API_H_
-#define PREDICT_SRC_RUNTIME_RUNTIME_API_H_
+#ifndef MINDSPORE_LITE_SRC_RUNTIME_RUNTIME_API_H_
+#define MINDSPORE_LITE_SRC_RUNTIME_RUNTIME_API_H_
 #include <memory>
 
 #ifndef INTERNAL_API_DLL
@@ -36,11 +36,8 @@ struct ThreadPool;
 #endif
 INTERNAL_API_DLL ThreadPool *CreateLiteThreadPool(int thread_num, int mode);
 INTERNAL_API_DLL void LiteAPISetLastError(const char *msg);
-INTERNAL_API_DLL void *LiteBackendAllocWorkspace(int deviceType, int deviceId, uint64_t size, int dtypeCode,
-                                                 int dtypeBits);
-INTERNAL_API_DLL int LiteBackendFreeWorkspace(int deviceType, int deviceId, void *ptr);
 INTERNAL_API_DLL int LiteBackendRegisterSystemLibSymbol(const char *name, void *ptr);
 #ifdef __cplusplus
 }
 #endif
-#endif  // PREDICT_SRC_RUNTIME_RUNTIME_API_H_
+#endif  // MINDSPORE_LITE_SRC_RUNTIME_RUNTIME_API_H_

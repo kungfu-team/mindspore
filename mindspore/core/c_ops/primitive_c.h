@@ -1,5 +1,5 @@
 /**
- * Copyright 2019-2020 Huawei Technologies Co., Ltd
+ * Copyright 2020 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,8 @@
 #define MINDSPORE_CORE_C_OPS_PRIMITIVE_C_H_
 #include <string>
 #include <vector>
+#include <map>
+#include <memory>
 #include "ir/primitive.h"
 #include "abstract/primitive_infer_map.h"
 #include "ir/value.h"
@@ -32,5 +34,33 @@ class PrimitiveC : public Primitive {
  protected:
   void InitIOName(const std::vector<std::string> &inputs_name, const std::vector<std::string> &outputs_name);
 };
+
+using OpPrimCDefineFunc = std::function<std::shared_ptr<PrimitiveC>()>;
+class OpPrimCRegister {
+ public:
+  ~OpPrimCRegister() {}
+  static OpPrimCRegister &GetInstance();
+  std::map<std::string, OpPrimCDefineFunc> GetPrimCMap();
+  void SetPrimCMap(const std::string &kname, const OpPrimCDefineFunc &fn);
+
+ private:
+  OpPrimCRegister() {}
+  std::map<std::string, OpPrimCDefineFunc> op_primc_fns_;
+};
+
+class OpPrimCRegisterHelper {
+ public:
+  OpPrimCRegisterHelper(const std::string &kname, const OpPrimCDefineFunc &fn) {
+    OpPrimCRegister::GetInstance().SetPrimCMap(kname, fn);
+  }
+  ~OpPrimCRegisterHelper() = default;
+};
+
+#define REGISTER_PRIMITIVE_C(kname, primc)               \
+  std::shared_ptr<PrimitiveC> GetDefaultPrimC##primc() { \
+    auto out = std::make_shared<primc>();                \
+    return out;                                          \
+  }                                                      \
+  OpPrimCRegisterHelper primc_gen_##kname(kname, GetDefaultPrimC##primc);
 }  // namespace mindspore
 #endif  // MINDSPORE_CORE_C_OPS_PRIMITIVE_C_H_

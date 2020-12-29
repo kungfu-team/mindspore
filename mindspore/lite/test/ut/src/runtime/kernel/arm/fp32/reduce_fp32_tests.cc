@@ -16,7 +16,7 @@
 #include <memory>
 #include "src/common/log_adapter.h"
 #include "common/common_test.h"
-#include "mindspore/lite/nnacl/fp32/reduce.h"
+#include "mindspore/lite/nnacl/fp32/reduce_fp32.h"
 #include "schema/inner/model_generated.h"
 #include "src/tensor.h"
 #include "mindspore/lite/src/kernel_registry.h"
@@ -61,8 +61,8 @@ class TestReduceFp32 : public mindspore::CommonTest {
 
 void TestReduceFp32::TearDown() {
   delete ctx_;
-  in_tensor_.SetData(nullptr);
-  out_tensor_.SetData(nullptr);
+  in_tensor_.set_data(nullptr);
+  out_tensor_.set_data(nullptr);
 }
 
 void TestReduceFp32::Prepare(const std::vector<int> &in_shape, const std::vector<int> &out_shape, float *input_data,
@@ -70,11 +70,11 @@ void TestReduceFp32::Prepare(const std::vector<int> &in_shape, const std::vector
                              bool reduce_to_end, float coeff) {
   in_tensor_.set_data_type(kNumberTypeFloat32);
   in_tensor_.set_shape(in_shape);
-  in_tensor_.SetData(input_data);
+  in_tensor_.set_data(input_data);
 
   out_tensor_.set_data_type(kNumberTypeFloat32);
   out_tensor_.set_shape(out_shape);
-  out_tensor_.SetData(output_data);
+  out_tensor_.set_data(output_data);
 
   param_.mode_ = static_cast<int>(mode);
   param_.num_axes_ = num_axes;
@@ -116,7 +116,7 @@ TEST_F(TestReduceFp32, Mean1) {
   kernel_->Run();
 
   int output_size = 24;
-  CompareOutputData(out, correct, output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out, correct, output_size, err_tol));
 }
 
 // thread num 2 reduce_to_end
@@ -143,7 +143,7 @@ TEST_F(TestReduceFp32, Mean2) {
   kernel_->Run();
 
   int output_size = 2;
-  CompareOutputData(out, correct, output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out, correct, output_size, err_tol));
 }
 
 // thread num 1
@@ -171,7 +171,7 @@ TEST_F(TestReduceFp32, Mean3) {
   kernel_->Run();
 
   int output_size = 2;
-  CompareOutputData(out, correct, output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out, correct, output_size, err_tol));
 }
 
 TEST_F(TestReduceFp32, MeanAllAxis) {
@@ -197,7 +197,7 @@ TEST_F(TestReduceFp32, MeanAllAxis) {
   kernel_->Run();
 
   int output_size = 1;
-  CompareOutputData(out, correct, output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out, correct, output_size, err_tol));
 }
 
 TEST_F(TestReduceFp32, Sum) {
@@ -224,7 +224,7 @@ TEST_F(TestReduceFp32, Sum) {
   kernel_->Run();
 
   int output_size = 24;
-  CompareOutputData(out, correct, output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out, correct, output_size, err_tol));
 }
 
 // sum reduce_to_end
@@ -253,7 +253,7 @@ TEST_F(TestReduceFp32, Sum2) {
   kernel_->Run();
 
   int output_size = 32;
-  CompareOutputData(out, correct, output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out, correct, output_size, err_tol));
 }
 
 TEST_F(TestReduceFp32, Sum3) {
@@ -281,7 +281,7 @@ TEST_F(TestReduceFp32, Sum3) {
   kernel_->Run();
 
   int output_size = 32;
-  CompareOutputData(out, correct, output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out, correct, output_size, err_tol));
 }
 
 TEST_F(TestReduceFp32, SumAllAxis) {
@@ -306,7 +306,7 @@ TEST_F(TestReduceFp32, SumAllAxis) {
   kernel_->Run();
 
   int output_size = 1;
-  CompareOutputData(out, correct, output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out, correct, output_size, err_tol));
 }
 
 TEST_F(TestReduceFp32, Max) {
@@ -333,7 +333,7 @@ TEST_F(TestReduceFp32, Max) {
   kernel_->Run();
 
   int output_size = 24;
-  CompareOutputData(out, correct, output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out, correct, output_size, err_tol));
 }
 
 TEST_F(TestReduceFp32, Min) {
@@ -360,7 +360,7 @@ TEST_F(TestReduceFp32, Min) {
   kernel_->Run();
 
   int output_size = 24;
-  CompareOutputData(out, correct, output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out, correct, output_size, err_tol));
 }
 
 TEST_F(TestReduceFp32, Prod) {
@@ -388,7 +388,7 @@ TEST_F(TestReduceFp32, Prod) {
   kernel_->Run();
 
   int output_size = 24;
-  CompareOutputData(out, correct, output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out, correct, output_size, err_tol));
 }
 
 TEST_F(TestReduceFp32, SumSquare) {
@@ -414,7 +414,7 @@ TEST_F(TestReduceFp32, SumSquare) {
   kernel_->Run();
 
   int output_size = 8;
-  CompareOutputData(out, correct, output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out, correct, output_size, err_tol));
 }
 
 TEST_F(TestReduceFp32, SumSquare2) {
@@ -443,7 +443,7 @@ TEST_F(TestReduceFp32, SumSquare2) {
   kernel_->Run();
 
   int output_size = 32;
-  CompareOutputData(out, correct, output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out, correct, output_size, err_tol));
 }
 
 TEST_F(TestReduceFp32, ASum) {
@@ -471,6 +471,6 @@ TEST_F(TestReduceFp32, ASum) {
   kernel_->Run();
 
   int output_size = 32;
-  CompareOutputData(out, correct, output_size, err_tol);
+  ASSERT_EQ(0, CompareOutputData(out, correct, output_size, err_tol));
 }
 }  // namespace mindspore

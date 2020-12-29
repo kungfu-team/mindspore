@@ -16,18 +16,13 @@
 
 #include "src/ops/sparse_to_dense.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
-#ifdef PRIMITIVE_WRITEABLE
-bool SparseToDense::GetValidateIndices() const { return this->primitive_->value.AsSparseToDense()->validateIndices; }
-
-void SparseToDense::SetValidateIndices(bool validate_indices) {
-  this->primitive_->value.AsSparseToDense()->validateIndices = validate_indices;
-}
-
-#else
-
-bool SparseToDense::GetValidateIndices() const { return this->primitive_->value_as_SparseToDense()->validateIndices(); }
+#ifndef PRIMITIVE_WRITEABLE
 int SparseToDense::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) {
   MS_ASSERT(nullptr != primitive);
   MS_ASSERT(nullptr != fbb);
@@ -36,27 +31,31 @@ int SparseToDense::UnPackToFlatBuilder(const schema::Primitive *primitive, flatb
     MS_LOG(ERROR) << "value_as_SparseToDense return nullptr";
     return RET_ERROR;
   }
-  auto val_offset = schema::CreateSparseToDense(*fbb, attr->validateIndices());
+  auto val_offset = schema::CreateSparseToDense(*fbb);
   auto prim_offset = schema::CreatePrimitive(*fbb, schema::PrimitiveType_SparseToDense, val_offset.o);
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *SparseToDenseCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<SparseToDense>(primitive);
+}
+Registry SparseToDenseRegistry(schema::PrimitiveType_SparseToDense, SparseToDenseCreator);
 #endif
 
 int SparseToDense::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
   MS_ASSERT(this->primitive_ != nullptr);
-  MS_ASSERT(output_shape != nullptr);
   auto output = outputs_.front();
   if (output == nullptr) {
     MS_LOG(ERROR) << "output null pointer dereferencing.";
     return RET_ERROR;
   }
   auto input2 = inputs_.at(2);
-  outputs_[0]->set_data_type(input2->data_type());
-  outputs_[0]->SetFormat(input2->GetFormat());
+  outputs_.at(0)->set_data_type(input2->data_type());
+  outputs_.at(0)->set_format(input2->format());
 
-  if (!GetInferFlag()) {
-    return RET_OK;
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   if (this->primitive_ == nullptr) {
     return RET_NULL_PTR;
@@ -68,7 +67,7 @@ int SparseToDense::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor 
   for (int i = 0; i < input1->ElementsNum(); i++) {
     output_shape.push_back(input1_data[i]);
   }
-  outputs_[0]->set_shape(output_shape);
+  outputs_.at(0)->set_shape(output_shape);
   return RET_OK;
 }
 }  // namespace lite

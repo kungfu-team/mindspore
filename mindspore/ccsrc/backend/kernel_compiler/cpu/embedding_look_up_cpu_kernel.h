@@ -32,16 +32,16 @@ class EmbeddingLookUpCPUKernel : public CPUKernel {
   bool Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
               const std::vector<AddressPtr> &outputs) override;
   template <typename T>
-  void LaunchKernel(const std::vector<kernel::AddressPtr> &inputs,
-                    const std::vector<kernel::AddressPtr> &outputs) const;
+  void LaunchKernel(const std::vector<kernel::AddressPtr> &inputs, const std::vector<kernel::AddressPtr> &outputs);
 
  protected:
   void CheckParam(const CNodePtr &kernel_node);
-  int offset_{0};
+  int64_t offset_{0};
   size_t indices_lens_{1};
   size_t first_dim_size_{1};
   size_t outer_dim_size_{1};
   TypeId indices_data_type_{kNumberTypeInt32};
+  CNodePtr node_ = nullptr;
 };
 
 MS_REG_CPU_KERNEL(

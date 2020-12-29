@@ -22,6 +22,11 @@
 #include "./securec.h"
 #include "minddata/dataset/util/allocator.h"
 #include "minddata/dataset/util/status.h"
+
+#if defined(__APPLE__)
+#define off64_t off_t
+#endif
+
 namespace mindspore {
 namespace dataset {
 /// \brief A ReadableSlice wraps a const pointer in memory and its size.
@@ -87,6 +92,7 @@ class WritableSlice : public ReadableSlice {
  public:
   friend class StorageContainer;
   friend class CacheService;
+  friend class CacheServer;
   /// \brief Default constructor
   WritableSlice() : ReadableSlice(), mutable_data_(nullptr) {}
   /// \brief This form of a constructor takes a pointer and its size.

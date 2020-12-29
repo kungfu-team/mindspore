@@ -141,38 +141,44 @@ BuiltInTypeMap &GetMethodMap() {
                                          {"__len__", prim::kPrimDictLen},          // P.dict_len
                                          {"__getitem__", prim::kPrimDictGetItem},  // P.dict_getitem
                                          {"__setitem__", prim::kPrimDictSetItem},  // P.dict_setitem,
+                                         {"keys", prim::kPrimDictGetKeys},         // P.dict_getkeys,
+                                         {"values", prim::kPrimDictGetValues},     // P.dict_getvalues,
                                          {"__bool__", std::string("dict_bool")}    // C.dict_bool
                                        }},
                                       {kObjectTypeTensorType,
                                        {
-                                         {"all", std::string("all_")},                // C.reduce_all
-                                         {"any", std::string("any_")},                // C.reduce_any
-                                         {"__add__", std::string("add")},             // C.add
-                                         {"__sub__", std::string("sub")},             // C.sub
-                                         {"__mul__", std::string("mul")},             // C.mul
-                                         {"__truediv__", std::string("truediv")},     // C.truediv
-                                         {"__floordiv__", std::string("floordiv")},   // C.floordiv
-                                         {"__mod__", std::string("mod")},             // C.mod
-                                         {"__pow__", std::string("pow_")},            // C.pow
-                                         {"__floor__", std::string("array_floor")},   // C.array_floor
-                                         {"__trunc__", std::string("array_trunc")},   // C.array_trunc
-                                         {"__pos__", std::string("array_uadd")},      // C.array_uadd
-                                         {"__neg__", std::string("array_usub")},      // C.array_usub
-                                         {"__eq__", std::string("eq")},               // C.eq
-                                         {"__ne__", std::string("ne")},               // C.ne
-                                         {"__lt__", std::string("lt")},               // C.lt
-                                         {"__gt__", std::string("gt")},               // C.gt
-                                         {"__le__", std::string("le")},               // C.le
-                                         {"__ge__", std::string("ge")},               // C.ge
-                                         {"__matmul__", prim::kPrimDot},              // P.dot,
-                                         {"__len__", prim::kPrimArrayLen},            // P.array_len,
-                                         {"__getitem__", prim::kPrimArrayGetItem},    // P.array_getitem,
-                                         {"__setitem__", prim::kPrimArraySetItem},    // P.array_setitem,
-                                         {"__ms_iter__", std::string("array_iter")},  // C.array_iter
-                                         {"__ms_to_array__", prim::kPrimIdentity},    // P.identity,
-                                         {"item", prim::kPrimArrayToScalar},          // P.array_to_scalar,
-                                         {"transpose", std::string("transpose")},     // P.transpose
-                                         {"__bool__", std::string("tensor_bool")},    // C.tensor_bool
+                                         {"all", std::string("all_")},                    // C.reduce_all
+                                         {"any", std::string("any_")},                    // C.reduce_any
+                                         {"__add__", std::string("add")},                 // C.add
+                                         {"__sub__", std::string("sub")},                 // C.sub
+                                         {"__mul__", std::string("mul")},                 // C.mul
+                                         {"abs", std::string("abs_")},                    // C.abs_
+                                         {"mean", std::string("mean")},                   // C.mean
+                                         {"__truediv__", std::string("truediv")},         // C.truediv
+                                         {"__floordiv__", std::string("floordiv")},       // C.floordiv
+                                         {"__mod__", std::string("mod")},                 // C.mod
+                                         {"__pow__", std::string("pow_")},                // C.pow
+                                         {"__floor__", std::string("array_floor")},       // C.array_floor
+                                         {"__trunc__", std::string("array_trunc")},       // C.array_trunc
+                                         {"__pos__", std::string("array_uadd")},          // C.array_uadd
+                                         {"__neg__", std::string("array_usub")},          // C.array_usub
+                                         {"__eq__", std::string("eq")},                   // C.eq
+                                         {"__ne__", std::string("ne")},                   // C.ne
+                                         {"__lt__", std::string("lt")},                   // C.lt
+                                         {"__gt__", std::string("gt")},                   // C.gt
+                                         {"__le__", std::string("le")},                   // C.le
+                                         {"__ge__", std::string("ge")},                   // C.ge
+                                         {"expand_as", std::string("expand_tensor_as")},  // C.expand_as
+                                         {"view", std::string("view")},                   // C.view
+                                         {"__matmul__", prim::kPrimDot},                  // P.dot,
+                                         {"__len__", prim::kPrimArrayLen},                // P.array_len,
+                                         {"__getitem__", prim::kPrimArrayGetItem},        // P.array_getitem,
+                                         {"__setitem__", prim::kPrimArraySetItem},        // P.array_setitem,
+                                         {"__ms_iter__", std::string("array_iter")},      // C.array_iter
+                                         {"__ms_to_array__", prim::kPrimIdentity},        // P.identity,
+                                         {"item", prim::kPrimArrayToScalar},              // P.array_to_scalar,
+                                         {"transpose", std::string("transpose")},         // P.transpose
+                                         {"__bool__", std::string("tensor_bool")},        // C.tensor_bool
                                        }},
                                       {kObjectTypeJTagged, {}},
                                       {kObjectTypeSymbolicKeyType, {}},
@@ -186,6 +192,8 @@ BuiltInTypeMap &GetAttrMap() {
      {
        {"shape", std::string("shape_")},  // C.shape_
        {"dtype", std::string("dtype_")},  // C.dtype_
+       {"size", std::string("size_")},    // C.size_
+       {"ndim", std::string("ndim_")},    // C.ndim_
      }},
     {kObjectTypeRowTensorType,
      {
@@ -232,7 +240,7 @@ Resource::~Resource() {
 }
 
 Any GetMethodOrAttr(const string &name, const TypeId &type_id, const BuiltInTypeMap &method_map) {
-  auto type_method_map = method_map.find(static_cast<int>(type_id));
+  auto type_method_map = method_map.find(static_cast<int64_t>(type_id));
   if (type_method_map == method_map.end()) {
     return Any();
   }
@@ -246,10 +254,10 @@ Any GetMethodOrAttr(const string &name, const TypeId &type_id, const BuiltInType
 bool Resource::IsTypeInBuiltInMap(const TypeId &type) {
   TypeId type_id = NormalizeTypeId(type);
   const BuiltInTypeMap &method_map = GetMethodMap();
-  auto iter = method_map.find(static_cast<int>(type_id));
+  auto iter = method_map.find(static_cast<int64_t>(type_id));
   if (iter == method_map.end()) {
     const BuiltInTypeMap &attr_map = GetAttrMap();
-    iter = attr_map.find(static_cast<int>(type_id));
+    iter = attr_map.find(static_cast<int64_t>(type_id));
     if (iter == attr_map.end()) {
       return false;
     }
@@ -286,5 +294,92 @@ void Resource::Clean() {
   trace::ClearTraceStack();
   is_cleaned_ = true;
 }
+
+void MemoryCleaner::Init() {
+  pynative_in_construct_process_ = false;
+  pynative_in_end_graph_process_ = false;
+  pynative_released_history_.clear();
+  pynative_new_primtives_squence_.clear();
+}
+
+MemoryCleaner Resource::mem_cleaner_ = MemoryCleaner();
+void MemoryCleaner::RecordPrimitivePy(PrimitivePy *prim) {
+  if (prim == nullptr) {
+    return;
+  }
+  all_primitives_[prim] = true;
+}
+
+void MemoryCleaner::ReleasePrimitivePyObj(PrimitivePy *prim) {
+  if (prim == nullptr) {
+    return;
+  }
+  auto it = all_primitives_.find(prim);
+  if (it == all_primitives_.end()) {
+    return;
+  }
+  // If flag is false,the pointer hased been released, so it can't be visited.
+  if (!it->second) {
+    return;
+  }
+  all_primitives_[prim] = false;
+  prim->SetPyObj(py::none());
+}
+
+void MemoryCleaner::ClearPrimitivePyPythonObj() {
+  for (auto &it : all_primitives_) {
+    if (it.second) {
+      it.first->SetPyObj(py::none());
+    }
+  }
+  all_primitives_.clear();
+}
+
+void MemoryCleaner::RecordPynativeShortLifePrimitivePy(PrimitivePy *prim) {
+  if (prim == nullptr) {
+    return;
+  }
+  if (pynative_short_life_primitives_.find(prim) != pynative_short_life_primitives_.end()) {
+    return;
+  }
+  MS_LOG(DEBUG) << "Record pynative tmp primitve:" << prim->ToString();
+  pynative_short_life_primitives_.insert(prim);
+  pynative_new_primtives_squence_.push_back(prim->ToString());
+}
+
+void MemoryCleaner::ErasePynativeShortLifePrimitivePy(PrimitivePy *prim) {
+  if (prim == nullptr) {
+    return;
+  }
+  if (pynative_short_life_primitives_.find(prim) == pynative_short_life_primitives_.end()) {
+    return;
+  }
+  pynative_short_life_primitives_.erase(prim);
+  MS_LOG(DEBUG) << "Erase pynative tmp primitive:" << prim->ToString();
+}
+
+void MemoryCleaner::ClearPynativeShortLifePrimitivePy() {
+  // If the primitives name sequence never been released before, keep the primtives alive
+  if (std::find(pynative_released_history_.begin(), pynative_released_history_.end(),
+                pynative_new_primtives_squence_) == pynative_released_history_.end()) {
+    pynative_released_history_.push_back(pynative_new_primtives_squence_);
+  } else {
+    for (auto &primitive : pynative_short_life_primitives_) {
+      ReleasePrimitivePyObj(primitive);
+    }
+  }
+  pynative_short_life_primitives_.clear();
+  pynative_new_primtives_squence_.clear();
+}
+
+void MemoryCleaner::EnterPynativeConstructProcess() { pynative_in_construct_process_ = true; }
+void MemoryCleaner::LeavePynativeConstructProcess() {
+  pynative_in_construct_process_ = false;
+  ClearPynativeShortLifePrimitivePy();
+}
+bool MemoryCleaner::IsInPynativeConstructProcess() const { return pynative_in_construct_process_; }
+void MemoryCleaner::EnterPynativeEndGraphProcess() { pynative_in_end_graph_process_ = true; }
+void MemoryCleaner::LeavePynativeEndGraphProcess() { pynative_in_end_graph_process_ = false; }
+bool MemoryCleaner::IsInPynativeEndGraphProcess() const { return pynative_in_end_graph_process_; }
 }  // namespace pipeline
 }  // namespace mindspore

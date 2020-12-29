@@ -112,7 +112,7 @@ class AnfRuntimeAlgorithm {
   // get input format select of anf node
   static std::string GetInputFormat(const AnfNodePtr &node, size_t input_idx);
   // get prev node output width output index
-  static KernelWithIndex GetPrevNodeOutput(const AnfNodePtr &anf_node, size_t input_idx);
+  static KernelWithIndex GetPrevNodeOutput(const AnfNodePtr &anf_node, size_t input_idx, bool visit_nop_node = false);
   // get output format from prev node,input_index is the input index of current node related to prev node
   static std::string GetPrevNodeOutputFormat(const AnfNodePtr &node, size_t input_idx);
   // get reshape_type of from the output of input node.
@@ -184,8 +184,12 @@ class AnfRuntimeAlgorithm {
   static bool IsRealCNodeKernel(const AnfNodePtr &node);
   // checkout whether the anf node is a graph kernel.
   static bool IsGraphKernel(const AnfNodePtr &node);
+  // checkout whether the anf node is an inner node of graph kernel.
+  static bool IsNodeInGraphKernel(const AnfNodePtr &node);
   // check parameter is weight or data
   static bool IsParameterWeight(const ParameterPtr &node);
+  // checkout whether the anf node is include the label_index.
+  static bool IsLabelIndexInNode(const AnfNodePtr &node, size_t label_index);
   // set stream id of kernel,which will be set in stream assign and be used in stream generate
   static void SetStreamId(uint32_t stream_id, AnfNode *node);
   // get stream id
@@ -223,10 +227,17 @@ class AnfRuntimeAlgorithm {
   static bool IsIndependentNode(const CNodePtr &node);
   static bool GetBooleanAttr(const AnfNodePtr &node, const std::string &attr);
   static void GetRealDynamicShape(const std::vector<size_t> &shape, NotNull<std::vector<int64_t> *> dynamic_shape);
-  static std::vector<int> GetInputMaxShape(const AnfNodePtr &anf_node, size_t index);
-  static std::vector<int> GetInputMinShape(const AnfNodePtr &anf_node, size_t index);
-  static std::vector<int> GetOutputMaxShape(const AnfNodePtr &anf_node, size_t index);
-  static std::vector<int> GetOutputMinShape(const AnfNodePtr &anf_node, size_t index);
+  static std::vector<int64_t> GetInputMaxShape(const AnfNodePtr &anf_node, size_t index);
+  static std::vector<int64_t> GetInputMinShape(const AnfNodePtr &anf_node, size_t index);
+  static std::vector<int64_t> GetOutputMaxShape(const AnfNodePtr &anf_node, size_t index);
+  static std::vector<int64_t> GetOutputMinShape(const AnfNodePtr &anf_node, size_t index);
+  static bool IsNodeDynamicShape(const AnfNodePtr &node);
+  static void InferShape(const CNodePtr &node);
+  static std::vector<size_t> GetInputRealDeviceShapeIfExist(const AnfNodePtr &anf_node, size_t index);
+  static std::vector<size_t> GetOutputRealDeviceShapeIfExist(const AnfNodePtr &anf_node, size_t index);
+  // Find control_depend real input nodes.
+  static void GetAllFatherRealNode(const AnfNodePtr &anf_node, std::vector<AnfNodePtr> *result,
+                                   std::set<AnfNodePtr> *visited);
 };
 }  // namespace session
 using AnfAlgo = session::AnfRuntimeAlgorithm;

@@ -44,7 +44,10 @@ namespace parallel {
 #define DEFAULT_RUN_PHASE 0
 #define TRAINING_PHASE 0
 #define INFERENCE_PHASE 1
-#define DEFAULT_TRIANGLE_STRATEGY_OVERWRITE true;
+#define DEFAULT_TRIANGLE_STAR_STRATEGY_OVERWRITE true;
+#define DEFAULT_DP_ALGO_ENABLE_APPROX false
+#define DEFAULT_DP_ALGO_APPROX_EPSILON 0.1
+#define DEFAULT_DP_ALGO_SINGLE_LOOP true
 
 class CostModelContext {
  public:
@@ -92,11 +95,11 @@ class CostModelContext {
   void set_multi_subgraphs(bool);
   bool is_multi_subgraphs() const { return is_multi_subgraphs_; }
 
-  void set_costmodel_allreduce_fusion_algorithm(int32_t);
-  int32_t costmodel_allreduce_fusion_algorithm() const { return costmodel_allreduce_fusion_algorithm_; }
+  void set_costmodel_allreduce_fusion_algorithm(int64_t);
+  int64_t costmodel_allreduce_fusion_algorithm() const { return costmodel_allreduce_fusion_algorithm_; }
 
-  void set_costmodel_allreduce_fusion_times(int32_t);
-  int32_t costmodel_allreduce_fusion_times() const { return costmodel_allreduce_fusion_times_; }
+  void set_costmodel_allreduce_fusion_times(int64_t);
+  int64_t costmodel_allreduce_fusion_times() const { return costmodel_allreduce_fusion_times_; }
 
   void set_costmodel_allreduce_fusion_tail_percent(double);
   double costmodel_allreduce_fusion_tail_percent() const { return costmodel_allreduce_fusion_tail_percent_; }
@@ -135,11 +138,20 @@ class CostModelContext {
   void set_elementwise_stra_follow(bool);
   bool elementwise_stra_follow() const { return elementwise_stra_follow_; }
 
-  void set_triangle_strategy_overwrite(bool);
-  bool triangle_strategy_overwrite() const { return triangle_strategy_overwrite_; }
+  void set_triangle_star_strategy_overwrite(bool);
+  bool triangle_star_strategy_overwrite() const { return triangle_star_strategy_overwrite_; }
 
-  void set_run_phase(int32_t);
-  int32_t run_phase() const { return run_phase_; }
+  void set_run_phase(int64_t);
+  int64_t run_phase() const { return run_phase_; }
+
+  void set_dp_algo_approxi_epsilon(double);
+  double dp_algo_approxi_epsilon() const { return dp_algo_approxi_epsilon_; }
+
+  void set_dp_algo_enable_approxi(bool);
+  bool dp_algo_enable_approxi() const { return dp_algo_enable_approxi_; }
+
+  void set_dp_algo_single_loop(bool);
+  bool dp_algo_single_loop() const { return dp_algo_single_loop_; }
 
  private:
   CostModelContext();
@@ -172,15 +184,24 @@ class CostModelContext {
   // MULTI_SUBGRAPHS
   bool is_multi_subgraphs_;
 
-  // In the recovery phase of DP algorithm, when encountering triangle structure,
+  // In the recovery phase of DP algorithm, when encountering triangle structure and star structure,
   // whether overwrite the right-node strategy
-  bool triangle_strategy_overwrite_;
+  bool triangle_star_strategy_overwrite_;
 
-  int32_t run_phase_;  // 0: 'training', 1: 'inference'
+  // Whether to enable APPROXIMATION in the DP algorithm.
+  bool dp_algo_enable_approxi_;
 
-  int32_t costmodel_allreduce_fusion_algorithm_;
+  // When APPROXIMATION is enabled in the DP algorithm, the 'epsilon' value used in the APPROXIMATION.
+  double dp_algo_approxi_epsilon_;
 
-  int32_t costmodel_allreduce_fusion_times_;
+  // Whether to generate a single suite of OperatorInfo for a loop.
+  bool dp_algo_single_loop_;
+
+  int64_t run_phase_;  // 0: 'training', 1: 'inference'
+
+  int64_t costmodel_allreduce_fusion_algorithm_;
+
+  int64_t costmodel_allreduce_fusion_times_;
 
   double costmodel_allreduce_fusion_tail_percent_;
 

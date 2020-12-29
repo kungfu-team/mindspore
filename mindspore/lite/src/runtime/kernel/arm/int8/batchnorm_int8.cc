@@ -42,10 +42,10 @@ BatchnormInt8CPUKernel::~BatchnormInt8CPUKernel() {
 }
 
 int BatchnormInt8CPUKernel::InitConstTensor() {
-  auto input = in_tensors_[0];
-  auto mean = in_tensors_[1];
-  auto variance = in_tensors_[2];
-  auto output = out_tensors_[0];
+  auto input = in_tensors_.at(0);
+  auto mean = in_tensors_.at(1);
+  auto variance = in_tensors_.at(2);
+  auto output = out_tensors_.at(0);
 
   auto mean_ptr = reinterpret_cast<int8_t *>(mean->MutableData());
   auto var_ptr = reinterpret_cast<int8_t *>(variance->MutableData());
@@ -61,14 +61,14 @@ int BatchnormInt8CPUKernel::InitConstTensor() {
   }
   // compute alpha, beta;
   auto eps = batchnorm_param_->epsilon_;
-  auto zp_in = input->GetQuantParams().front().zeroPoint;
-  auto zp_mean = mean->GetQuantParams().front().zeroPoint;
-  auto zp_var = variance->GetQuantParams().front().zeroPoint;
-  auto zp_out = output->GetQuantParams().front().zeroPoint;
-  auto s_in = input->GetQuantParams().front().scale;
-  auto s_mean = mean->GetQuantParams().front().scale;
-  auto s_var = variance->GetQuantParams().front().scale;
-  auto s_out = output->GetQuantParams().front().scale;
+  auto zp_in = input->quant_params().front().zeroPoint;
+  auto zp_mean = mean->quant_params().front().zeroPoint;
+  auto zp_var = variance->quant_params().front().zeroPoint;
+  auto zp_out = output->quant_params().front().zeroPoint;
+  auto s_in = input->quant_params().front().scale;
+  auto s_mean = mean->quant_params().front().scale;
+  auto s_var = variance->quant_params().front().scale;
+  auto s_out = output->quant_params().front().scale;
 
   for (int i = 0; i < batchnorm_param_->channel_; ++i) {
     float tmp = s_out * sqrt(eps + s_var * (var_ptr[i] - zp_var));
@@ -81,12 +81,12 @@ int BatchnormInt8CPUKernel::InitConstTensor() {
 }
 
 int BatchnormInt8CPUKernel::InitFusedConstTensor() {
-  auto input = in_tensors_[0];
-  auto scale = in_tensors_[1];
-  auto offset = in_tensors_[2];
-  auto mean = in_tensors_[3];
-  auto variance = in_tensors_[4];
-  auto output = out_tensors_[0];
+  auto input = in_tensors_.at(0);
+  auto scale = in_tensors_.at(1);
+  auto offset = in_tensors_.at(2);
+  auto mean = in_tensors_.at(3);
+  auto variance = in_tensors_.at(4);
+  auto output = out_tensors_.at(0);
 
   auto scale_ptr = reinterpret_cast<int8_t *>(scale->MutableData());
   auto offset_ptr = reinterpret_cast<int8_t *>(offset->MutableData());
@@ -105,18 +105,18 @@ int BatchnormInt8CPUKernel::InitFusedConstTensor() {
   }
   // compute alpha, beta;
   auto eps = batchnorm_param_->epsilon_;
-  auto zp_in = input->GetQuantParams().front().zeroPoint;
-  auto zp_scale = scale->GetQuantParams().front().zeroPoint;
-  auto zp_offset = offset->GetQuantParams().front().zeroPoint;
-  auto zp_mean = mean->GetQuantParams().front().zeroPoint;
-  auto zp_var = variance->GetQuantParams().front().zeroPoint;
-  auto zp_out = output->GetQuantParams().front().zeroPoint;
-  auto s_in = input->GetQuantParams().front().scale;
-  auto s_scale = scale->GetQuantParams().front().scale;
-  auto s_offset = offset->GetQuantParams().front().scale;
-  auto s_mean = mean->GetQuantParams().front().scale;
-  auto s_var = variance->GetQuantParams().front().scale;
-  auto s_out = output->GetQuantParams().front().scale;
+  auto zp_in = input->quant_params().front().zeroPoint;
+  auto zp_scale = scale->quant_params().front().zeroPoint;
+  auto zp_offset = offset->quant_params().front().zeroPoint;
+  auto zp_mean = mean->quant_params().front().zeroPoint;
+  auto zp_var = variance->quant_params().front().zeroPoint;
+  auto zp_out = output->quant_params().front().zeroPoint;
+  auto s_in = input->quant_params().front().scale;
+  auto s_scale = scale->quant_params().front().scale;
+  auto s_offset = offset->quant_params().front().scale;
+  auto s_mean = mean->quant_params().front().scale;
+  auto s_var = variance->quant_params().front().scale;
+  auto s_out = output->quant_params().front().scale;
 
   float mul_12 = s_in * s_scale;
   float mul_24 = s_scale * s_mean;
@@ -133,7 +133,7 @@ int BatchnormInt8CPUKernel::InitFusedConstTensor() {
 }
 
 int BatchnormInt8CPUKernel::Init() {
-  auto input_shapes = in_tensors_[0]->shape();
+  auto input_shapes = in_tensors_.at(0)->shape();
   auto n_dim = input_shapes.size();
   batchnorm_param_->channel_ = input_shapes[n_dim - 1];
   batchnorm_param_->units_ = 1;
@@ -161,7 +161,7 @@ int BatchnormInt8CPUKernel::Init() {
 }
 
 int BatchnormInt8CPUKernel::ReSize() {
-  auto input_shapes = in_tensors_[0]->shape();
+  auto input_shapes = in_tensors_.at(0)->shape();
   batchnorm_param_->unit_ = 1;
   for (size_t i = 0; i < input_shapes.size() - 1; i++) {
     batchnorm_param_->unit_ *= input_shapes[i];
@@ -185,15 +185,10 @@ int BatchNormInt8Run(void *cdata, int task_id) {
 }
 
 int BatchnormInt8CPUKernel::Run() {
-  auto prepare_ret = Prepare();
-  if (prepare_ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail! Ret error code: " << prepare_ret;
-    return prepare_ret;
-  }
   in_addr_ = reinterpret_cast<int8_t *>(in_tensors_.at(0)->MutableData());
   out_addr_ = reinterpret_cast<int8_t *>(out_tensors_.at(0)->MutableData());
 
-  int ret =
+  auto ret =
     ParallelLaunch(this->context_->thread_pool_, BatchNormInt8Run, this, batchnorm_param_->op_parameter_.thread_num_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "BatchnormRun error error_code[" << ret << "]";
@@ -202,27 +197,6 @@ int BatchnormInt8CPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuBatchnormInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                  const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                  const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                  const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(opParameter != nullptr);
-  MS_ASSERT(desc.type == schema::PrimitiveType_BatchNorm);
-  auto *kernel = new (std::nothrow) BatchnormInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new BatchnormInt8CPUKernel fail!";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_BatchNorm, CpuBatchnormInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_FusedBatchNorm, CpuBatchnormInt8KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_BatchNorm, LiteKernelCreator<BatchnormInt8CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_FusedBatchNorm, LiteKernelCreator<BatchnormInt8CPUKernel>)
 }  // namespace mindspore::kernel

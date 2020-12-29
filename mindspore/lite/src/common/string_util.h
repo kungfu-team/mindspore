@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_LITE_COMMON_STRING_UTIL_H_
-#define MINDSPORE_LITE_COMMON_STRING_UTIL_H_
+#ifndef MINDSPORE_LITE_SRC_COMMON_STRING_UTIL_H_
+#define MINDSPORE_LITE_SRC_COMMON_STRING_UTIL_H_
 
 #include <vector>
 #include <string>
@@ -24,6 +24,7 @@
 #include "src/common/log_adapter.h"
 #include "tools/common/option.h"
 #include "include/errorcode.h"
+#include "include/lite_utils.h"
 
 namespace mindspore {
 namespace lite {
@@ -33,12 +34,11 @@ typedef struct {
 } StringPack;
 
 // example of string tensor:
-// 3, 0, 0, 0    # int32, num of strings
-// 20, 0, 0, 0   # int32, offset of 0-th string
-// 23, 0, 0, 0   # int32, offset of 0-th string
-// 26, 0, 0, 0   # int32, offset of 0-th string
-// 29, 0, 0, 0   # int32, total length of tensor data
-// 'h', 'o', 'w', 'a', 'r', 'e', 'y', 'o', 'u'  # char, how are you
+// 2, 0, 0, 0    # int32, num of strings
+// 16, 0, 0, 0   # int32, offset of 0-th string
+// 21, 0, 0, 0   # int32, offset of 1-th string
+// 30, 0, 0, 0   # int32, total length of tensor data
+// 'h', 'e', 'l', 'l', 'o', 'h', 'o', 'w', 'a', 'r', 'e', 'y', 'o', 'u'  # char, "hello", "how are you"
 std::vector<StringPack> ParseTensorBuffer(Tensor *tensor);
 std::vector<StringPack> ParseStringBuffer(const void *data);
 
@@ -52,4 +52,4 @@ uint64_t StringHash64(const char *s, size_t len);
 }  // namespace lite
 }  // namespace mindspore
 
-#endif  // MINDSPORE_LITE_COMMON_STRING_UTIL_H_
+#endif  // MINDSPORE_LITE_SRC_COMMON_STRING_UTIL_H_

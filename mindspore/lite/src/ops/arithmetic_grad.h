@@ -21,18 +21,19 @@
 #include <set>
 #include <cmath>
 #include "src/ops/primitive_c.h"
+#include "nnacl/arithmetic_self_parameter.h"
 
 namespace mindspore {
 namespace lite {
 class ArithmeticGrad : public PrimitiveC {
  public:
+  ArithmeticGrad() = default;
+  ~ArithmeticGrad() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(ArithmeticGrad, PrimitiveC);
-  ArithmeticGrad() = default;
   explicit ArithmeticGrad(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
 #else
   // explicit ArithmeticGrad(const schema::Primitive &primitive) : PrimitiveC(primitive) {}
-  ArithmeticGrad() = default;
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override {
     return RET_ERROR;
   }

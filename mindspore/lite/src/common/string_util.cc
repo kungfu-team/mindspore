@@ -14,13 +14,15 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include "src/common/string_util.h"
+#include "include/ms_tensor.h"
 
 namespace mindspore {
 namespace lite {
 
 std::vector<StringPack> ParseTensorBuffer(Tensor *tensor) {
-  if (tensor->MutableData() == nullptr) {
+  if (tensor->data_c() == nullptr) {
     MS_LOG(ERROR) << "Tensor data is null, cannot be parsed";
     return std::vector<StringPack>{};
   }
@@ -28,9 +30,13 @@ std::vector<StringPack> ParseTensorBuffer(Tensor *tensor) {
 }
 
 std::vector<StringPack> ParseStringBuffer(const void *data) {
-  const int32_t *offset = reinterpret_cast<const int32_t *>(data);
-  int32_t num = *offset;
   std::vector<StringPack> buffer;
+  if (data == nullptr) {
+    MS_LOG(ERROR) << "data is nullptr";
+    return buffer;
+  }
+  const auto *offset = reinterpret_cast<const int32_t *>(data);
+  int32_t num = *offset;
   for (int i = 0; i < num; i++) {
     offset += 1;
     buffer.push_back(StringPack{(*(offset + 1)) - (*offset), reinterpret_cast<const char *>(data) + (*offset)});
@@ -47,13 +53,14 @@ int WriteStringsToTensor(Tensor *tensor, const std::vector<StringPack> &string_b
   }
   std::vector<int> shape = {offset[num]};
   tensor->set_shape(shape);
+  tensor->FreeData();
   void *data = tensor->MutableData();
   if (data == nullptr) {
     return RET_ERROR;
   }
 
   auto *string_info = reinterpret_cast<int32_t *>(data);
-  auto *string_data = reinterpret_cast<char *>(data);
+  char *string_data = reinterpret_cast<char *>(data);
 
   string_info[0] = num;
   for (int i = 0; i <= num; i++) {
@@ -80,6 +87,7 @@ int WriteSeperatedStringsToTensor(Tensor *tensor, const std::vector<std::vector<
 
   std::vector<int> shape = {offset[num]};
   tensor->set_shape(shape);
+  tensor->FreeData();
   void *data = tensor->MutableData();
   if (data == nullptr) {
     return RET_ERROR;
@@ -106,21 +114,47 @@ int GetStringCount(const void *data) { return *(static_cast<const int32_t *>(dat
 
 int GetStringCount(Tensor *tensor) { return GetStringCount(tensor->MutableData()); }
 
+int StringsToMSTensor(const std::vector<std::string> &inputs, tensor::MSTensor *tensor) {
+  if (tensor == nullptr) {
+    return RET_PARAM_INVALID;
+  }
+  std::vector<StringPack> all_pack;
+  for (auto &input : inputs) {
+    StringPack pack = {static_cast<int>(input.length()), input.data()};
+    all_pack.push_back(pack);
+  }
+  return WriteStringsToTensor(static_cast<Tensor *>(tensor), all_pack);
+}
+
+std::vector<std::string> MSTensorToStrings(const tensor::MSTensor *tensor) {
+  if (tensor == nullptr) {
+    return {""};
+  }
+  const void *ptr = static_cast<const Tensor *>(tensor)->data_c();
+  std::vector<StringPack> all_pack = ParseStringBuffer(ptr);
+  std::vector<std::string> result(all_pack.size());
+  std::transform(all_pack.begin(), all_pack.end(), result.begin(), [](StringPack &pack) {
+    std::string str(pack.data, pack.len);
+    return str;
+  });
+  return result;
+}
+
 // Some primes between 2^63 and 2^64
 static uint64_t k0 = 0xc3a5c85c97cb3127ULL;
 static uint64_t k1 = 0xb492b66fbe98f273ULL;
 static uint64_t k2 = 0x9ae16a3b2f90404fULL;
 
 uint64_t Fetch64Bit(const char *p) {
-  uint64_t result;
+  uint64_t result = 0;
   memcpy(&result, p, sizeof(uint64_t));
-  return __builtin_bswap64(result);
+  return result;
 }
 
 uint32_t Fetch32Bit(const char *p) {
-  uint32_t result;
+  uint32_t result = 0;
   memcpy(&result, p, sizeof(uint32_t));
-  return __builtin_bswap32(result);
+  return result;
 }
 
 uint64_t Rotate64(uint64_t value, int shift) {
@@ -198,7 +232,7 @@ std::pair<uint64_t, uint64_t> HashLen32WithSeeds(const char *s, uint64_t a, uint
 }
 
 uint64_t StringHash64(const char *s, size_t len) {
-  uint64_t seed_value = 81;
+  const uint64_t seed_value = 81;
   if (len <= 16) {
     return HashStringLen0to16(s, len);
   } else if (len <= 32) {

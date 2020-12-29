@@ -15,7 +15,6 @@
 """rmsprop"""
 from mindspore.ops import functional as F, composite as C, operations as P
 from mindspore._checkparam import Validator as validator
-from mindspore._checkparam import Rel
 from .optimizer import Optimizer
 
 _rmsprop_opt = C.MultitypeFuncGraph("rmsprop_opt")
@@ -43,51 +42,51 @@ class RMSProp(Optimizer):
     """
     Implements Root Mean Squared Propagation (RMSProp) algorithm.
 
+    Update `params` according to the RMSProp algorithm.
+
+    The equation is as follows:
+
+    ..  math::
+        s_{t} = \\rho s_{t-1} + (1 - \\rho)(\\nabla Q_{i}(w))^2
+
+    ..  math::
+        m_{t} = \\beta m_{t-1} + \\frac{\\eta} {\\sqrt{s_{t} + \\epsilon}} \\nabla Q_{i}(w)
+
+    ..  math::
+        w = w - m_{t}
+
+    The first equation calculates moving average of the squared gradient for
+    each weight. Then dividing the gradient by :math:`\\sqrt{ms_{t} + \\epsilon}`.
+
+    if centered is True:
+
+    ..  math::
+        g_{t} = \\rho g_{t-1} + (1 - \\rho)\\nabla Q_{i}(w)
+
+    ..  math::
+        s_{t} = \\rho s_{t-1} + (1 - \\rho)(\\nabla Q_{i}(w))^2
+
+    ..  math::
+        m_{t} = \\beta m_{t-1} + \\frac{\\eta} {\\sqrt{s_{t} - g_{t}^2 + \\epsilon}} \\nabla Q_{i}(w)
+
+    ..  math::
+        w = w - m_{t}
+
+    where :math:`w` represents `params`, which will be updated.
+    :math:`g_{t}` is mean gradients, :math:`g_{t-1}` is the last moment of :math:`g_{t}`.
+    :math:`s_{t}` is the mean square gradients, :math:`s_{t-1}` is the last moment of :math:`s_{t}`,
+    :math:`m_{t}` is moment, the delta of `w`, :math:`m_{t-1}` is the last moment of :math:`m_{t}`.
+    :math:`\\rho` represents `decay`. :math:`\\beta` is the momentum term, represents `momentum`.
+    :math:`\\epsilon` is a smoothing term to avoid division by zero, represents `epsilon`.
+    :math:`\\eta` is learning rate, represents `learning_rate`. :math:`\\nabla Q_{i}(w)` is gradientse,
+    represents `gradients`.
+
     Note:
         When separating parameter groups, the weight decay in each group will be applied on the parameters if the
         weight decay is positive. When not separating parameter groups, the `weight_decay` in the API will be applied
         on the parameters without 'beta' or 'gamma' in their names if `weight_decay` is positive.
 
         To improve parameter groups performance, the customized order of parameters can be supported.
-
-        Update `params` according to the RMSProp algorithm.
-
-        The equation is as follows:
-
-        ..  math::
-            s_{t} = \\rho s_{t-1} + (1 - \\rho)(\\nabla Q_{i}(w))^2
-
-        ..  math::
-            m_{t} = \\beta m_{t-1} + \\frac{\\eta} {\\sqrt{s_{t} + \\epsilon}} \\nabla Q_{i}(w)
-
-        ..  math::
-            w = w - m_{t}
-
-        The first equation calculates moving average of the squared gradient for
-        each weight. Then dividing the gradient by :math:`\\sqrt{ms_{t} + \\epsilon}`.
-
-        if centered is True:
-
-        ..  math::
-            g_{t} = \\rho g_{t-1} + (1 - \\rho)\\nabla Q_{i}(w)
-
-        ..  math::
-            s_{t} = \\rho s_{t-1} + (1 - \\rho)(\\nabla Q_{i}(w))^2
-
-        ..  math::
-            m_{t} = \\beta m_{t-1} + \\frac{\\eta} {\\sqrt{s_{t} - g_{t}^2 + \\epsilon}} \\nabla Q_{i}(w)
-
-        ..  math::
-            w = w - m_{t}
-
-        where :math:`w` represents `params`, which will be updated.
-        :math:`g_{t}` is mean gradients, :math:`g_{t-1}` is the last moment of :math:`g_{t}`.
-        :math:`s_{t}` is the mean square gradients, :math:`s_{t-1}` is the last moment of :math:`s_{t}`,
-        :math:`m_{t}` is moment, the delta of `w`, :math:`m_{t-1}` is the last moment of :math:`m_{t}`.
-        :math:`\\rho` represents `decay`. :math:`\\beta` is the momentum term, represents `momentum`.
-        :math:`\\epsilon` is a smoothing term to avoid division by zero, represents `epsilon`.
-        :math:`\\eta` is learning rate, represents `learning_rate`. :math:`\\nabla Q_{i}(w)` is gradientse,
-        represents `gradients`.
 
     Args:
         params (Union[list[Parameter], list[dict]]): When the `params` is a list of `Parameter` which will be updated,
@@ -131,17 +130,20 @@ class RMSProp(Optimizer):
     Outputs:
         Tensor[bool], the value is True.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> net = Net()
         >>> #1) All parameters use the same learning rate and weight decay
-        >>> optim = nn.RMSProp(params=net.trainable_params(), learning_rate=lr)
+        >>> optim = nn.RMSProp(params=net.trainable_params(), learning_rate=0.1)
         >>>
         >>> #2) Use parameter groups and set different values
         >>> conv_params = list(filter(lambda x: 'conv' in x.name, net.trainable_params()))
         >>> no_conv_params = list(filter(lambda x: 'conv' not in x.name, net.trainable_params()))
         >>> group_params = [{'params': conv_params, 'weight_decay': 0.01},
-        >>>                 {'params': no_conv_params, 'lr': 0.01},
-        >>>                 {'order_params': net.trainable_params()}]
+        ...                 {'params': no_conv_params, 'lr': 0.01},
+        ...                 {'order_params': net.trainable_params()}]
         >>> optim = nn.RMSProp(group_params, learning_rate=0.1, weight_decay=0.0)
         >>> # The conv_params's parameters will use a learning rate of default value 0.1 and a weight decay of 0.01.
         >>> # The no_conv_params's parameters will use a learning rate of 0.01 and a weight decay of default value 0.0.
@@ -154,11 +156,11 @@ class RMSProp(Optimizer):
                  use_locking=False, centered=False, loss_scale=1.0, weight_decay=0.0):
         super(RMSProp, self).__init__(learning_rate, params, weight_decay, loss_scale)
         validator.check_value_type("decay", decay, [float], self.cls_name)
-        validator.check_number_range("decay", decay, 0.0, float("inf"), Rel.INC_LEFT, self.cls_name)
+        validator.check_non_negative_float(decay, "decay", self.cls_name)
         validator.check_value_type("momentum", momentum, [float], self.cls_name)
-        validator.check_number_range("momentum", momentum, 0.0, float("inf"), Rel.INC_LEFT, self.cls_name)
+        validator.check_non_negative_float(momentum, "momentum", self.cls_name)
         validator.check_value_type("epsilon", epsilon, [float], self.cls_name)
-        validator.check_number_range("epsilon", epsilon, 0.0, float("inf"), Rel.INC_NEITHER, self.cls_name)
+        validator.check_positive_float(epsilon, "epsilon", self.cls_name)
         validator.check_value_type("use_locking", use_locking, [bool], self.cls_name)
         validator.check_value_type("centered", centered, [bool], self.cls_name)
 

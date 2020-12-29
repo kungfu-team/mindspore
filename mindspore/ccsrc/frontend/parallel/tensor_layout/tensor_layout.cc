@@ -58,7 +58,11 @@ Status TensorLayout::Init(const Arrangement &device_arrangement, const Map &tens
     MS_LOG(DEBUG) << "standard tensor layout " << this->StandardToString();
     return Status::SUCCESS;
   } else {
-    MS_LOG(ERROR) << "invalid origin tensor layout " << this->OriginToString();
+    if (layout_transfer_) {
+      MS_LOG(DEBUG) << "invalid origin tensor layout " << this->OriginToString();
+    } else {
+      MS_LOG(ERROR) << "invalid origin tensor layout " << this->OriginToString();
+    }
     return Status::FAILED;
   }
 }
@@ -90,16 +94,20 @@ bool TensorLayout::IsValidTensorLayout() const {
     return false;
   }
   if (!TensorShapeDimensionIsDividedBySplitDeviceDimension()) {
-    MS_LOG(ERROR) << "TensorShapeDimensionIsDividedBySplitDeviceDimension failed!";
+    if (layout_transfer_) {
+      MS_LOG(DEBUG) << "TensorShapeDimensionIsDividedBySplitDeviceDimension failed!";
+    } else {
+      MS_LOG(ERROR) << "TensorShapeDimensionIsDividedBySplitDeviceDimension failed!";
+    }
     return false;
   }
   return true;
 }
 
 bool TensorLayout::TensorShapeDimensionIsDividedBySplitDeviceDimension() const {
-  for (uint32_t i = 0; i < tensor_map_.GetDimSize(); i++) {
+  for (uint64_t i = 0; i < tensor_map_.GetDimSize(); i++) {
     if (tensor_map_.GetDimByIdx(i) != -1) {
-      int32_t divisor = GetSliceNumByTensorDimensionIndex(i);
+      int64_t divisor = GetSliceNumByTensorDimensionIndex(i);
       if (divisor == 0) {
         MS_LOG(ERROR) << "GetSliceNumByTensorDimensionIndex is 0";
         return false;
@@ -119,9 +127,9 @@ void TensorLayout::RemoveElementEqualToOneInDeviceArrangement() {
   size_t dev_num_left = device_arrangement_origin_.GetDimSize();
   for (size_t i = 0; i < dev_num; i++) {
     if (device_arrangement_origin_.GetDimByIdx(i) == 1) {
-      int32_t idx = GetTensorDimensionIndexByDeviceDimensionIndex(static_cast<int64_t>(dev_num - 1 - i));
+      int64_t idx = GetTensorDimensionIndexByDeviceDimensionIndex(static_cast<int64_t>(dev_num - 1 - i));
       if (idx != -1) {
-        tensor_map_shape[static_cast<uint32_t>(idx)] = -1;
+        tensor_map_shape[static_cast<uint64_t>(idx)] = -1;
       }
       for (auto &value : tensor_map_shape) {
         if (value >= SizeToLong(dev_num_left) - 1 - static_cast<int64_t>(i)) {
@@ -138,18 +146,18 @@ void TensorLayout::RemoveElementEqualToOneInDeviceArrangement() {
 }
 
 // if idx is not in tensor_map, return -1
-int32_t TensorLayout::GetTensorDimensionIndexByDeviceDimensionIndex(int64_t idx) const {
+int64_t TensorLayout::GetTensorDimensionIndexByDeviceDimensionIndex(int64_t idx) const {
   return tensor_map_.GetIndexByValue(idx);
 }
 
 // tensor_map_.GetDimByIdx(idx) should not be -1
-int32_t TensorLayout::GetSliceDeviceDimensionByTensorDimensionIndex(uint32_t idx) const {
-  return static_cast<int32_t>(device_arrangement_.GetDimSize()) - 1 - tensor_map_.GetDimByIdx(idx);
+int64_t TensorLayout::GetSliceDeviceDimensionByTensorDimensionIndex(uint64_t idx) const {
+  return static_cast<int64_t>(device_arrangement_.GetDimSize()) - 1 - tensor_map_.GetDimByIdx(idx);
 }
 
 // tensor_map_.GetDimByIdx(idx) should not be -1
-int32_t TensorLayout::GetSliceNumByTensorDimensionIndex(uint32_t idx) const {
-  return device_arrangement_.GetDimByIdx(static_cast<uint32_t>(GetSliceDeviceDimensionByTensorDimensionIndex(idx)));
+int64_t TensorLayout::GetSliceNumByTensorDimensionIndex(uint64_t idx) const {
+  return device_arrangement_.GetDimByIdx(static_cast<uint64_t>(GetSliceDeviceDimensionByTensorDimensionIndex(idx)));
 }
 
 std::shared_ptr<TensorLayout> TensorLayout::ExpandTensorShape(const Arrangement &expanded_shape) const {
@@ -180,11 +188,11 @@ std::shared_ptr<Arrangement> TensorLayout::ComputeArrangementByExpandedShape(con
   }
   std::vector<Arrangement> re_map_expand_list;
   Arrangement empty_arrangement;
-  for (int32_t i = static_cast<int32_t>(device_arrangement_.GetDimSize()) - 1; i >= 0; i--) {
+  for (int64_t i = static_cast<int64_t>(device_arrangement_.GetDimSize()) - 1; i >= 0; i--) {
     if (tensor_map_.GetIndexByValue(i) < 0) {
       re_map_expand_list.push_back(empty_arrangement);
     } else {
-      re_map_expand_list.push_back((*expand_list_ptr)[IntToUint(tensor_map_.GetIndexByValue(i))]);
+      re_map_expand_list.push_back((*expand_list_ptr)[LongToUlong(tensor_map_.GetIndexByValue(i))]);
     }
   }
   std::shared_ptr<Arrangement> new_arrangement_ptr =
@@ -214,6 +222,7 @@ std::shared_ptr<TensorLayout> TensorLayout::ExpandTensorShapeWithoutExtendDevice
     return nullptr;
   }
   TensorLayout tensor_layout_new;
+  tensor_layout_new.set_layout_transfer(true);
   Status status = tensor_layout_new.Init(device_arrangement_, *tensor_map_new_ptr, expanded_shape);
   if (status != Status::SUCCESS) {
     return nullptr;
@@ -317,7 +326,7 @@ Arrangement TensorLayout::slice_shape() const {
     if (dim == -1) {
       shape.push_back(num);
     } else {
-      int64_t divisor = device_arrangement_.GetDimByReverseIdx(IntToUint(dim));
+      int64_t divisor = device_arrangement_.GetDimByReverseIdx(LongToUlong(dim));
       shape.push_back(num / divisor);
     }
   }
@@ -346,6 +355,10 @@ Status TensorLayout::UpdateTensorMap(size_t index, int64_t value) {
 
 bool TensorLayout::operator==(const TensorLayout &t1) const {
   return (IsSameDeviceArrangement(t1) && IsSameTensorMap(t1) && IsSameTensorShape(t1));
+}
+
+bool TensorLayout::operator!=(const TensorLayout &t1) const {
+  return !(IsSameDeviceArrangement(t1) && IsSameTensorMap(t1) && IsSameTensorShape(t1));
 }
 
 /*
@@ -388,6 +401,15 @@ TensorLayout TensorLayout::SqueezeShape() const {
   out_map = tensor_map_.SqueezeMapByIdxList(squeeze_list);
   (void)out.Init(device_arrangement_, out_map, out_shape);
   return out;
+}
+
+TensorLayout TensorLayout::TransferRepeatLayout() const {
+  Shape dev_mat(device_arrangement_origin_.array());
+  Shape tensor_map(tensor_map_origin_.GetDimSize(), -1);
+  Shape tensor_shape(tensor_shape_origin_.array());
+  TensorLayout repeat;
+  repeat.InitFromVector(dev_mat, tensor_map, tensor_shape);
+  return repeat;
 }
 
 // Generate a totally shard tensor slice shape for parallel optimizer

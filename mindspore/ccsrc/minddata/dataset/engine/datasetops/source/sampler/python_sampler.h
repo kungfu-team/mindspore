@@ -23,37 +23,37 @@
 
 namespace mindspore {
 namespace dataset {
-class PythonSampler : public Sampler {
+class PythonSamplerRT : public SamplerRT {
  public:
   // Constructor
   // @param num_samples - the number of samples to draw.  Value of 0 means to sample all of the
   //                      data from the dataset.
   // @param py_sampler_instance - the python instance of the sampler
   // @param int64_t samples_per_buffer - Num of Sampler Ids to fetch via 1 GetNextBuffer call
-  explicit PythonSampler(int64_t num_samples, py::object py_sampler_instance,
-                         int64_t samples_per_buffer = std::numeric_limits<int64_t>::max());
+  explicit PythonSamplerRT(int64_t num_samples, py::object py_sampler_instance,
+                           int64_t samples_per_buffer = std::numeric_limits<int64_t>::max());
 
   // Destructor.
-  ~PythonSampler() = default;
+  ~PythonSamplerRT() = default;
 
   // Initialize the sampler.
   // @return Status
   Status InitSampler() override;
 
   // for next epoch of sampleIds
-  // @return - The error code return
+  // @return Status The status code returned
   Status ResetSampler() override;
 
   // Op calls this to get next Buffer that contains all the sampleIds
   // @param std::unique_ptr<DataBuffer> pBuffer - Buffer to be returned to corresponding Dataset Op
   // @param int32_t workerId - not meant to be used
-  // @return - The error code return
+  // @return Status The status code returned
   Status GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) override;
 
   // Printer for debugging purposes.
   // @param out - output stream to write to
   // @param show_all - bool to show detailed vs summary
-  void Print(std::ostream &out, bool show_all) const override;
+  void SamplerPrint(std::ostream &out, bool show_all) const override;
 
  private:
   bool need_to_reset_;  // Whether Reset() should be called before calling GetNextBuffer()

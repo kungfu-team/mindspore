@@ -40,13 +40,13 @@ class LayerNormInfo : public OperatorInfo {
  public:
   LayerNormInfo(const std::string &operator_name, const Shapes &inputs_shape, const Shapes &outputs_shape,
                 const PrimitiveAttrs &attrs)
-      : OperatorInfo(operator_name, inputs_shape, outputs_shape, attrs, std::make_shared<LayerNormCost>(true)),
+      : OperatorInfo(operator_name, inputs_shape, outputs_shape, attrs, std::make_shared<LayerNormCost>()),
         begin_norm_axis_(0) {}
   ~LayerNormInfo() override = default;
 
   Status Init(const StrategyPtr &strategy) override;
   Status InitForCostModel(const StrategyPtr &strategy) override;
-  Status GenerateStrategies(int32_t) override;
+  Status GenerateStrategies(int64_t) override;
   Status SetCostUnderStrategy(const StrategyPtr &) override;
 
  protected:

@@ -34,6 +34,7 @@
 #include "utils/ordered_map.h"
 #include "base/base_ref.h"
 #include "ir/func_graph_cloner.h"
+#include "abstract/abstract_value.h"
 
 namespace mindspore {
 using BaseRefCounterMap = OrderedMap<BaseRef, int, BaseRefHash>;
@@ -274,12 +275,12 @@ class FuncGraph : public FuncGraphBase {
   bool AddFuncGraphUsed(FuncGraphPtr fg, int count = 1);
   bool DropFuncGraphUsed(FuncGraphPtr fg);
 
-  // get all value nodes of J func graph directly used by this func graph
-  const FuncGraphCounterMap &j_func_graphs();
-  void CopyJFuncGraphs(const FuncGraphPtr &source);
-  void ClearJFuncGraphs();
-  void AddJFuncGraph(FuncGraphPtr fg, int count = 1);
-  void DropJFuncGraph(FuncGraphPtr fg);
+  // get all value nodes in the inputs of J directly used by this func graph
+  const std::unordered_map<AnfNodePtr, int> &j_value_nodes();
+  void CopyJValueNodes(const FuncGraphPtr &source);
+  void ClearJValueNodes();
+  void AddJValueNode(const AnfNodePtr &value_node, int count = 1);
+  void DropJValueNode(const AnfNodePtr &value_node);
 
   // get all func graphs nested used by this func graph
   const FuncGraphSet &func_graphs_used_total();
@@ -353,6 +354,9 @@ class FuncGraph : public FuncGraphBase {
   static void set_drawer(Drawer drawer) { drawer_ = drawer; }
   std::shared_ptr<bool> switch_layer_input() const { return switch_layer_input_; }
   void set_switch_layer_input(std::shared_ptr<bool> switch_layer_input) { switch_layer_input_ = switch_layer_input; }
+  bool ContainMultiTarget() const;
+  int64_t stage() { return stage_; }
+  void set_stage(int64_t stage) { stage_ = stage; }
 
  private:
   // graph is manipulated by manager and others
@@ -371,7 +375,7 @@ class FuncGraph : public FuncGraphBase {
   AnfNodeCounterMap free_variables_;
 
   // all value nodes calling J in the function
-  FuncGraphCounterMap j_func_graphs_;
+  std::unordered_map<AnfNodePtr, int> j_value_nodes_;
 
   // all user value nodes of this func graph, recording by CNode and its input's index
   CNodeIndexCounterMap func_graph_cnodes_index_;
@@ -417,6 +421,10 @@ class FuncGraph : public FuncGraphBase {
   // Design switch_layer_input as a ptr to
   // share between derived backpropagator and cloned graphs
   std::shared_ptr<bool> switch_layer_input_;
+  int64_t stage_;
+  std::unordered_map<AbstractBasePtrList, FuncGraphPtr, abstract::AbstractBasePtrListHasher,
+                     abstract::AbstractBasePtrListEqual>
+    func_graph_cache_;
 };
 
 inline CNodePtr NewCNode(const std::vector<AnfNodePtr> &inputs, const FuncGraphPtr &fg) {

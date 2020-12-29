@@ -82,7 +82,6 @@ class ExecutorPy : public std::enable_shared_from_this<ExecutorPy> {
   ResourcePtr GetResource(const std::string &phase);
   FuncGraphPtr GetFuncGraph(const std::string &phase);
   py::bytes GetFuncGraphProto(const std::string &phase, const std::string &type);
-  std::size_t ArgListSize(const std::string &phase);
   compile::VmEvalFuncPtr GetVmEvalFunc(const std::string &phase);
   bool HasCompiled(const std::string &phase) const;
 
@@ -91,8 +90,12 @@ class ExecutorPy : public std::enable_shared_from_this<ExecutorPy> {
   void UpdataParamNodeDefaultInput(const std::string &phase,
                                    const std::unordered_map<std::string, tensor::TensorPtr> &params);
   void RunInitGraph(const py::dict &init_params, const std::string &phase);
+  void PyExePath(const py::object &phase);
   py::dict GetParameterLayout(const std::string &phase);
   py::dict GetCNodeStrategy(const std::string &phase);
+  void SetCNodeStrategy(const std::string &name, const parallel::Strategys &strategy);
+  size_t GetNumOpsInfo(const std::string &phase);
+  void SetNumOpsInfo(size_t);
   py::dict GetAllreduceFusion(const std::string &phase);
   void DelNetRes(const std::string &id);
   void ReleaseResource(const py::object &phase);
@@ -115,6 +118,9 @@ class ExecutorPy : public std::enable_shared_from_this<ExecutorPy> {
   static std::shared_ptr<ExecutorPy> executor_;
   static std::mutex instance_lock_;
   static bool debugger_terminate_;
+  std::map<std::string, py::dict> stra_dict_;
+  std::string phase_ = "";
+  std::map<std::string, size_t> phase_to_num_op_info_;
 };
 using ExecutorPyPtr = std::shared_ptr<ExecutorPy>;
 
@@ -127,7 +133,7 @@ bool InitDistribute(const std::map<std::string, std::string> &options);
 void ResetOpId();
 void InitHccl();
 void FinalizeHccl();
-void InitBackend();
+void InitPipeline();
 void FinalizeBackend();
 void ClearResAtexit();
 void ReleaseGeTsd();

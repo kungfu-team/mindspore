@@ -46,9 +46,13 @@ class TensorLayout {
 
   void set_skip_redistribution(bool flag) { skip_redistribution_ = flag; }
 
-  int32_t get_field_size() const { return field_size_; }
+  bool layout_transfer() const { return layout_transfer_; }
 
-  void set_field_size(int32_t field_size) { field_size_ = field_size; }
+  void set_layout_transfer(bool flag) { layout_transfer_ = flag; }
+
+  int64_t get_field_size() const { return field_size_; }
+
+  void set_field_size(int64_t field_size) { field_size_ = field_size; }
 
   bool uniform_split() const { return uniform_split_; }
 
@@ -78,6 +82,8 @@ class TensorLayout {
 
   bool operator==(const TensorLayout &t1) const;
 
+  bool operator!=(const TensorLayout &t1) const;
+
   bool TensorShapeCanBeExpanded(const Arrangement &expanded_shape) const;
 
   std::shared_ptr<Arrangement> ComputeExpandedTensorShape(const Arrangement &expand_shape) const;
@@ -87,6 +93,8 @@ class TensorLayout {
   Status UpdateTensorMap(size_t index, int64_t value);
 
   TensorLayout SqueezeShape() const;
+
+  TensorLayout TransferRepeatLayout() const;
 
   Status GenerateOptShardSliceShape();
 
@@ -105,20 +113,21 @@ class TensorLayout {
   std::shared_ptr<Arrangement> ComputeArrangementByExpandedShape(const Arrangement &tensor_shape) const;
   bool IsValidTensorLayout() const;
   void RemoveElementEqualToOneInDeviceArrangement();
-  int32_t GetSliceDeviceDimensionByTensorDimensionIndex(uint32_t idx) const;
-  int32_t GetSliceNumByTensorDimensionIndex(uint32_t idx) const;
+  int64_t GetSliceDeviceDimensionByTensorDimensionIndex(uint64_t idx) const;
+  int64_t GetSliceNumByTensorDimensionIndex(uint64_t idx) const;
   bool TensorShapeDimensionIsDividedBySplitDeviceDimension() const;
-  int32_t GetTensorDimensionIndexByDeviceDimensionIndex(int64_t idx) const;
+  int64_t GetTensorDimensionIndexByDeviceDimensionIndex(int64_t idx) const;
 
   Arrangement device_arrangement_origin_;
-  Map tensor_map_origin_;
   Arrangement tensor_shape_origin_;
   Arrangement device_arrangement_;
-  Map tensor_map_;
   Arrangement tensor_shape_;
+  Map tensor_map_;
+  Map tensor_map_origin_;
   bool skip_redistribution_ = false;
-  int32_t field_size_ = 0;
   bool uniform_split_ = true;
+  bool layout_transfer_ = false;
+  int32_t field_size_ = 0;
   Shape opt_shard_slice_shape_;
   std::string opt_shard_group_ = "";
 };

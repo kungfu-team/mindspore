@@ -35,6 +35,8 @@ class PoolingCPUKernel : public MKLCPUKernel {
 
 MS_REG_CPU_KERNEL(MaxPool, KernelAttr().AddInputAttr(kNumberTypeFloat32).AddOutputAttr(kNumberTypeFloat32),
                   PoolingCPUKernel);
+MS_REG_CPU_KERNEL(AvgPool, KernelAttr().AddInputAttr(kNumberTypeFloat32).AddOutputAttr(kNumberTypeFloat32),
+                  PoolingCPUKernel);
 }  // namespace kernel
 }  // namespace mindspore
 

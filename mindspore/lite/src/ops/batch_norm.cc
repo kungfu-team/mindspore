@@ -16,6 +16,10 @@
 
 #include "src/ops/batch_norm.h"
 #include <memory>
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -41,6 +45,7 @@ int BatchNorm::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &
     if (attr == nullptr) {
       MS_LOG(ERROR) << "new FusedBatchNormT failed";
       delete this->primitive_;
+      this->primitive_ = nullptr;
       return RET_ERROR;
     }
     attr->epsilon = GetValue<float>(prim.GetAttr("epsilon"));
@@ -60,6 +65,11 @@ int BatchNorm::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffe
 }
 float BatchNorm::GetEpsilon() const { return this->primitive_->value_as_BatchNorm()->epsilon(); }
 
+PrimitiveC *BatchNormCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<BatchNorm>(primitive);
+}
+Registry BatchNormRegistry(schema::PrimitiveType_BatchNorm, BatchNormCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

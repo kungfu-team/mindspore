@@ -18,6 +18,7 @@
 #define MINDSPORE_LITE_NNACL_FP16_MATRIX_FP16_H_
 
 #include <arm_neon.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {

@@ -99,6 +99,7 @@ bool CastAllFusion::Run(const FuncGraphPtr &graph) {
     for (size_t idx = 0; idx < cast_list.size(); ++idx) {
       inputs.push_back(AnfAlgo::GetInputNode(utils::cast<CNodePtr>(cast_list[idx]), 0));
     }
+    TraceGuard guard(std::make_shared<TraceOpt>(cast_list[0]->debug_info()));
     auto cast_all = graph->NewCNode(inputs);
     auto kernel_info = std::make_shared<device::KernelInfo>();
     MS_EXCEPTION_IF_NULL(kernel_info);
@@ -120,8 +121,8 @@ bool CastAllFusion::Run(const FuncGraphPtr &graph) {
       std::vector<AnfNodePtr> tuple_getitem_input;
       tuple_getitem_input.push_back(NewValueNode(prim::kPrimTupleGetItem));
       tuple_getitem_input.push_back(cast_all);
-      auto index = NewValueNode(SizeToInt(idx));
-      auto imm = std::make_shared<Int32Imm>(idx);
+      auto index = NewValueNode(SizeToLong(idx));
+      auto imm = std::make_shared<Int64Imm>(idx);
       auto abstract_scalar = std::make_shared<abstract::AbstractScalar>(imm);
       MS_EXCEPTION_IF_NULL(abstract_scalar);
       index->set_abstract(abstract_scalar);

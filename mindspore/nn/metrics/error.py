@@ -39,6 +39,8 @@ class MAE(Metric):
         >>> error.clear()
         >>> error.update(x, y)
         >>> result = error.eval()
+        >>> print(result)
+        0.037499990314245224
     """
     def __init__(self):
         super(MAE, self).__init__()
@@ -91,7 +93,8 @@ class MSE(Metric):
     norm) between each element in the input: :math:`x` and the target: :math:`y`.
 
     .. math::
-        \text{MSE}(x,\ y) = \frac{\sum_{i=1}^n(y_i - x_i)^2}{n},
+        \text{MSE}(x,\ y) = \frac{\sum_{i=1}^n(y_i - x_i)^2}{n}
+
     where :math:`n` is batch size.
 
     Examples:

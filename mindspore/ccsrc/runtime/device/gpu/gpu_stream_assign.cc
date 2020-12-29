@@ -71,27 +71,34 @@ bool FindAllReduceStreamSwitchPos(const std::shared_ptr<session::KernelGraph> &k
       std::vector<CNodePtr>::iterator mock_send_node_iter =
         FindSendNodePos(iter_begin, iter + 1, *iter, kAllReduceStreamSwitch);
       if (mock_send_node_iter == iter + 1) {
-        MS_LOG(WARNING) << "Can't find send node place before AllReduce node.";
-        continue;
-      }
-      if (AnfAlgo::GetCNodeName(*mock_send_node_iter) != kAllReduceOpName) {
+        MS_LOG(INFO) << "Can't find send node place before AllReduce node.";
+      } else if (AnfAlgo::GetCNodeName(*mock_send_node_iter) != kAllReduceOpName) {
         SendRecvPair pair1 = {kAllReduceStreamSwitch, *mock_send_node_iter, *iter,
                               IntToSize(mock_send_node_iter - iter_begin + 1), IntToSize(iter - iter_begin)};
         send_recv_pairs->push_back(pair1);
+      } else {
+        MS_LOG(INFO) << "mock_send_node is AllReduce, no need to add stream switch node.";
       }
       // Find node which uses AllReduce as input[0].
       std::vector<CNodePtr>::iterator mock_recv_node_iter =
         FindRecvNodePos(iter, iter_end, *iter, kAllReduceStreamSwitch);
       if (mock_recv_node_iter == iter_end) {
-        MS_LOG(WARNING) << "Can't find recv node place after AllReduce node.";
+        // Each AllReduce must have its corresponding node which takes AllReduce as a input to synchronize stream,
+        // otherwise consider FindAllReduceStreamSwitchPos as failed.
+        MS_LOG(INFO) << "Can't find recv node place after AllReduce node.";
         return false;
-      }
-      if (AnfAlgo::GetCNodeName(*mock_recv_node_iter) != kAllReduceOpName) {
+      } else if (AnfAlgo::GetCNodeName(*mock_recv_node_iter) != kAllReduceOpName) {
         SendRecvPair pair2 = {kAllReduceStreamSwitch, *iter, *mock_recv_node_iter, IntToSize(iter - iter_begin + 1),
                               IntToSize(mock_recv_node_iter - iter_begin)};
         send_recv_pairs->push_back(pair2);
+      } else {
+        MS_LOG(INFO) << "mock_recv_node is AllReduce, no need to add stream switch node.";
       }
     }
+  }
+  if (send_recv_pairs->empty()) {
+    MS_LOG(INFO) << "No stream switch node is found.";
+    return false;
   }
   return true;
 }
@@ -143,17 +150,17 @@ void InsertStreamSwitchNode(const std::shared_ptr<session::KernelGraph> &kernel_
     size_t recv_node_offset = pair.recv_node_offset;
     CNodePtr send_node = nullptr;
     CNodePtr recv_node = nullptr;
-    // Step 1: generate Send and Recv CNodes.
+    // Step 1: Generate stream Send and Recv CNodes.
     if (stream_switch_type == kAllReduceStreamSwitch) {
       if (!GenSendRecvCNodesForAllReduce(kernel_graph, mock_send_node, mock_recv_node, &send_node, &recv_node)) {
         MS_LOG(EXCEPTION) << "Generating CNodes for send and recv failed. Stream switch type: kAllReduceStreamSwitch";
       }
     }
-    // Step 2: sort send and recv CNodes by offset.
+    // Step 2: Sort send and recv CNodes by offset.
     ordered_stream_switch_nodes.insert({send_node_offset, send_node});
     ordered_stream_switch_nodes.insert({recv_node_offset, recv_node});
   }
-  // Step 3: insert stream switch CNodes into execution kernel list.
+  // Step 3: Insert stream switch CNodes into execution kernel list.
   auto execution_kernels = kernel_graph->execution_order();
   for (auto node = ordered_stream_switch_nodes.rbegin(); node != ordered_stream_switch_nodes.rend(); node++) {
     execution_kernels.insert(execution_kernels.begin() + node->offset, node->cnode);
@@ -170,7 +177,8 @@ bool GenSendRecvCNodesForAllReduce(const std::shared_ptr<session::KernelGraph> &
   MS_EXCEPTION_IF_NULL(*recv_node);
 
   cudaEvent_t event = nullptr;
-  CHECK_CUDA_RET_WITH_EXCEPT(cudaEventCreate(&event, cudaEventDisableTiming), "Creating cuda event failed.");
+  CHECK_CUDA_RET_WITH_EXCEPT(*send_node, cudaEventCreate(&event, cudaEventDisableTiming),
+                             "Creating cuda event failed.");
   AnfAlgo::SetNodeAttr(kAttrRecordEvent, MakeValue(reinterpret_cast<uintptr_t>(event)), *send_node);
   AnfAlgo::SetNodeAttr(kAttrWaitEvent, MakeValue(reinterpret_cast<uintptr_t>(event)), *recv_node);
 

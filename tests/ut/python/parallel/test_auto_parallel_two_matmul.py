@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import re
 import numpy as np
 
 import mindspore as ms
@@ -22,6 +23,7 @@ from mindspore.common.api import _executor
 from mindspore.ops import composite as C
 from mindspore.ops import operations as P
 from mindspore.parallel import _cost_model_context as cost_model_context
+from mindspore.parallel._cost_model_context import _set_algo_single_loop, _get_algo_single_loop
 from mindspore.parallel import set_algo_parameters, get_algo_parameters, reset_algo_parameters
 from mindspore.parallel._utils import _reset_op_id as reset_op_id
 from tests.ut.python.ops.test_math_ops import VirtualLoss
@@ -105,7 +107,8 @@ def test_two_matmul():
     assert costmodel_communi_bias == 1024.0
 
     set_algo_parameters(tensor_slice_align_enable=False, tensor_slice_align_size=32,
-                        fully_use_devices=False, elementwise_op_strategy_follow=False)
+                        fully_use_devices=False, elementwise_op_strategy_follow=False,
+                        enable_algo_approxi=True, algo_approxi_epsilon=0.001)
     para_slice_align_enable = get_algo_parameters("tensor_slice_align_enable")
     assert not para_slice_align_enable
     para_slice_align_size = get_algo_parameters("tensor_slice_align_size")
@@ -114,6 +117,18 @@ def test_two_matmul():
     assert not fully_use_devices
     elementwise_op_strategy_follow = get_algo_parameters("elementwise_op_strategy_follow")
     assert not elementwise_op_strategy_follow
+    enable_approxi = get_algo_parameters("enable_algo_approxi")
+    assert enable_approxi
+    algo_epsilon = get_algo_parameters("algo_approxi_epsilon")
+    assert algo_epsilon == 0.001
+
+    expecte_single_loop = True
+    signle_loop = _get_algo_single_loop()
+    assert expecte_single_loop == signle_loop
+    expecte_single_loop = False
+    _set_algo_single_loop(expecte_single_loop)
+    signle_loop = _get_algo_single_loop()
+    assert expecte_single_loop == signle_loop
 
     reset_algo_parameters()
     para_slice_align_enable = get_algo_parameters("tensor_slice_align_enable")
@@ -124,6 +139,10 @@ def test_two_matmul():
     assert fully_use_devices
     elementwise_op_strategy_follow = get_algo_parameters("elementwise_op_strategy_follow")
     assert not elementwise_op_strategy_follow
+    enable_approxi = get_algo_parameters("enable_algo_approxi")
+    assert not enable_approxi
+    algo_epsilon = get_algo_parameters("algo_approxi_epsilon")
+    assert algo_epsilon == 0.1
 
     x = Tensor(np.ones([128, 32]), dtype=ms.float32)
     y = Tensor(np.ones([32, 64]), dtype=ms.float32)
@@ -134,8 +153,9 @@ def test_two_matmul():
     net.set_auto_parallel()
     reset_op_id()
 
+    net.set_train()
     _executor.compile(net, x, y, b, phase='train')
     strategies = _executor._get_shard_strategy(net)
-    expected_strategies = {'Default/network-Net/MatMul-op0': [[16, 1], [1, 1]],
-                           'Default/network-Net/MatMul-op1': [[16, 1], [1, 1]]}
-    assert strategies == expected_strategies
+    for (k, v) in strategies.items():
+        if re.search('MatMul-op', k) is not None:
+            assert v == [[16, 1], [1, 1]]

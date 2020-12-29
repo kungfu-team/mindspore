@@ -27,19 +27,16 @@ namespace mindspore {
 namespace lite {
 class GatherNd : public PrimitiveC {
  public:
+  GatherNd() = default;
+  ~GatherNd() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(GatherNd, PrimitiveC);
-  GatherNd() = default;
   explicit GatherNd(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
-  void SetBatchDims(int batch_dims);
-
+  int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
 #else
-  GatherNd() = default;
-
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
   int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
-  int GetBatchDims() const;
 };
 }  // namespace lite
 }  // namespace mindspore

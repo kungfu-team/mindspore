@@ -15,10 +15,12 @@
  */
 
 #include "nnacl/winograd_transform.h"
+#include "nnacl/op_base.h"
 
 // fp32 conv winograd
 void WinogradInputTransform(const float *input_data, float *trans_input, float *tmp_data, int cal_num,
-                            int out_tile_index, int out_w_block_num, ConvParameter *conv_param, InputTransFunc func) {
+                            int out_tile_index, int out_w_block_num, const ConvParameter *conv_param,
+                            InputTransFunc func) {
   int input_unit = conv_param->input_unit_;
   int output_unit = conv_param->output_unit_;
   int in_channel = conv_param->input_channel_;
@@ -60,8 +62,8 @@ void WinogradInputTransform(const float *input_data, float *trans_input, float *
             int dst_x_offset = dst_y_offset + j * C4NUM;
             float *src_addr = (float *)(input_data) + src_x_offset;
             float *dst_addr = tmp_data + dst_x_offset;
-#ifdef ENABLE_NEON
-            vst1q_f32(dst_addr, vld1q_f32(src_addr));
+#if defined(ENABLE_ARM) || defined(ENABLE_SSE)
+            MS_STQ_F32(dst_addr, MS_LDQ_F32(src_addr));
 #else
             for (int k = 0; k < C4NUM; k++) {
               dst_addr[k] = src_addr[k];
@@ -85,11 +87,7 @@ void WinogradInputTransform(const float *input_data, float *trans_input, float *
         }    // interval y loop
       }
       // input transform
-#ifdef ENABLE_ARM32
-      const int tile_num = 4;
-#else
-      const int tile_num = 12;
-#endif
+      const int tile_num = C12NUM;
       int dst_ic4_offset = dst_plane_offset + ic * C4NUM;
       size_t dst_step = tile_num * in_channel;
       float *trans_input_ptr = trans_input + dst_ic4_offset;
@@ -100,7 +98,8 @@ void WinogradInputTransform(const float *input_data, float *trans_input, float *
 }
 
 void WinogradOutputTransform(const float *gemm_out, float *out_data, const float *bias_data, int cal_num,
-                             int out_tile_index, int output_unit_num, ConvParameter *conv_param, OutputTransFunc func) {
+                             int out_tile_index, int output_unit_num, const ConvParameter *conv_param,
+                             OutputTransFunc func) {
   int output_unit = conv_param->output_unit_;
   int output_w = conv_param->output_w_;
   int output_h = conv_param->output_h_;
@@ -689,6 +688,9 @@ void Conv3x3Int8OutputUnit(const int32_t *gemm_out, const int32_t *bias_data, in
 
   d00 = vqshlq_s32(d00, ls);
   d00 = vqrdmulhq_s32(d00, out_multiplier);
+  int32x4_t carry = vandq_s32(d00, rs);
+  carry = vshrq_n_s32(carry, 31);
+  d00 = vqaddq_s32(d00, carry);
   d00 = vqrshlq_s32(d00, rs);
   d00 = vaddq_s32(d00, out_zp);
   d00 = vmaxq_s32(d00, output_min);
@@ -696,6 +698,9 @@ void Conv3x3Int8OutputUnit(const int32_t *gemm_out, const int32_t *bias_data, in
 
   d01 = vqshlq_s32(d01, ls);
   d01 = vqrdmulhq_s32(d01, out_multiplier);
+  carry = vandq_s32(d01, rs);
+  carry = vshrq_n_s32(carry, 31);
+  d01 = vqaddq_s32(d01, carry);
   d01 = vqrshlq_s32(d01, rs);
   d01 = vaddq_s32(d01, out_zp);
   d01 = vmaxq_s32(d01, output_min);
@@ -703,6 +708,9 @@ void Conv3x3Int8OutputUnit(const int32_t *gemm_out, const int32_t *bias_data, in
 
   d10 = vqshlq_s32(d10, ls);
   d10 = vqrdmulhq_s32(d10, out_multiplier);
+  carry = vandq_s32(d10, rs);
+  carry = vshrq_n_s32(carry, 31);
+  d10 = vqaddq_s32(d10, carry);
   d10 = vqrshlq_s32(d10, rs);
   d10 = vaddq_s32(d10, out_zp);
   d10 = vmaxq_s32(d10, output_min);
@@ -710,6 +718,9 @@ void Conv3x3Int8OutputUnit(const int32_t *gemm_out, const int32_t *bias_data, in
 
   d11 = vqshlq_s32(d11, ls);
   d11 = vqrdmulhq_s32(d11, out_multiplier);
+  carry = vandq_s32(d11, rs);
+  carry = vshrq_n_s32(carry, 31);
+  d11 = vqaddq_s32(d11, carry);
   d11 = vqrshlq_s32(d11, rs);
   d11 = vaddq_s32(d11, out_zp);
   d11 = vmaxq_s32(d11, output_min);

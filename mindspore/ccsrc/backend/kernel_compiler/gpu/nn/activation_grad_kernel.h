@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2020 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_NN_RELU_GRAD_KERNEL_H_
-#define MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_NN_RELU_GRAD_KERNEL_H_
+#ifndef MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_NN_ACTIVATION_GRAD_KERNEL_H_
+#define MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_NN_ACTIVATION_GRAD_KERNEL_H_
 
 #include <vector>
 #include <map>
@@ -29,21 +29,14 @@ namespace kernel {
 template <typename T>
 class ActivationGradGpuKernel : public GpuKernel {
  public:
-  ActivationGradGpuKernel()
-      : cudnn_handle_(nullptr),
-        activation_desc_(nullptr),
-        mode_(CUDNN_ACTIVATION_RELU),
-        data_descriptor_(nullptr),
-        is_null_input_(false),
-        cudnn_data_type_(CUDNN_DATA_FLOAT),
-        input_size_(0) {}
+  ActivationGradGpuKernel() { ResetResource(); }
   ~ActivationGradGpuKernel() override { DestroyResource(); }
   const std::vector<size_t> &GetInputSizeList() const override { return input_size_list_; }
   const std::vector<size_t> &GetOutputSizeList() const override { return output_size_list_; }
   const std::vector<size_t> &GetWorkspaceSizeList() const override { return workspace_size_list_; }
 
   bool Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &,
-              const std::vector<AddressPtr> &outputs, void *) override {
+              const std::vector<AddressPtr> &outputs, void *stream_ptr) override {
     if (is_null_input_) {
       return true;
     }
@@ -61,6 +54,7 @@ class ActivationGradGpuKernel : public GpuKernel {
     const float alpha = 1;
     const float beta = 0;
     CHECK_CUDNN_RET_WITH_EXCEPT(
+      kernel_node_,
       cudnnActivationBackward(cudnn_handle_, activation_desc_, &alpha, data_descriptor_, y, data_descriptor_, dy,
                               data_descriptor_, y, &beta, data_descriptor_, dx),
       "cudnnActivationBackward failed");
@@ -68,6 +62,7 @@ class ActivationGradGpuKernel : public GpuKernel {
     return true;
   }
   bool Init(const CNodePtr &kernel_node) override {
+    kernel_node_ = kernel_node;
     auto node_name = AnfAlgo::GetCNodeName(kernel_node);
     auto iter = kernel_map.find(node_name);
     if (iter == kernel_map.end()) {
@@ -91,7 +86,9 @@ class ActivationGradGpuKernel : public GpuKernel {
     }
     std::vector<size_t> shape;
     double coef = (mode_ == CUDNN_ACTIVATION_CLIPPED_RELU) ? 5.999999 : 0.0;
-    CHECK_CUDNN_RET_WITH_EXCEPT(cudnnSetActivationDescriptor(activation_desc_, mode_, CUDNN_PROPAGATE_NAN, coef),
+    if (mode_ == CUDNN_ACTIVATION_ELU) coef = 1.0;
+    CHECK_CUDNN_RET_WITH_EXCEPT(kernel_node_,
+                                cudnnSetActivationDescriptor(activation_desc_, mode_, CUDNN_PROPAGATE_NAN, coef),
                                 "SetActivationDescriptor failed");
 
     const int split_dim = 4;
@@ -99,33 +96,56 @@ class ActivationGradGpuKernel : public GpuKernel {
       ShapeNdTo4d(input_shape, &shape);
       if (AnfAlgo::GetInputFormat(kernel_node, 0) == kOpFormat_NHWC) {
         CHECK_CUDNN_RET_WITH_EXCEPT(
+          kernel_node_,
           cudnnSetTensor4dDescriptor(data_descriptor_, CUDNN_TENSOR_NHWC, cudnn_data_type_, SizeToInt(shape[0]),
                                      SizeToInt(shape[3]), SizeToInt(shape[1]), SizeToInt(shape[2])),
           "cudnnSetTensor4dDescriptor failed");
       } else {
         CHECK_CUDNN_RET_WITH_EXCEPT(
+          kernel_node_,
           cudnnSetTensor4dDescriptor(data_descriptor_, CUDNN_TENSOR_NCHW, cudnn_data_type_, SizeToInt(shape[0]),
                                      SizeToInt(shape[1]), SizeToInt(shape[2]), SizeToInt(shape[3])),
           "cudnnSetTensor4dDescriptor failed");
       }
     } else {
-      CudnnSetTensorNdDescriptor(input_shape, data_descriptor_, cudnn_data_type_);
+      CudnnSetTensorNdDescriptor(input_shape, data_descriptor_, cudnn_data_type_, kernel_node_);
     }
 
     InitSizeLists();
     return true;
   }
 
+  void DestroyResource() noexcept override {
+    CHECK_CUDNN_RET_WITH_ERROR(kernel_node_, cudnnDestroyActivationDescriptor(activation_desc_),
+                               "cudnnDestroyActivationDescriptor failed");
+    CHECK_CUDNN_RET_WITH_ERROR(kernel_node_, cudnnDestroyTensorDescriptor(data_descriptor_),
+                               "cudnnDestroyTensorDescriptor failed");
+  }
+
+  void ResetResource() noexcept override {
+    cudnn_handle_ = nullptr;
+    activation_desc_ = nullptr;
+    mode_ = CUDNN_ACTIVATION_RELU;
+    data_descriptor_ = nullptr;
+    is_null_input_ = false;
+    input_size_list_.clear();
+    output_size_list_.clear();
+    workspace_size_list_.clear();
+    cudnn_data_type_ = CUDNN_DATA_FLOAT;
+    input_size_ = 0;
+  }
+
  protected:
   void InitResource() override {
     cudnn_handle_ = device::gpu::GPUDeviceManager::GetInstance().GetCudnnHandle();
-    CHECK_CUDNN_RET_WITH_EXCEPT(cudnnCreateTensorDescriptor(&data_descriptor_), "cudnnCreateTensorDescriptor failed");
-    CHECK_CUDNN_RET_WITH_EXCEPT(cudnnCreateActivationDescriptor(&activation_desc_),
+    CHECK_CUDNN_RET_WITH_EXCEPT(kernel_node_, cudnnCreateTensorDescriptor(&data_descriptor_),
+                                "cudnnCreateTensorDescriptor failed");
+    CHECK_CUDNN_RET_WITH_EXCEPT(kernel_node_, cudnnCreateActivationDescriptor(&activation_desc_),
                                 "cudnnCreateActivationDescriptor failed");
   }
   void InitSizeLists() override {
     if (!is_null_input_) {
-      CHECK_CUDNN_RET_WITH_EXCEPT(cudnnGetTensorSizeInBytes(data_descriptor_, &input_size_),
+      CHECK_CUDNN_RET_WITH_EXCEPT(kernel_node_, cudnnGetTensorSizeInBytes(data_descriptor_, &input_size_),
                                   "cudnnGetTensorSizeInBytes failed");
     }
     input_size_list_.push_back(input_size_);
@@ -134,16 +154,10 @@ class ActivationGradGpuKernel : public GpuKernel {
   }
 
  private:
-  void DestroyResource() noexcept {
-    CHECK_CUDNN_RET_WITH_ERROR(cudnnDestroyActivationDescriptor(activation_desc_),
-                               "cudnnDestroyActivationDescriptor failed");
-    CHECK_CUDNN_RET_WITH_ERROR(cudnnDestroyTensorDescriptor(data_descriptor_), "cudnnDestroyTensorDescriptor failed");
-  }
-
   std::map<std::string, cudnnActivationMode_t> kernel_map = {{"ReluGrad", CUDNN_ACTIVATION_RELU},
                                                              {"ReLU6Grad", CUDNN_ACTIVATION_CLIPPED_RELU},
                                                              {"TanhGrad", CUDNN_ACTIVATION_TANH},
-                                                             {"ELUGrad", CUDNN_ACTIVATION_ELU},
+                                                             {"EluGrad", CUDNN_ACTIVATION_ELU},
                                                              {"SigmoidGrad", CUDNN_ACTIVATION_SIGMOID}};
   cudnnHandle_t cudnn_handle_;
   cudnnActivationDescriptor_t activation_desc_;
@@ -159,4 +173,4 @@ class ActivationGradGpuKernel : public GpuKernel {
 }  // namespace kernel
 }  // namespace mindspore
 
-#endif  // MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_NN_RELU_GRAD_KERNEL_H_
+#endif  // MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_NN_ACTIVATION_GRAD_KERNEL_H_

@@ -37,6 +37,7 @@ static constexpr size_t kCNodeSwitchLayerBranch = 2;
 static constexpr size_t kCNodeSwitchLayerLength = 3;
 static constexpr size_t kCNodeAssignTarget = 1;
 static constexpr size_t kCNodeAssignSource = 2;
+static constexpr size_t kCNodeAssignDestination = 1;
 
 namespace mindspore {
 namespace session {
@@ -216,7 +217,7 @@ void AscendControlParser::EraseParameter(NotNull<KernelGraphPtr> root_graph,
   std::set<CNodePtr> search_list(exec_order.begin(), exec_order.end());
   std::set<AnfNodePtr> root_inputs(root_graph->inputs().begin(), root_graph->inputs().end());
   auto ref_map = root_graph->GetRefMap();
-  ReferenceCounter parameter_count([](int32_t read, int32_t write) -> bool { return write == 1; });
+  ReferenceCounter parameter_count([](int64_t read, int64_t write) -> bool { return write == 1; });
   std::multimap<AnfNodePtr, std::tuple<size_t, AnfNodePtr, size_t>> ref_multimap;
   std::transform(ref_map.begin(), ref_map.end(), std::inserter(ref_multimap, ref_multimap.end()),
                  [](const std::pair<std::pair<AnfNodePtr, size_t>, std::pair<AnfNodePtr, size_t>> &p)
@@ -238,17 +239,29 @@ void AscendControlParser::EraseParameter(NotNull<KernelGraphPtr> root_graph,
       }
     }
   }
+  // parameter->transdata->assign<-5d node, ref parameter would get from transdata input
+  auto validate_ref_parameter = [](AnfNodePtr node) -> AnfNodePtr {
+    if (node->isa<CNode>() && AnfAlgo::CheckPrimitiveType(node, prim::KPrimTransData)) {
+      auto cnode = node->cast<CNodePtr>();
+      MS_EXCEPTION_IF_NULL(cnode);
+      auto first_input = cnode->input(kFirstDataInputIndex);
+      MS_EXCEPTION_IF_NULL(first_input);
+      return first_input;
+    }
+    return node;
+  };
   // prepare referance count
   for (auto &node : search_list) {
     MS_EXCEPTION_IF_NULL(node);
     // if assign node
     std::set<AnfNodePtr> refed_parameters;
     for (auto [iter, end] = ref_multimap.equal_range(node); iter != end; ++iter) {
-      refed_parameters.insert(std::get<1>(iter->second));
+      refed_parameters.insert(validate_ref_parameter(std::get<1>(iter->second)));
     }
 
     for (auto &in : node->inputs()) {
       auto visit_node = AnfAlgo::VisitKernelWithReturnType(in, 0).first;
+      visit_node = validate_ref_parameter(visit_node);
       if (!visit_node->isa<Parameter>() || root_inputs.find(visit_node) != root_inputs.end()) {
         continue;
       }
@@ -279,13 +292,15 @@ void AscendControlParser::EraseAssign(std::shared_ptr<ReferenceCounter> paramete
     }
     auto &assign_node = assign_iter->second;
     MS_EXCEPTION_IF_NULL(assign_node);
-    if (!IsPrimitiveCNode(assign_node, prim::kPrimAssign)) {
+    auto source = assign_node->input(kCNodeAssignSource);
+    auto destination = assign_node->input(kCNodeAssignDestination);
+    // not assign node or assign destination is transdata which for ref parameter(write 2 times) -> continue
+    if (!IsPrimitiveCNode(assign_node, prim::kPrimAssign) || IsPrimitiveCNode(destination, prim::KPrimTransData)) {
       parameter_count->EraseElem(para);
       continue;
     }
     MS_LOG(INFO) << "Erase " << assign_node->DebugString(5);
     EraseNodeFromExecOrder(assign_node, NOT_NULL(&exec_order));
-    auto source = assign_node->input(kCNodeAssignSource);
     MS_EXCEPTION_IF_NULL(source);
     auto visit_source = AnfAlgo::VisitKernelWithReturnType(source, 0).first;
     parameter_count->AddWriteCount(para, -1);
@@ -370,13 +385,9 @@ void AscendControlParser::ExecutorValidate(NotNull<KernelGraphPtr> root_graph) {
 
   auto context_ptr = MsContext::GetInstance();
   MS_EXCEPTION_IF_NULL(context_ptr);
-  auto save_graphs_path = context_ptr->get_param<std::string>(MS_CTX_SAVE_GRAPHS_PATH);
-  if (save_graphs_path.empty()) {
-    save_graphs_path = ".";
-  }
   if (context_ptr->get_param<bool>(MS_CTX_SAVE_GRAPHS_FLAG)) {
-    std::string file_path = save_graphs_path + "/after_erase_label_and_parameter.ir";
-    DumpIR(file_path, root_graph.get());
+    std::string file_name = "after_erase_label_and_parameter.ir";
+    DumpIR(file_name, root_graph.get());
   }
 }
 
@@ -728,8 +739,14 @@ void AscendControlParser::InsertMultipleAssignToGraph(NotNull<KernelGraphPtr> fr
                         << from_graph->ToString();
     }
     // insert assign between jump_node -1 and jump_node
-    if (jump_node_iter != from_graph_exe_order.begin()) {
-      InsertControlDependToGraph(from_graph, NOT_NULL(*(jump_node_iter - 1)), NOT_NULL(assign_node));
+    while (jump_node_iter != from_graph_exe_order.begin()) {
+      CNodePtr node = *(jump_node_iter - 1);
+      if (AnfAlgo::GetGraphId(node.get()) == from_graph->graph_id()) {
+        InsertControlDependToGraph(from_graph, NOT_NULL(*(jump_node_iter - 1)), NOT_NULL(assign_node));
+        break;
+      } else {
+        jump_node_iter--;
+      }
     }
     InsertControlDependToGraph(from_graph, NOT_NULL(assign_node), NOT_NULL(jump_node));
   }
@@ -775,16 +792,13 @@ std::vector<CNodePtr> AscendControlParser::RecurseGraph(NotNull<KernelGraphPtr> 
   }
 
   std::vector<CNodePtr> execution_order;
-  uint32_t child_order_index = 0;
   auto recurse_child_graph = [&](uint32_t index, uint32_t label_index, const CNodePtr &node) {
-    if (!CheckLabelIndex(index, label_index, node)) {
+    KernelGraphPtr cur_child_graph;
+    if (!CheckLabelIndex(index, label_index, node, &cur_child_graph)) {
       MS_LOG(EXCEPTION) << "Check label index fail";
     }
-    if (child_order_index >= graph->child_graph_order().size()) {
-      MS_LOG(EXCEPTION) << "Index out of range:" << graph->child_graph_order().size();
-    }
-    auto child_graph = graph->child_graph_order()[child_order_index++];
-    auto child_execution_order = RecurseGraph(NOT_NULL(child_graph.lock()), memo);
+    MS_EXCEPTION_IF_NULL(cur_child_graph);
+    auto child_execution_order = RecurseGraph(NOT_NULL(cur_child_graph), memo);
     execution_order.insert(execution_order.end(), child_execution_order.begin(), child_execution_order.end());
   };
 
@@ -813,18 +827,19 @@ std::vector<CNodePtr> AscendControlParser::RecurseGraph(NotNull<KernelGraphPtr> 
   return execution_order;
 }
 
-bool AscendControlParser::CheckLabelIndex(uint32_t index, uint32_t label_index, const CNodePtr &cur_label) {
+bool AscendControlParser::CheckLabelIndex(uint32_t index, uint32_t label_index, const CNodePtr &cur_label,
+                                          KernelGraphPtr *cur_child_graph) {
   auto child_graphs = AnfAlgo::GetNodeAttr<std::vector<KernelGraphPtr>>(cur_label, kAttrChildGraph);
   // check index and child order size
   if (child_graphs.size() <= IntToSize(index)) {
     MS_LOG(EXCEPTION) << "Child graph index is wrong, current node " << cur_label->ToString() << " child graph size "
                       << child_graphs.size() << " goto index " << index;
   }
-  auto child_graph = child_graphs[index];
-  MS_EXCEPTION_IF_NULL(child_graph);
+  *cur_child_graph = child_graphs[index];
+  MS_EXCEPTION_IF_NULL(*cur_child_graph);
 
   // get start_label_set_index of child graph
-  auto start_label_set = child_graph->get_start_label();
+  auto start_label_set = (*cur_child_graph)->get_start_label();
   uint32_t start_label_set_index = AnfAlgo::GetNodeAttr<uint32_t>(start_label_set, kAttrLabelIndex);
   if (label_index != start_label_set_index) {
     MS_EXCEPTION_IF_NULL(cur_label);
@@ -837,7 +852,7 @@ bool AscendControlParser::CheckLabelIndex(uint32_t index, uint32_t label_index, 
   }
 }
 
-void AscendControlParser::ReferenceCounter::AddReadCount(const AnfNodePtr &key, int32_t num) {
+void AscendControlParser::ReferenceCounter::AddReadCount(const AnfNodePtr &key, int64_t num) {
   auto iter = count_.find(key);
   if (iter != count_.end()) {
     iter->second.first += num;
@@ -846,7 +861,7 @@ void AscendControlParser::ReferenceCounter::AddReadCount(const AnfNodePtr &key, 
   }
 }
 
-void AscendControlParser::ReferenceCounter::AddWriteCount(const AnfNodePtr &key, int32_t num) {
+void AscendControlParser::ReferenceCounter::AddWriteCount(const AnfNodePtr &key, int64_t num) {
   auto iter = count_.find(key);
   if (iter != count_.end()) {
     iter->second.second += num;
@@ -866,7 +881,7 @@ bool AscendControlParser::ReferenceCounter::HasValidElem() const {
   return it != count_.end();
 }
 
-std::tuple<AnfNodePtr, int32_t, int32_t> AscendControlParser::ReferenceCounter::GetOneValidElem() const {
+std::tuple<AnfNodePtr, int64_t, int64_t> AscendControlParser::ReferenceCounter::GetOneValidElem() const {
   auto it = std::find_if(count_.begin(), count_.end(),
                          [this](const std::pair<AnfNodePtr, std::pair<uint32_t, uint32_t>> &p) -> bool {
                            auto &[read, written] = p.second;

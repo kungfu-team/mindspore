@@ -30,14 +30,7 @@ namespace kernel {
 template <typename T>
 class BroadcastOpGradGpuKernel : public GpuKernel {
  public:
-  BroadcastOpGradGpuKernel()
-      : op_type_(BROADCAST_GRAD_TYPE_INVALID),
-        need_broadcast_(false),
-        input1_num_(1),
-        input2_num_(1),
-        output_num_(1),
-        grad_x_(false),
-        grad_y_(false) {}
+  BroadcastOpGradGpuKernel() { ResetResource(); }
   ~BroadcastOpGradGpuKernel() override = default;
 
   const std::vector<size_t> &GetInputSizeList() const override { return input_size_list_; }
@@ -52,9 +45,11 @@ class BroadcastOpGradGpuKernel : public GpuKernel {
     T *dx1 = GetDeviceAddress<T>(outputs, 0);
     T *dx2 = GetDeviceAddress<T>(outputs, 1);
 
-    CHECK_CUDA_RET_WITH_EXCEPT(cudaMemsetAsync(dx1, 0, outputs[0]->size, reinterpret_cast<cudaStream_t>(stream_ptr)),
+    CHECK_CUDA_RET_WITH_EXCEPT(kernel_node_,
+                               cudaMemsetAsync(dx1, 0, outputs[0]->size, reinterpret_cast<cudaStream_t>(stream_ptr)),
                                "cudaMemSet Failed");
-    CHECK_CUDA_RET_WITH_EXCEPT(cudaMemsetAsync(dx2, 0, outputs[1]->size, reinterpret_cast<cudaStream_t>(stream_ptr)),
+    CHECK_CUDA_RET_WITH_EXCEPT(kernel_node_,
+                               cudaMemsetAsync(dx2, 0, outputs[1]->size, reinterpret_cast<cudaStream_t>(stream_ptr)),
                                "cudaMemSet Failed");
     if (need_broadcast_) {
       BroadcastGrad(x1_shape_[0], x1_shape_[1], x1_shape_[2], x1_shape_[3], x2_shape_[0], x2_shape_[1], x2_shape_[2],
@@ -68,6 +63,7 @@ class BroadcastOpGradGpuKernel : public GpuKernel {
     return true;
   }
   bool Init(const CNodePtr &kernel_node) override {
+    kernel_node_ = kernel_node;
     GetOpType(kernel_node);
     auto shape1 = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 0);
     auto shape2 = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 1);
@@ -78,17 +74,23 @@ class BroadcastOpGradGpuKernel : public GpuKernel {
     }
 
     for (size_t i = 0; i < shape3.size(); i++) {
-      dy_shape_[i] = shape3[i];
+      if (need_broadcast_) {
+        dy_shape_[i] = shape3[i];
+      }
       output_num_ *= shape3[i];
     }
     int x1_offset = shape3.size() - shape1.size();
     for (size_t i = 0; i < shape1.size(); i++) {
-      x1_shape_[i + x1_offset] = shape1[i];
+      if (need_broadcast_) {
+        x1_shape_[i + x1_offset] = shape1[i];
+      }
       input1_num_ *= shape1[i];
     }
     int x2_offset = shape3.size() - shape2.size();
     for (size_t i = 0; i < shape2.size(); i++) {
-      x2_shape_[i + x2_offset] = shape2[i];
+      if (need_broadcast_) {
+        x2_shape_[i + x2_offset] = shape2[i];
+      }
       input2_num_ *= shape2[i];
     }
 
@@ -97,6 +99,22 @@ class BroadcastOpGradGpuKernel : public GpuKernel {
 
     InitSizeLists();
     return true;
+  }
+
+  void ResetResource() noexcept override {
+    op_type_ = BROADCAST_GRAD_TYPE_INVALID;
+    need_broadcast_ = false;
+    input1_num_ = 1;
+    input2_num_ = 1;
+    output_num_ = 1;
+    std::fill(x1_shape_, x1_shape_ + 4, 1);
+    std::fill(x2_shape_, x2_shape_ + 4, 1);
+    std::fill(dy_shape_, dy_shape_ + 4, 1);
+    grad_x_ = false;
+    grad_y_ = false;
+    input_size_list_.clear();
+    output_size_list_.clear();
+    workspace_size_list_.clear();
   }
 
  protected:

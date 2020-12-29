@@ -4,16 +4,17 @@
 - [Model Architecture](#model-architecture)
 - [Dataset](#dataset)
 - [Features](#features)
-  - [Mixed Precision](#mixed-precision(ascend))
+    - [Mixed Precision](#mixed-precision(ascend))
 - [Environment Requirements](#environment-requirements)
 - [Script Description](#script-description)
-  - [Script and Sample Code](#script-and-sample-code)
-    - [Training Process](#training-process)
-    - [Evaluation Process](#eval-process)
+    - [Script and Sample Code](#script-and-sample-code)
+        - [Training Process](#training-process)
+        - [Evaluation Process](#eval-process)
+        - [Model Export](#model-export)
 - [Model Description](#model-description)
-  - [Performance](#performance)  
-    - [Training Performance](#training-performance)
-    - [Evaluation Performance](#evaluation-performance)
+    - [Performance](#performance)  
+        - [Training Performance](#training-performance)
+        - [Evaluation Performance](#evaluation-performance)
 - [Description of Random Situation](#description-of-random-situation)
 - [ModelZoo Homepage](#modelzoo-homepage)
 
@@ -34,10 +35,10 @@ The overall network architecture of MobileNetV2 is show below:
 Dataset used: [imagenet](http://www.image-net.org/)
 
 - Dataset size: ~125G, 1.2W colorful images in 1000 classes
-  - Train: 120G, 1.2W images
-  - Test: 5G, 50000 images
+    - Train: 120G, 1.2W images
+    - Test: 5G, 50000 images
 - Data format: RGB images.
-  - Note: Data will be processed in src/dataset.py
+    - Note: Data will be processed in src/dataset.py
 
 # [Features](#contents)
 
@@ -49,12 +50,12 @@ For FP16 operators, if the input data type is FP32, the backend of MindSpore wil
 # [Environment Requirements](#contents)
 
 - Hardware（Ascend/GPU/CPU）
-  - Prepare hardware environment with Ascend、GPU or CPU processor. If you want to try Ascend, please send the [application form](https://obs-9be7.obs.cn-east-2.myhuaweicloud.com/file/other/Ascend%20Model%20Zoo%E4%BD%93%E9%AA%8C%E8%B5%84%E6%BA%90%E7%94%B3%E8%AF%B7%E8%A1%A8.docx) to ascend@huawei.com. Once approved, you can get the resources.
+    - Prepare hardware environment with Ascend, GPU or CPU processor. If you want to try Ascend, please send the [application form](https://obs-9be7.obs.cn-east-2.myhuaweicloud.com/file/other/Ascend%20Model%20Zoo%E4%BD%93%E9%AA%8C%E8%B5%84%E6%BA%90%E7%94%B3%E8%AF%B7%E8%A1%A8.docx) to ascend@huawei.com. Once approved, you can get the resources.
 - Framework
-  - [MindSpore](https://www.mindspore.cn/install/en)
+    - [MindSpore](https://www.mindspore.cn/install/en)
 - For more information, please check the resources below：
-  - [MindSpore Tutorials](https://www.mindspore.cn/tutorial/training/en/master/index.html)
-  - [MindSpore Python API](https://www.mindspore.cn/doc/api_python/en/master/index.html)
+    - [MindSpore Tutorials](https://www.mindspore.cn/tutorial/training/en/master/index.html)
+    - [MindSpore Python API](https://www.mindspore.cn/doc/api_python/en/master/index.html)
 
 # [Script description](#contents)
 
@@ -62,22 +63,22 @@ For FP16 operators, if the input data type is FP32, the backend of MindSpore wil
 
 ```python
 ├── MobileNetV2
-  ├── README.md     # descriptions about MobileNetV2
+  ├── README.md              # descriptions about MobileNetV2
   ├── scripts
-  │   ├──run_train.sh   # shell script for train, fine_tune or incremental  learn with CPU, GPU or Ascend
-  │   ├──run_eval.sh    # shell script for evaluation with CPU, GPU or Ascend
+  │   ├──run_train.sh        # shell script for train, fine_tune or incremental  learn with CPU, GPU or Ascend
+  │   ├──run_eval.sh         # shell script for evaluation with CPU, GPU or Ascend
   ├── src
-  │   ├──args.py        # parse args
-  │   ├──config.py      # parameter configuration
-  │   ├──dataset.py     # creating dataset
-  │   ├──launch.py      # start python script
+  │   ├──args.py             # parse args
+  │   ├──config.py           # parameter configuration
+  │   ├──dataset.py          # creating dataset
   │   ├──lr_generator.py     # learning rate config
   │   ├──mobilenetV2.py      # MobileNetV2 architecture
-  │   ├──models.py      # contain define_net and Loss, Monitor
-  │   ├──utils.py       # utils to load ckpt_file for fine tune or incremental learn
-  ├── train.py      # training script
-  ├── eval.py       # evaluation script
-  ├── mindspore_hub_conf.py       #  mindspore hub interface
+  │   ├──models.py           # contain define_net and Loss, Monitor
+  │   ├──utils.py            # utils to load ckpt_file for fine tune or incremental learn
+  ├── train.py               # training script
+  ├── eval.py                # evaluation script
+  ├── export.py              # export mindir script
+  ├── mindspore_hub_conf.py  #  mindspore hub interface
 ```
 
 ## [Training process](#contents)
@@ -86,9 +87,17 @@ For FP16 operators, if the input data type is FP32, the backend of MindSpore wil
 
 You can start training using python or shell scripts. The usage of shell scripts as follows:
 
-- Ascend: sh run_train.sh Ascend [DEVICE_NUM] [VISIABLE_DEVICES(0,1,2,3,4,5,6,7)] [RANK_TABLE_FILE] [DATASET_PATH] [CKPT_PATH] [FREEZE_LAYER]
-- GPU: sh run_trian.sh GPU [DEVICE_NUM] [VISIABLE_DEVICES(0,1,2,3,4,5,6,7)] [DATASET_PATH] [CKPT_PATH] [FREEZE_LAYER]
-- CPU: sh run_trian.sh CPU [DATASET_PATH] [CKPT_PATH] [FREEZE_LAYER]
+- Ascend: sh run_train.sh Ascend [DEVICE_NUM] [VISIABLE_DEVICES(0,1,2,3,4,5,6,7)] [RANK_TABLE_FILE] [DATASET_PATH] [CKPT_PATH] [FREEZE_LAYER] [FILTER_HEAD]
+- GPU: sh run_trian.sh GPU [DEVICE_NUM] [VISIABLE_DEVICES(0,1,2,3,4,5,6,7)] [DATASET_PATH] [CKPT_PATH] [FREEZE_LAYER] [FILTER_HEAD]
+- CPU: sh run_trian.sh CPU [DATASET_PATH] [CKPT_PATH] [FREEZE_LAYER] [FILTER_HEAD]
+
+`CKPT_PATH` `FREEZE_LAYER` and `FILTER_HEAD` are optional, when set `CKPT_PATH`, `FREEZE_LAYER` must be set. `FREEZE_LAYER` should be in ["none", "backbone"], and if you set `FREEZE_LAYER`="backbone", the parameter in backbone will be freezed when training and the parameter in head will not be load from checkpoint. if `FILTER_HEAD`=True, the parameter in head will not be load from checkpoint.
+
+> RANK_TABLE_FILE is HCCL configuration file when running on Ascend.
+> The common restrictions on using the distributed service are as follows. For details, see the HCCL documentation.
+>
+> - In a single-node system, a cluster of 1, 2, 4, or 8 devices is supported. In a multi-node system, a cluster of 8 x N devices is supported.
+> - Each host has four devices numbered 0 to 3 and four devices numbered 4 to 7 deployed on two different networks. During training of 2 or 4 devices, the devices must be connected and clusters cannot be created across networks.
 
 ### Launch
 
@@ -106,14 +115,14 @@ You can start training using python or shell scripts. The usage of shell scripts
 
 # fine tune whole network example
   python:
-      Ascend: python train.py --platform Ascend --dataset_path [TRAIN_DATASET_PATH] --pretrain_ckpt [CKPT_PATH] --freeze_layer none
-      GPU: python train.py --platform GPU --dataset_path [TRAIN_DATASET_PATH] --pretrain_ckpt [CKPT_PATH] --freeze_layer none
-      CPU: python train.py --platform CPU --dataset_path [TRAIN_DATASET_PATH] --pretrain_ckpt [CKPT_PATH] --freeze_layer none
+      Ascend: python train.py --platform Ascend --dataset_path [TRAIN_DATASET_PATH] --pretrain_ckpt [CKPT_PATH] --freeze_layer none --filter_head True
+      GPU: python train.py --platform GPU --dataset_path [TRAIN_DATASET_PATH] --pretrain_ckpt [CKPT_PATH] --freeze_layer none --filter_head True
+      CPU: python train.py --platform CPU --dataset_path [TRAIN_DATASET_PATH] --pretrain_ckpt [CKPT_PATH] --freeze_layer none --filter_head True
 
   shell:
-      Ascend: sh run_train.sh Ascend 8 0,1,2,3,4,5,6,7 hccl_config.json [TRAIN_DATASET_PATH]  [CKPT_PATH] none
-      GPU: sh run_train.sh GPU 8 0,1,2,3,4,5,6,7 [TRAIN_DATASET_PATH] [CKPT_PATH] none
-      CPU: sh run_train.sh CPU [TRAIN_DATASET_PATH] [CKPT_PATH] none
+      Ascend: sh run_train.sh Ascend 8 0,1,2,3,4,5,6,7 hccl_config.json [TRAIN_DATASET_PATH]  [CKPT_PATH] none True
+      GPU: sh run_train.sh GPU 8 0,1,2,3,4,5,6,7 [TRAIN_DATASET_PATH] [CKPT_PATH] none True
+      CPU: sh run_train.sh CPU [TRAIN_DATASET_PATH] [CKPT_PATH] none True
 
 # fine tune full connected layers example
   python:
@@ -172,6 +181,14 @@ Inference result will be stored in the example path, you can find result like th
 ```shell
 result: {'acc': 0.71976314102564111} ckpt=./ckpt_0/mobilenet-200_625.ckpt
 ```
+
+## [Model Export](#contents)
+
+```shell
+python export.py --platform [PLATFORM] --ckpt_file [CKPT_PATH] --file_format [EXPORT_FORMAT]
+```
+
+`EXPORT_FORMAT` should be in ["AIR", "ONNX", "MINDIR"]
 
 # [Model description](#contents)
 

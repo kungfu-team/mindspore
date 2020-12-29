@@ -593,6 +593,20 @@ test_cases = [
         'block': nn.LGamma(),
         'desc_inputs': [Tensor(np.array([3, 4, 5, 6]).astype(np.float32))],
         'skip': ['backward']}),
+    ('IGamma', {
+        'block': nn.IGamma(),
+        'desc_inputs': [Tensor(np.array([3, 4, 5, 6]).astype(np.float32)),
+                        Tensor(np.array([3, 4, 5, 6]).astype(np.float32))],
+        'skip': ['backward']}),
+    ('DiGamma', {
+        'block': nn.DiGamma(),
+        'desc_inputs': [Tensor(np.array([3, 4, 5, 6]).astype(np.float32))],
+        'skip': ['backward']}),
+    ('LBeta', {
+        'block': nn.LBeta(),
+        'desc_inputs': [Tensor(np.array([3, 4, 5, 6]).astype(np.float32)),
+                        Tensor(np.array([3, 4, 5, 6]).astype(np.float32))],
+        'skip': ['backward']}),
     ('FlattenNet', {
         'block': FlattenNet(),
         'desc_inputs': [Tensor(np.ones([1, 2, 3, 4], np.float32))],
@@ -621,6 +635,16 @@ test_cases = [
         'block': nn.MatrixSetDiag(),
         'desc_inputs': [Tensor(np.array([[1, 2, 3], [4, 5, 6]]).astype(np.float32)),
                         Tensor(np.array([1, 2]).astype(np.float32))],
+        'skip': ['backward']
+    }),
+    ('MatInverse', {
+        'block': nn.MatInverse(),
+        'desc_inputs': [Tensor(np.array([[4, 12, -16], [12, 37, -43], [-16, -43, 98]]).astype(np.float32))],
+        'skip': ['backward']
+    }),
+    ('MatDet', {
+        'block': nn.MatDet(),
+        'desc_inputs': [Tensor(np.array([[4, 12, -16], [12, 37, -43], [-16, -43, 98]]).astype(np.float32))],
         'skip': ['backward']
     }),
     ('LRNNet', {

@@ -15,6 +15,10 @@
  */
 #include "src/ops/custom_predict.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -35,12 +39,23 @@ float CustomPredict::GetWeightThreshold() const {
 int CustomPredict::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) {
   MS_ASSERT(nullptr != primitive);
   MS_ASSERT(nullptr != fbb);
-  auto val_offset = schema::CreateCustomPredict(*fbb);
+  auto attr = primitive->value_as_CustomPredict();
+  if (attr == nullptr) {
+    MS_LOG(ERROR) << "CustomPredict attr is nullptr";
+    return RET_ERROR;
+  }
+  auto val_offset = schema::CreateCustomPredict(*fbb, attr->outputNum(), attr->weightThreshold());
   auto prim_offset = schema::CreatePrimitive(*fbb, schema::PrimitiveType_CustomPredict, val_offset.o);
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *CustomPredictCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<CustomPredict>(primitive);
+}
+Registry CustomPredictRegistry(schema::PrimitiveType_CustomPredict, CustomPredictCreator);
 #endif
+
 int CustomPredict::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
   auto input = inputs_.at(0);
   auto output0 = outputs_.at(0);
@@ -54,10 +69,10 @@ int CustomPredict::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor 
 
   output0->set_shape(shape);
   output0->set_data_type(kNumberTypeInt32);
-  output0->SetFormat(input->GetFormat());
+  output0->set_format(input->format());
   output1->set_shape(shape);
   output1->set_data_type(kNumberTypeFloat32);
-  output1->SetFormat(input->GetFormat());
+  output1->set_format(input->format());
   return RET_OK;
 }
 }  // namespace lite

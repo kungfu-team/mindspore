@@ -29,8 +29,8 @@ class TfliteL2NormParser : public TfliteNodeParser {
  public:
   TfliteL2NormParser() : TfliteNodeParser("L2_NORMALIZATION") {}
 
-  STATUS Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-               const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) override;
+  PrimitiveC *ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                 const std::unique_ptr<tflite::ModelT> &tflite_model) override;
 };
 }  // namespace lite
 }  // namespace mindspore

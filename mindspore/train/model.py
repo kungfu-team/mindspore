@@ -22,11 +22,11 @@ import numpy as np
 from mindspore import log as logger
 from ..common.tensor import Tensor
 from ..nn.metrics import get_metrics
-from .._checkparam import check_input_data, check_output_data, Validator, check_int
-from .callback import _InternalCallbackParam, RunContext, _CallbackManager
+from .._checkparam import check_input_data, check_output_data, Validator
+from .callback import _InternalCallbackParam, RunContext, _CallbackManager, Callback
 from .. import context
 from ..parallel._utils import _get_parallel_mode, _get_device_num, _get_global_rank, \
-    _get_parameter_broadcast, _device_number_check, _parameter_broadcast_check
+    _get_parameter_broadcast, _device_number_check, _parameter_broadcast_check, _parallel_predict_check
 from ..parallel._ps_context import _is_role_pserver, _is_role_sched
 from ..nn.metrics import Loss
 from .. import nn
@@ -35,6 +35,7 @@ from ..context import ParallelMode
 from ..parallel._cost_model_context import _set_multi_subgraphs
 from .dataset_helper import DatasetHelper, connect_network_with_dataset
 from . import amp
+from ..common.api import _pynative_exec
 
 
 def _transfer_tensor_to_tuple(inputs):
@@ -45,6 +46,11 @@ def _transfer_tensor_to_tuple(inputs):
         return (inputs,)
 
     return inputs
+
+
+class _StepSync(Callback):
+    def step_end(self, run_context):
+        _pynative_exec.sync()
 
 
 class Model:
@@ -88,27 +94,32 @@ class Model:
 
     Examples:
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.conv = nn.Conv2d(3, 64, 3, has_bias=False, weight_init='normal')
-        >>>         self.bn = nn.BatchNorm2d(64)
-        >>>         self.relu = nn.ReLU()
-        >>>         self.flatten = nn.Flatten()
-        >>>         self.fc = nn.Dense(64*224*224, 12) # padding=0
-        >>>
-        >>>     def construct(self, x):
-        >>>         x = self.conv(x)
-        >>>         x = self.bn(x)
-        >>>         x = self.relu(x)
-        >>>         x = self.flatten(x)
-        >>>         out = self.fc(x)
-        >>>         return out
+        ...     def __init__(self, num_class=10, num_channel=1):
+        ...         super(Net, self).__init__()
+        ...         self.conv1 = nn.Conv2d(num_channel, 6, 5, pad_mode='valid')
+        ...         self.conv2 = nn.Conv2d(6, 16, 5, pad_mode='valid')
+        ...         self.fc1 = nn.Dense(16*5*5, 120, weight_init='ones')
+        ...         self.fc2 = nn.Dense(120, 84, weight_init='ones')
+        ...         self.fc3 = nn.Dense(84, num_class, weight_init='ones')
+        ...         self.relu = nn.ReLU()
+        ...         self.max_pool2d = nn.MaxPool2d(kernel_size=2, stride=2)
+        ...         self.flatten = nn.Flatten()
+        ...
+        ...     def construct(self, x):
+        ...         x = self.max_pool2d(self.relu(self.conv1(x)))
+        ...         x = self.max_pool2d(self.relu(self.conv2(x)))
+        ...         x = self.flatten(x)
+        ...         x = self.relu(self.fc1(x))
+        ...         x = self.relu(self.fc2(x))
+        ...         x = self.fc3(x)
+        ...         return x
         >>>
         >>> net = Net()
-        >>> loss = nn.SoftmaxCrossEntropyWithLogits(is_grad=False, sparse=True)
-        >>> optim = Momentum(params=net.trainable_params(), learning_rate=0.1, momentum=0.9)
+        >>> loss = nn.SoftmaxCrossEntropyWithLogits()
+        >>> optim = nn.Momentum(params=net.trainable_params(), learning_rate=0.1, momentum=0.9)
         >>> model = Model(net, loss_fn=loss, optimizer=optim, metrics=None)
-        >>> dataset = get_dataset()
+        >>> # For details about how to build the dataset, please refer to the tutorial document on the official website.
+        >>> dataset = create_custom_dataset()
         >>> model.train(2, dataset)
     """
 
@@ -250,11 +261,14 @@ class Model:
             scaling_sens /= self._device_number
         return scaling_sens
 
-    def _exec_preprocess(self, network, is_train, phase, dataset, dataset_sink_mode, sink_size=-1, epoch_num=1):
+    def _exec_preprocess(self, network, is_train, phase, dataset,
+                         dataset_sink_mode, sink_size=-1, epoch_num=1, dataset_helper=None):
         """Initializes dataset."""
         if dataset_sink_mode and not is_train:
             dataset.__loop_size__ = 1
-        dataset_helper = DatasetHelper(dataset, dataset_sink_mode, sink_size, epoch_num)
+
+        if dataset_helper is None:
+            dataset_helper = DatasetHelper(dataset, dataset_sink_mode, sink_size, epoch_num)
 
         if dataset_sink_mode:
             network = connect_network_with_dataset(network, dataset_helper)
@@ -357,6 +371,9 @@ class Model:
         cb_params.device_number = self._device_number
         cb_params.train_dataset = train_dataset
         cb_params.list_callback = self._transform_callbacks(callbacks)
+        if context.get_context("mode") == context.PYNATIVE_MODE:
+            cb_params.list_callback.insert(0, _StepSync())
+            callbacks = cb_params.list_callback
         cb_params.train_dataset_element = None
         cb_params.network = self._network
         if _is_role_pserver() or _is_role_sched():
@@ -366,8 +383,8 @@ class Model:
         with _CallbackManager(callbacks) as list_callback:
             if not dataset_sink_mode:
                 self._train_process(epoch, train_dataset, list_callback, cb_params)
-            elif context.get_context("mode") == context.PYNATIVE_MODE or context.get_context("device_target") == "CPU":
-                logger.warning("The pynative mode and CPU cannot support dataset sink mode currently."
+            elif context.get_context("device_target") == "CPU":
+                logger.warning("The CPU cannot support dataset sink mode currently."
                                "So the training process will be performed with dataset not sink.")
                 self._train_process(epoch, train_dataset, list_callback, cb_params)
             else:
@@ -403,35 +420,44 @@ class Model:
             epoch_num = epoch
         else:
             epoch_num = math.ceil(epoch * sink_size / train_dataset.get_dataset_size())
+            train_dataset.__total_batch__ = epoch * sink_size
 
-        dataset_helper, train_network = self._exec_preprocess(self._train_network,
-                                                              is_train=True,
-                                                              phase='train',
-                                                              dataset=train_dataset,
-                                                              dataset_sink_mode=True,
-                                                              sink_size=sink_size,
-                                                              epoch_num=epoch_num)
-        self._train_network = train_network
-        cb_params.train_network = self._train_network
         cb_params.cur_step_num = 0
 
         run_context = RunContext(cb_params)
         list_callback.begin(run_context)
-
+        is_graph = (context.get_context("mode") == context.GRAPH_MODE)
         # used to stop training for early stop, such as stopAtTIme or stopATStep
         should_stop = False
+        dataset_helper = None
         for i in range(epoch):
             cb_params.cur_epoch_num = i + 1
             list_callback.epoch_begin(run_context)
+            dataset_helper, train_network = self._exec_preprocess(self._train_network,
+                                                                  is_train=True,
+                                                                  phase='train',
+                                                                  dataset=train_dataset,
+                                                                  dataset_sink_mode=True,
+                                                                  sink_size=sink_size,
+                                                                  epoch_num=epoch_num,
+                                                                  dataset_helper=dataset_helper)
+
+            self._train_network = train_network
+            cb_params.train_network = self._train_network
 
             # for data sink dataset_helper only iter once, other wise iter epoch_size times.
             for inputs in dataset_helper:
                 cb_params.train_dataset_element = inputs
                 list_callback.step_begin(run_context)
                 outputs = self._train_network(*inputs)
-                cb_params.cur_step_num += dataset_helper.sink_size()
+                if is_graph:
+                    cb_params.cur_step_num += dataset_helper.sink_size()
+                else:
+                    cb_params.cur_step_num += 1
                 cb_params.net_outputs = outputs
                 list_callback.step_end(run_context)
+                if _is_role_pserver():
+                    os._exit(0)
 
             dataset_helper.continue_send()
             list_callback.epoch_end(run_context)
@@ -439,6 +465,7 @@ class Model:
             if should_stop:
                 break
         dataset_helper.stop_send()
+        dataset_helper.release()
 
         list_callback.end(run_context)
 
@@ -477,7 +504,7 @@ class Model:
                 len_element = len(next_element)
                 next_element = _transfer_tensor_to_tuple(next_element)
                 if self._loss_fn and len_element != 2:
-                    raise ValueError("when loss_fn is not None, train_dataset should"
+                    raise ValueError("when loss_fn is not None, train_dataset should "
                                      "return two elements, but got {}".format(len_element))
                 cb_params.cur_step_num += 1
 
@@ -513,9 +540,6 @@ class Model:
         When setting pynative mode or CPU, the training process will be performed with dataset not sink.
 
         Note:
-            If dataset_sink_mode is True, epoch of training should be equal to the count of repeat
-            operation in dataset processing. Otherwise, errors could occur since the amount of data
-            is not equal to the required amount of training .
             If dataset_sink_mode is True, data will be sent to device. If device is Ascend, features
             of data will be transferred one by one. The limitation of data transmission per time is 256M.
             If sink_size > 0, each epoch the dataset can be traversed unlimited times until you get sink_size
@@ -530,7 +554,8 @@ class Model:
                                      returned and passed to the network. Otherwise, a tuple (data, label) should
                                      be returned. The data and label would be passed to the network and loss
                                      function respectively.
-            callbacks (list): List of callback objects which should be executed while training. Default: None.
+            callbacks (list, object): List of callback objects or callback object, which should be executed
+                                      while training. Default: None.
             dataset_sink_mode (bool): Determines whether to pass the data through dataset channel. Default: True.
                                       Configure pynative mode or CPU, the training process will be performed with
                                       dataset not sink.
@@ -540,23 +565,26 @@ class Model:
                              If dataset_sink_mode is False, set sink_size as invalid. Default: -1.
 
         Examples:
-            >>> dataset = get_dataset()
+            >>> from mindspore.train.loss_scale_manager import FixedLossScaleManager
+            >>> dataset = create_custom_dataset()
             >>> net = Net()
-            >>> loss = nn.SoftmaxCrossEntropyWithLogits(is_grad=False, sparse=True)
+            >>> loss = nn.SoftmaxCrossEntropyWithLogits()
             >>> loss_scale_manager = FixedLossScaleManager()
             >>> optim = Momentum(params=net.trainable_params(), learning_rate=0.1, momentum=0.9)
             >>> model = Model(net, loss_fn=loss, optimizer=optim, metrics=None, loss_scale_manager=loss_scale_manager)
             >>> model.train(2, dataset)
         """
         dataset_sink_mode = Validator.check_bool(dataset_sink_mode)
+        Validator.check_is_int(sink_size)
+        dataset_size = train_dataset.get_dataset_size()
+        if dataset_size == 0:
+            raise ValueError("There is no valid data in dataset, please check dataset file first.")
         if sink_size == -1:
-            sink_size = train_dataset.get_dataset_size()
-        check_int(sink_size)
+            sink_size = dataset_size
         if sink_size < -1 or sink_size == 0:
             raise ValueError("The sink_size must be -1 or positive, but got sink_size {}.".format(sink_size))
 
         _device_number_check(self._parallel_mode, self._device_number)
-        _parameter_broadcast_check(self._parallel_mode, self._parameter_broadcast)
 
         self._train(epoch,
                     train_dataset,
@@ -658,11 +686,11 @@ class Model:
             Dict, which returns the loss value and metrics values for the model in the test mode.
 
         Examples:
-            >>> dataset = get_dataset()
+            >>> dataset = create_custom_dataset()
             >>> net = Net()
-            >>> loss = nn.SoftmaxCrossEntropyWithLogits(is_grad=False, sparse=True)
+            >>> loss = nn.SoftmaxCrossEntropyWithLogits()
             >>> model = Model(net, loss_fn=loss, optimizer=None, metrics={'acc'})
-            >>> model.eval(dataset)
+            >>> acc = model.eval(dataset, dataset_sink_mode=False)
         """
         dataset_sink_mode = Validator.check_bool(dataset_sink_mode)
         _device_number_check(self._parallel_mode, self._device_number)
@@ -680,7 +708,7 @@ class Model:
 
         self._clear_metrics()
 
-        if context.get_context("device_target") == "CPU":
+        if context.get_context("device_target") == "CPU" and dataset_sink_mode:
             dataset_sink_mode = False
             logger.warning("CPU cannot support dataset sink mode currently."
                            "So the evaluating process will be performed with dataset non-sink mode.")
@@ -700,22 +728,61 @@ class Model:
             Batch data should be put together in one tensor.
 
         Args:
-           predict_data (Tensor): Tensor of predict data. can be array, list or tuple.
+           predict_data: The predict data, can be bool, int, float, str, None, tensor,
+                         or tuple, list and dict that store these types.
 
         Returns:
             Tensor, array(s) of predictions.
 
         Examples:
-            >>> input_data = Tensor(np.random.randint(0, 255, [1, 3, 224, 224]), mindspore.float32)
+            >>> input_data = Tensor(np.random.randint(0, 255, [1, 1, 32, 32]), mindspore.float32)
             >>> model = Model(Net())
-            >>> model.predict(input_data)
+            >>> result = model.predict(input_data)
         """
         self._predict_network.set_train(False)
-        check_input_data(*predict_data, data_class=Tensor)
+        check_input_data(*predict_data, data_class=(int, float, str, None, Tensor))
+        _parallel_predict_check()
         result = self._predict_network(*predict_data)
 
         check_output_data(result)
         return result
+
+    def infer_predict_layout(self, *predict_data):
+        """
+        Generate parameter layout for the predict network in auto or semi auto parallel mode.
+
+        Data could be a single tensor or multiple tensors.
+
+        Note:
+            Batch data should be put together in one tensor.
+
+        Args:
+            predict_data (Tensor): One tensor or multiple tensors of predict data.
+
+        Returns:
+            parameter_layout_dict (dict): Parameter layout dictionary used for load distributed checkpoint
+
+        Examples:
+            >>> context.set_context(mode=context.GRAPH_MODE)
+            >>> context.set_auto_parallel_context(full_batch=True, parallel_mode=ParallelMode.SEMI_AUTO_PARALLEL)
+            >>> input_data = Tensor(np.random.randint(0, 255, [1, 3, 224, 224]), mindspore.float32)
+            >>> model = Model(Net())
+            >>> model.infer_predict_layout(input_data)
+        """
+        if context.get_context("mode") != context.GRAPH_MODE:
+            raise RuntimeError('infer predict layout only supports GRAPH MODE currently.')
+        # remove this restriction after support inferring repeated strategy
+        if _get_parallel_mode() not in (ParallelMode.SEMI_AUTO_PARALLEL, ParallelMode.AUTO_PARALLEL):
+            raise RuntimeError('infer predict layout only supports semi auto parallel and auto parallel mode.')
+        _parallel_predict_check()
+        check_input_data(*predict_data, data_class=Tensor)
+
+        predict_net = self._predict_network
+        # Unlike the cases in build_train_network() and build_eval_network(), 'multi_subgraphs' is not set
+        predict_net.set_auto_parallel()
+        predict_net.set_train(False)
+        predict_net.compile(*predict_data)
+        return predict_net.parameter_layout_dict
 
 
 __all__ = ["Model"]

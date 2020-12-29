@@ -21,6 +21,8 @@
 #include "src/kernel_registry.h"
 
 using mindspore::lite::KernelRegistrar;
+using mindspore::lite::RET_ERROR;
+using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_BatchNorm;
 
 namespace mindspore::kernel {
@@ -47,11 +49,6 @@ int BatchnormFp16CPUKernel::InitConstTensor() {
 }
 
 int BatchnormFp16CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail! Ret error code: " << ret;
-    return ret;
-  }
   auto input_tensor = in_tensors_.at(0);
   auto output_tensor = out_tensors_.at(0);
   input_ = ConvertInputFp32toFp16(input_tensor, context_);
@@ -62,7 +59,7 @@ int BatchnormFp16CPUKernel::Run() {
     return RET_ERROR;
   }
 
-  ret = ParallelLaunch(this->context_->thread_pool_, BatchNormRun, this, op_parameter_->thread_num_);
+  auto ret = ParallelLaunch(this->context_->thread_pool_, BatchNormRun, this, op_parameter_->thread_num_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "BatchnormRun error error_code[" << ret << "]";
   }
@@ -76,7 +73,7 @@ int BatchnormFp16CPUKernel::Run() {
 int BatchnormFp16CPUKernel::DoExecute(int task_id) {
   auto param = reinterpret_cast<BatchNormParameter *>(op_parameter_);
   BatchNormFp16(input_, mean_, variance_, param, task_id, output_);
-  return mindspore::lite::RET_OK;
+  return RET_OK;
 }
 
 void BatchnormFp16CPUKernel::FreeInputAndOutput() {
@@ -90,24 +87,5 @@ void BatchnormFp16CPUKernel::FreeInputAndOutput() {
   }
 }
 
-kernel::LiteKernel *CpuBatchnormFp16KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                  const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                  const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                  const mindspore::lite::PrimitiveC *primitive) {
-  auto *kernel = new (std::nothrow) BatchnormFp16CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new BatchnormFp16CPUKernel fail!";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_BatchNorm, CpuBatchnormFp16KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_BatchNorm, LiteKernelCreator<BatchnormFp16CPUKernel>)
 }  // namespace mindspore::kernel

@@ -33,6 +33,7 @@ reduce_sum = P.ReduceSum()
 unsorted_segment_sum = P.UnsortedSegmentSum()
 transpose = P.Transpose()
 shape_op = P.Shape()
+dyn_shape_op = P.DynamicShape()
 reshape = P.Reshape()
 size_op = P.Size()
 invert_permutation = P.InvertPermutation()
@@ -46,6 +47,26 @@ def get_bprop_fill(self):
 
     def bprop(dtype, dims, x, out, dout):
         return zeros_like(dims), zeros_like(x)
+
+    return bprop
+
+
+@bprop_getters.register(P.Ones)
+def get_bprop_ones(self):
+    """Generate bprop for Ones"""
+
+    def bprop(dims, dtype, out, dout):
+        return zeros_like(dims)
+
+    return bprop
+
+
+@bprop_getters.register(P.Zeros)
+def get_bprop_zeros(self):
+    """Generate bprop for Zeros"""
+
+    def bprop(dims, dtype, out, dout):
+        return zeros_like(dims)
 
     return bprop
 
@@ -350,26 +371,56 @@ def _generate_inverse_index(x_shape, axis):
     return perm
 
 
+@constexpr
+def _regenerate_output_shape(x_shp, ind_shp, axis):
+    rank = len(x_shp)
+    if axis < 0:
+        axis += rank
+    out_shape = x_shp[:axis] + ind_shp + x_shp[axis + 1:]
+    return out_shape
+
+
 @bprop_getters.register(P.GatherV2)
 def get_bprop_gather_v2(self):
     """Generate bprop for GatherV2"""
 
     def bprop(x, indices, axis, out, dout):
+        orig_indices = indices
         if F.rank(dout) == 0:
             dout = P.ExpandDims()(dout, -1)
         if F.rank(indices) == 0:
             indices = P.ExpandDims()(indices, -1)
+            x_shp = shape_op(x)
+            ind_shp = shape_op(indices)
+            out_shp = _regenerate_output_shape(x_shp, ind_shp, axis)
+            dout = reshape(dout, out_shp)
+
         x_shp = shape_op(x)
         out_shp = shape_op(dout)
         ind_shp = shape_op(indices)
         # Example: out_shape:(3,2,3) axis 1 -> (1,0,2)
         perm_1 = _generate_shape_index(out_shp, ind_shp, axis)
         values_transpose = transpose(dout, perm_1)
-        params_grad = unsorted_segment_sum(values_transpose, indices, shape_op(x)[axis])
+        if -1 in shape_op(x):
+            params_grad = unsorted_segment_sum(values_transpose, indices, dyn_shape_op(x)[axis])
+        else:
+            params_grad = unsorted_segment_sum(values_transpose, indices, shape_op(x)[axis])
         # Example: out_shape:(3,2,3) axis 2 -> (1,2,0)
         perm_2 = _generate_inverse_index(x_shp, axis)
         params_grad = transpose(params_grad, perm_2)
-        return params_grad, zeros_like(indices), zeros_like(axis)
+        return params_grad, zeros_like(orig_indices), zeros_like(axis)
+
+    return bprop
+
+
+@bprop_getters.register(P.GatherD)
+def get_bprop_gather_d(self):
+    """Generate bprop for GatherD"""
+
+    def bprop(x, dim, index, out, dout):
+        x_shp = shape_op(x)
+        dx = G.GatherDGrad(dim, x_shp)(index, dout)
+        return dx, zeros_like(dim), zeros_like(index)
 
     return bprop
 
@@ -382,7 +433,10 @@ def get_bprop_sparse_gather_v2(self):
         x_shp = shape_op(x)
         if axis == 0:
             indices_size = (size_op(indices),)
-            x_tail_shp = x_shp[1:]
+            if len(x_shp) <= 1:
+                x_tail_shp = ()
+            else:
+                x_tail_shp = x_shp[1:]
             values_shape = indices_size + x_tail_shp
             values = reshape(dout, values_shape)
             indices_new = reshape(indices, indices_size)
@@ -401,6 +455,16 @@ def get_bprop_sparse_gather_v2(self):
         perm_2 = _generate_inverse_index(x_shp, axis)
         params_grad = transpose(params_grad, perm_2)
         return params_grad, zeros_like(indices), zeros_like(axis)
+
+    return bprop
+
+
+@bprop_getters.register(P.Identity)
+def get_bprop_identity(self):
+    """Generate bprop for Identity"""
+
+    def bprop(x, out, dout):
+        return (dout,)
 
     return bprop
 
@@ -662,10 +726,10 @@ def get_bprop_diag_part(self):
     return bprop
 
 
-def _GatherDropNegatives(params,
-                         ids,
-                         zero_clipped_indices=None,
-                         is_positive=None):
+def _gather_drop_negatives(params,
+                           ids,
+                           zero_clipped_indices=None,
+                           is_positive=None):
     """Helper function for unsorted segment ops."""
     maximum = P.Maximum()
     gather = P.GatherV2()
@@ -690,12 +754,33 @@ def _GatherDropNegatives(params,
     return (select(is_positive, gathered, zero_slice), zero_clipped_indices, is_positive)
 
 
+def _unsorted_segment_min_or_max_grad(x, segment_ids, num_segments, out, dout):
+    """Gradient for UnsortedSegmentMin or UnsortedSegmentMax"""
+    equal = P.Equal()
+    cast = P.Cast()
+    divide = P.RealDiv()
+    get_dtype = P.DType()
+    select = P.Select()
+
+    gathered_outputs, zero_clipped_indices, is_positive = _gather_drop_negatives(out, segment_ids, None, None)
+    is_selected = equal(x, gathered_outputs)
+    is_selected = logical_and(is_selected, is_positive)
+    num_selected = unsorted_segment_sum(cast(is_selected, get_dtype(dout)),
+                                        segment_ids, num_segments)
+    weighted_grads = divide(dout, num_selected)
+    gathered_grads, _, _ = _gather_drop_negatives(weighted_grads, None,
+                                                  zero_clipped_indices, is_positive)
+    zeros = zeros_like(gathered_grads)
+    return select(is_selected, gathered_grads, zeros), zeros_like(segment_ids), zeros_like(num_segments)
+
+
 @bprop_getters.register(P.UnsortedSegmentSum)
 def get_bprop_unsorted_segment_sum(self):
     """Generate bprop for UnsortedSegmentSum"""
 
     def bprop(x, segment_ids, num_segments, out, dout):
-        return _GatherDropNegatives(dout, segment_ids)[0], zeros_like(segment_ids), zeros_like(num_segments)
+        return _gather_drop_negatives(dout, segment_ids, None, None)[0], zeros_like(segment_ids), \
+                zeros_like(num_segments)
 
     return bprop
 
@@ -703,23 +788,20 @@ def get_bprop_unsorted_segment_sum(self):
 @bprop_getters.register(P.UnsortedSegmentMin)
 def get_bprop_unsorted_segment_min(self):
     """Generate bprop for UnsortedSegmentMin"""
-    equal = P.Equal()
-    cast = P.Cast()
-    divide = P.RealDiv()
-    get_dtype = P.DType()
-    select = P.Select()
 
     def bprop(x, segment_ids, num_segments, out, dout):
-        gathered_outputs, zero_clipped_indices, is_positive = _GatherDropNegatives(out, segment_ids, None, None)
-        is_selected = equal(x, gathered_outputs)
-        is_selected = logical_and(is_selected, is_positive)
-        num_selected = unsorted_segment_sum(cast(is_selected, get_dtype(dout)),
-                                            segment_ids, num_segments)
-        weighted_grads = divide(dout, num_selected)
-        gathered_grads, _, _ = _GatherDropNegatives(weighted_grads, None,
-                                                    zero_clipped_indices, is_positive)
-        zeros = zeros_like(gathered_grads)
-        return select(is_selected, gathered_grads, zeros), zeros_like(segment_ids), zeros_like(num_segments)
+        return _unsorted_segment_min_or_max_grad(x, segment_ids, num_segments, out, dout)
+
+    return bprop
+
+
+@bprop_getters.register(P.UnsortedSegmentMax)
+def get_bprop_unsorted_segment_max(self):
+    """Generate bprop for UnsortedSegmentMax"""
+
+    def bprop(x, segment_ids, num_segments, out, dout):
+        return _unsorted_segment_min_or_max_grad(x, segment_ids, num_segments, out, dout)
+
     return bprop
 
 
@@ -746,7 +828,7 @@ def get_bprop_unsorted_segment_prod(self):
         gathered_non_zero_prod = gather(non_zero_prod, zero_clipped_indices, 0)
         prod_divided_by_x = gathered_prod / x
         partial_derivative = select(is_zero, gathered_non_zero_prod, prod_divided_by_x)
-        gathered_grad, _, _ = _GatherDropNegatives(grad, segment_ids, zero_clipped_indices)
+        gathered_grad, _, _ = _gather_drop_negatives(grad, segment_ids, zero_clipped_indices, None)
         dx = gathered_grad * partial_derivative
         return dx, zeros_like(segment_ids), zeros_like(num_segments)
 

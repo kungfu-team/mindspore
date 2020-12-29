@@ -29,7 +29,7 @@
 #include "minddata/dataset/engine/execution_tree.h"
 #include "minddata/dataset/engine/opt/pass.h"
 #include "minddata/dataset/kernels/tensor_op.h"
-#include "utils/log_adapter.h"
+#include "minddata/dataset/util/log_adapter.h"
 #include "minddata/dataset/util/task_manager.h"
 
 namespace mindspore {
@@ -60,7 +60,7 @@ Status FilterOp::Builder::Build(std::shared_ptr<FilterOp> *ptr) {
 }
 
 FilterOp::FilterOp(const std::vector<std::string> &in_col_names, int32_t num_workers, int32_t op_queue_size,
-                   py::function predicate_func)
+                   std::shared_ptr<TensorOp> predicate_func)
     : ParallelOp(num_workers, op_queue_size), predicate_func_(std::move(predicate_func)), in_columns_(in_col_names) {}
 
 Status FilterOp::operator()() {
@@ -70,7 +70,8 @@ Status FilterOp::operator()() {
   }
   filter_queues_.Init(num_workers_, oc_queue_size_);
   RETURN_IF_NOT_OK(filter_queues_.Register(tree_->AllTasks()));
-  Status rc = tree_->LaunchWorkers(num_workers_, std::bind(&FilterOp::WorkerEntry, this, std::placeholders::_1));
+  Status rc =
+    tree_->LaunchWorkers(num_workers_, std::bind(&FilterOp::WorkerEntry, this, std::placeholders::_1), Name());
   // Synchronize with TaskManager.
   TaskManager::FindMe()->Post();
   RETURN_IF_NOT_OK(rc);
@@ -238,28 +239,11 @@ Status FilterOp::CheckInput(const TensorRow &input) const {
 
 Status FilterOp::InvokePredicateFunc(const TensorRow &input, bool *out_predicate) {
   RETURN_IF_NOT_OK(CheckInput(input));
-  // Acquire Python GIL.
-  py::gil_scoped_acquire gil_acquire;
-  if (Py_IsInitialized() == 0) {
-    return Status(StatusCode::kPythonInterpreterFailure, "Python Interpreter is finalized");
-  }
-  try {
-    // Transform input tensor vector into numpy array vector.
-    py::tuple input_args(input.size());
-    for (size_t i = 0; i < input.size(); i++) {
-      py::array new_data;
-      RETURN_IF_NOT_OK(input.at(i)->GetDataAsNumpy(&new_data));
-      input_args[i] = new_data;
-    }
-    // Invoke python function.
-    py::object ret_py_obj = predicate_func_(*input_args);
-    *out_predicate = ret_py_obj.cast<py::bool_>();
-  } catch (const py::error_already_set &e) {
-    std::stringstream ss;
-    ss << e.what() << std::endl;
-    ss << "Invalid parameter, predicate function function should return true/false.";
-    return Status(StatusCode::kPyFuncException, ss.str());
-  }
+
+  TensorRow output;
+  RETURN_IF_NOT_OK(predicate_func_->Compute(input, &output));
+  RETURN_IF_NOT_OK(output.at(0)->GetItemAt(out_predicate, {}));
+
   return Status(StatusCode::kOK, "FilterOp predicate func call succeed");
 }
 
@@ -274,5 +258,6 @@ Status FilterOp::PreAccept(NodePass *p, bool *modified) {
   // Downcast shared pointer then call visitor
   return p->PreRunOnNode(shared_from_base<FilterOp>(), modified);
 }
+
 }  // namespace dataset
 }  // namespace mindspore

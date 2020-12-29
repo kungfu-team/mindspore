@@ -35,8 +35,8 @@ Status SplitInfo::GetAttrs() {
   auto axis_iter = attrs_.find(AXIS);
   if (axis_iter != attrs_.end()) {
     MS_EXCEPTION_IF_NULL(axis_iter->second);
-    if (axis_iter->second->isa<Int32Imm>()) {
-      axis = axis_iter->second->cast<Int32ImmPtr>()->value();
+    if (axis_iter->second->isa<Int64Imm>()) {
+      axis = axis_iter->second->cast<Int64ImmPtr>()->value();
     } else {
       MS_LOG(ERROR) << name_ << ": The value of axis is not int";
       return FAILED;
@@ -59,8 +59,8 @@ Status SplitInfo::GetAttrs() {
   auto output_num_iter = attrs_.find(OUTPUT_NUM);
   if (output_num_iter != attrs_.end()) {
     MS_EXCEPTION_IF_NULL(output_num_iter->second);
-    if (output_num_iter->second->isa<Int32Imm>()) {
-      output_num = output_num_iter->second->cast<Int32ImmPtr>()->value();
+    if (output_num_iter->second->isa<Int64Imm>()) {
+      output_num = output_num_iter->second->cast<Int64ImmPtr>()->value();
     } else {
       MS_LOG(ERROR) << name_ << ": The value of output_num is not int";
       return FAILED;
@@ -190,7 +190,7 @@ Status SplitInfo::InferTensorInfo() {
 
 Status SplitInfo::SetCostUnderStrategy(const StrategyPtr &strategy) { return SetCostUnderStrategyBase(strategy); }
 
-Status SplitInfo::GenerateStrategies(int32_t stage_id) {
+Status SplitInfo::GenerateStrategies(int64_t stage_id) {
   if (InferAttrs() != SUCCESS) {
     MS_LOG(ERROR) << name_ << ": Infer attrs failed";
     return FAILED;
@@ -233,15 +233,13 @@ std::shared_ptr<Strategys> SplitInfo::GenerateBatchStrategies() {
   if (GetAttrs() != SUCCESS) {
     MS_LOG(EXCEPTION) << name_ << ": Get attr failed";
   }
-  CheckGlobalDeviceManager();
-  size_t dev_num = g_device_manager->GetDeviceListByStageId(0).size();
   Dimensions input_strategy(inputs_shape_[0].size(), 1);
   // axis can't split
   if (inputs_shape_[0].size() > 1) {
     if (axis_ == 0) {
-      input_strategy[1] = dev_num;
+      input_strategy[1] = stage_device_size_;
     } else {
-      input_strategy[0] = dev_num;
+      input_strategy[0] = stage_device_size_;
     }
   }
   Strategys strategy_v = {input_strategy};
@@ -260,7 +258,7 @@ Status SplitInfo::InferAsLossDivisor() {
   }
 
   if (outputs_tensor_map_[0].empty()) {
-    as_loss_divisor_ = SizeToInt(global_device_list_.size());
+    as_loss_divisor_ = stage_device_size_;
     MS_LOG(INFO) << name_ << ": The output is a scalar, use the dev size " << as_loss_divisor_ << ", loss divisor.";
     return SUCCESS;
   }

@@ -18,6 +18,7 @@
 
 #include <memory>
 #include <string>
+#include <set>
 #include <vector>
 #include "runtime/device/ascend/kernel_select_ascend.h"
 #include "backend/kernel_compiler/kernel_query.h"
@@ -93,9 +94,9 @@ void RefreshKernelBuildInfo(const std::string &input_format, const std::string &
 CNodePtr NewTransOpNode(const FuncGraphPtr &func_graph, const AnfNodePtr &input, const KernelSelectPtr &kernel_select,
                         const bool need_padding, const std::string &op_name);
 
-AnfNodePtr AddCastOpNodeToGraph(const FuncGraphPtr &func_graph, const AnfNodePtr &input, const std::string &format,
-                                const TypeId &input_type, const TypeId &output_type,
-                                const std::vector<size_t> &origin_shape, const TypeId &origin_type);
+CNodePtr AddCastOpNodeToGraph(const FuncGraphPtr &func_graph, const AnfNodePtr &input, const std::string &format,
+                              const TypeId &input_type, const TypeId &output_type,
+                              const std::vector<size_t> &origin_shape, const TypeId &origin_type);
 
 AnfNodePtr InsertTransOpForInput(const FuncGraphPtr &func_graph, const AnfNodePtr &node,
                                  const KernelSelectPtr &kernel_select);
@@ -106,6 +107,11 @@ AnfNodePtr InsertTransOpForOutput(const FuncGraphPtr &func_graph, const AnfNodeP
 CNodePtr InsertCastForInput(const FuncGraphPtr &func_graph, const CNodePtr &cnode);
 
 AnfNodePtr CreateMemcpyAsyncOp(const FuncGraphPtr &graph, const AnfNodePtr &node);
+
+AnfNodePtr AddTransOpNodeToGraph(const FuncGraphPtr &func_graph, const AnfNodePtr &node,
+                                 const KernelSelectPtr &kernel_select, size_t insert_index, bool is_insert_input);
+
+const std::set<std::string> kCommonFormatSet = {kOpFormat_DEFAULT, kOpFormat_ND, kOpFormat_NCHW, kOpFormat_NCDHW};
 }  // namespace opt
 }  // namespace mindspore
 #endif  // MINDSPORE_CCSRC_BACKEND_OPTIMIZER_ASCEND_ASCEND_HELPER_H_

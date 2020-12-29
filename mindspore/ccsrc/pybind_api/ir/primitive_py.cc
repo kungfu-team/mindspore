@@ -15,24 +15,28 @@
  */
 
 #include "pybind_api/ir/primitive_py.h"
+
 #include <mutex>
 #include "ir/signature.h"
-#include "pipeline/jit/parse/python_adapter.h"
 #include "pipeline/jit/parse/data_converter.h"
+#include "pipeline/jit/parse/python_adapter.h"
 #include "pybind11/pytypes.h"
-#include "utils/convert_utils_base.h"
-#include "utils/convert_utils_py.h"
-#include "utils/primitive_utils.h"
-#include "utils/ms_context.h"
 #include "pybind_api/api_register.h"
 #include "pybind_api/export_flags.h"
 #include "pybind_api/ir/base_ref_py.h"
+#include "utils/convert_utils_base.h"
+#include "utils/convert_utils_py.h"
+#include "utils/ms_context.h"
+#include "utils/primitive_utils.h"
+#include "pipeline/jit/resource.h"
+#include "pipeline/pynative/pynative_execute.h"
 
 namespace mindspore {
 namespace {
 constexpr auto kBpropAttrName = "bprop";
 constexpr auto kCellHookAttrName = "cell_hook";
 constexpr auto kCellIDAttrName = "cell_id";
+
 void SyncData(const py::object &arg) {
   if (py::isinstance<py::tuple>(arg)) {
     py::tuple arg_list = py::cast<py::tuple>(arg);
@@ -48,6 +52,22 @@ void SyncData(const py::object &arg) {
 }  // namespace
 std::map<std::string, py::object> PrimitivePy::hook_grad_;
 
+PrimitivePy::PrimitivePy(const py::str &name, const py::object &python_obj)
+    : Primitive(name, false), python_obj_(python_obj), signatures_() {
+  auto &mem_cleaner = pipeline::Resource::mem_cleaner();
+  mem_cleaner.RecordPrimitivePy(this);
+  MS_LOG(DEBUG) << "New primitive:" << name;
+  if (mem_cleaner.IsInPynativeConstructProcess() && !mem_cleaner.IsInPynativeEndGraphProcess()) {
+    mem_cleaner.RecordPynativeShortLifePrimitivePy(this);
+  }
+}
+PrimitivePy::~PrimitivePy() {
+  // Erase primitive here to set released flag false, to avoid calling released pointer when clear primitives in
+  // resource.
+  pipeline::Resource::mem_cleaner().ReleasePrimitivePyObj(this);
+  MS_LOG(DEBUG) << "Release:" << ToString();
+}
+void PrimitivePy::SetPyObj(const py::object &obj) { python_obj_ = obj; }
 void PrimitivePy::set_signatures(const std::vector<Signature> &signatures) {
   signatures_ = signatures;
   set_has_signature(true);
@@ -107,21 +127,82 @@ py::tuple check_bprop_out(const py::object &grads_obj, const py::tuple &py_args)
   return grads;
 }
 
+void PrimitivePy::ConvertCTensorToPyTensor(const py::tuple &input_args, py::tuple *convert_args) const {
+  MS_EXCEPTION_IF_NULL(convert_args);
+  if (input_args.size() != (*convert_args).size()) {
+    MS_LOG(EXCEPTION) << "The size of input_args: " << input_args.size()
+                      << " should be equal to the size of convert_args: " << (*convert_args).size();
+  }
+  for (size_t i = 0; i < input_args.size(); ++i) {
+    (*convert_args)[i] = py::isinstance<tensor::Tensor>(input_args[i])
+                           ? parse::python_adapter::CallPyFn(parse::PYTHON_MOD_PARSE_MODULE,
+                                                             parse::PYTHON_MOD_CONVERT_TO_MS_TENSOR, input_args[i])
+                           : input_args[i];
+  }
+}
+
+void PrimitivePy::CheckHookConsistency(const py::object &grad_out, const py::object &expected_grad_out) const {
+  if (py::isinstance<py::tuple>(expected_grad_out)) {
+    if (!py::isinstance<py::tuple>(grad_out)) {
+      hook_grad_.clear();
+      MS_EXCEPTION(TypeError) << "The output gradient should be a tuple!";
+    }
+    auto actual_out_tuple = py::cast<py::tuple>(grad_out);
+    auto expected_out_tuple = py::cast<py::tuple>(expected_grad_out);
+    if (actual_out_tuple.size() != expected_out_tuple.size()) {
+      hook_grad_.clear();
+      MS_EXCEPTION(ValueError) << "The tuple size of output gradient should be " << expected_out_tuple.size()
+                               << ", but it is " << actual_out_tuple.size();
+    }
+    for (size_t i = 0; i < expected_out_tuple.size(); ++i) {
+      CheckHookConsistency(actual_out_tuple[i], expected_out_tuple[i]);
+    }
+  }
+
+  if (py::isinstance<tensor::Tensor>(expected_grad_out)) {
+    if (!py::isinstance<tensor::Tensor>(grad_out)) {
+      hook_grad_.clear();
+      MS_EXCEPTION(TypeError) << "The output gradient should be a tensor!";
+    }
+    auto actual_out_tensor = py::cast<tensor::TensorPtr>(grad_out);
+    auto expected_out_tensor = py::cast<tensor::TensorPtr>(expected_grad_out);
+    MS_EXCEPTION_IF_NULL(actual_out_tensor);
+    MS_EXCEPTION_IF_NULL(expected_out_tensor);
+    if (actual_out_tensor->GetShapeAndDataTypeInfo() != expected_out_tensor->GetShapeAndDataTypeInfo()) {
+      hook_grad_.clear();
+      MS_EXCEPTION(ValueError) << "The output gradient is not consistent with the expected, it should be "
+                               << expected_out_tensor->GetShapeAndDataTypeInfo() << ", but it is "
+                               << actual_out_tensor->GetShapeAndDataTypeInfo();
+    }
+  }
+}
+
 BaseRef PrimitivePy::RunHookFunction(const VectorRef &args) const {
   py::tuple py_args = ConvertDatatoPyTuple(args);
   bool is_bprop = this->HasAttr(kBpropAttrName);
   if (is_bprop) {
     SyncData(py_args);
-    py::tuple convert_args(py_args.size());
-    for (size_t i = 0; i < py_args.size(); i++) {
-      convert_args[i] = py::isinstance<tensor::Tensor>(py_args[i])
-                          ? parse::python_adapter::CallPyFn(parse::PYTHON_MOD_PARSE_MODULE,
-                                                            parse::PYTHON_MOD_CONVERT_TO_MS_TENSOR, py_args[i])
-                          : py_args[i];
+    auto size = py_args.size();
+    py::tuple input_args(size - 2);
+    for (size_t i = 0; i < size - 2; ++i) {
+      input_args[i] = py_args[i];
     }
-    py::object grads_obj = hook_(*convert_args);
-    py::tuple grads = check_bprop_out(grads_obj, py_args);
-    return std::make_shared<PyObjectRef>(grads);
+    py::tuple convert_args(py_args.size());
+    ConvertCTensorToPyTensor(py_args, &convert_args);
+    auto inst = pynative::PynativeExecutor::GetInstance();
+    MS_EXCEPTION_IF_NULL(inst);
+    try {
+      MS_LOG(DEBUG) << "Run bprop function start";
+      inst->NewGraph(hook_, input_args.cast<py::args>());
+      py::object grads_obj = hook_(*convert_args);
+      py::tuple grads = check_bprop_out(grads_obj, py_args);
+      inst->EndGraph(hook_, grads_obj, input_args.cast<py::args>());
+      MS_LOG(DEBUG) << "Run bprop function end";
+      return std::make_shared<PyObjectRef>(grads);
+    } catch (std::exception &bt) {
+      inst->ClearRes();
+      std::rethrow_exception(std::current_exception());
+    }
   }
   SyncData(py_args[2]);
   bool is_cell = this->HasAttr(kCellHookAttrName);
@@ -130,14 +211,20 @@ BaseRef PrimitivePy::RunHookFunction(const VectorRef &args) const {
     auto cell_id = GetValue<std::string>(this->GetAttr(kCellIDAttrName));
     auto iter = hook_grad_.find(cell_id);
     if (iter != hook_grad_.end()) {
+      py::tuple convert_args(2);
+      py::tuple input_args(2);
+      input_args[0] = iter->second;
+      input_args[1] = py_args[2];
+      ConvertCTensorToPyTensor(input_args, &convert_args);
       auto hook_args = py::tuple(3);
       hook_args[0] = cell_id;
-      hook_args[1] = py::make_tuple(iter->second);
-      hook_args[2] = py::make_tuple(py_args[2]);
+      hook_args[1] = py::make_tuple(convert_args[0]);
+      hook_args[2] = py::make_tuple(convert_args[1]);
       obj = hook_(*hook_args);
       if (py::isinstance<py::none>(obj)) {
         obj = py_args[2];
       }
+      CheckHookConsistency(obj, py_args[2]);
       hook_grad_.erase(cell_id);
     } else {
       hook_grad_[cell_id] = py_args[2];
@@ -149,6 +236,7 @@ BaseRef PrimitivePy::RunHookFunction(const VectorRef &args) const {
     if (py::isinstance<py::none>(obj)) {
       obj = py_args[2];
     }
+    CheckHookConsistency(obj, py_args[2]);
   }
   obj = py::make_tuple(obj);
   return std::make_shared<PyObjectRef>(obj);
@@ -240,6 +328,10 @@ py::dict PrimitivePy::RunInfer(const py::tuple &args) {
   if (!HasPyObj()) {
     MS_LOG(EXCEPTION) << "[" << this->ToString() << "]: pyobj is empty";
   }
+  // Python obj could be replaced as None, so it will losed the original info when throw exception in python.
+  if (!py::hasattr(python_obj_, PY_PRIM_METHOD_INFER)) {
+    MS_LOG(EXCEPTION) << "prim:" << ToString() << " has no attr:" << PY_PRIM_METHOD_INFER;
+  }
   auto infer_fuc = python_obj_.attr(PY_PRIM_METHOD_INFER);
   return infer_fuc(*args);
 }
@@ -248,6 +340,10 @@ void PrimitivePy::RunCheck(const py::tuple &args) {
   if (!HasPyObj()) {
     MS_LOG(EXCEPTION) << "[" << this->ToString() << "]: pyobj is empty";
   }
+  // Python obj could be replaced as None, so it will losed the original info when throw exception in python.
+  if (!py::hasattr(python_obj_, PY_PRIM_METHOD_CHECK)) {
+    MS_LOG(EXCEPTION) << "prim:" << ToString() << " has no attr:" << PY_PRIM_METHOD_CHECK;
+  }
   auto check_func = python_obj_.attr(PY_PRIM_METHOD_CHECK);
   (void)check_func(*args);
 }
@@ -255,6 +351,10 @@ void PrimitivePy::RunCheck(const py::tuple &args) {
 py::object PrimitivePy::RunInferValue(const py::tuple &args) {
   if (!HasPyObj()) {
     MS_LOG(EXCEPTION) << "[" << this->ToString() << "]: pyobj is empty";
+  }
+  // Python obj could be replaced as None, so it will losed the original info when throw exception in python.
+  if (!py::hasattr(python_obj_, PY_PRIM_METHOD_INFER_VALUE)) {
+    MS_LOG(EXCEPTION) << "prim:" << ToString() << " has no attr:" << PY_PRIM_METHOD_INFER_VALUE;
   }
   auto infer_value = python_obj_.attr(PY_PRIM_METHOD_INFER_VALUE);
   return infer_value(*args);

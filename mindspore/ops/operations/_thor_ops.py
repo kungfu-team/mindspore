@@ -82,7 +82,7 @@ class CusBatchMatMul(PrimitiveWithInfer):
     Examples:
         >>> input_x = Tensor(np.ones(shape=[2, 128, 128]), mindspore.float32)
         >>> input_y = Tensor(np.ones(shape=[2, 128, 128]), mindspore.float32)
-        >>> cus_batch_matmul = P.CusBatchMatMul()
+        >>> cus_batch_matmul = ops.CusBatchMatMul()
         >>> output = cus_batch_matmul(input_x, input_y)
     """
 
@@ -115,7 +115,7 @@ class CusCholeskyTrsm(PrimitiveWithInfer):
 
     Examples:
         >>> input_x = Tensor(np.ones(shape=[256, 256]), mindspore.float32)
-        >>> cus_choleskytrsm = P.CusCholeskyTrsm()
+        >>> cus_choleskytrsm = ops.CusCholeskyTrsm()
         >>> output = matmul(input_x)
     """
 
@@ -151,7 +151,7 @@ class CusFusedAbsMax1(PrimitiveWithInfer):
 
     Examples:
         >>> input_x = Tensor(np.ones(shape=[1, 3]), mindspore.float32)
-        >>> cus_fused_abs_max1 = P.CusFusedAbsMax1()
+        >>> cus_fused_abs_max1 = ops.CusFusedAbsMax1()
         >>> output = cus_fused_abs_max1(input_x)
     """
 
@@ -165,7 +165,7 @@ class CusFusedAbsMax1(PrimitiveWithInfer):
     def infer_shape(self, data1_shape):
         ll = []
         if len(data1_shape) == 2:
-            ll = [1,]
+            ll = [1]
         else:
             ll = [32, 64]
         return ll
@@ -187,7 +187,7 @@ class CusImg2Col(PrimitiveWithInfer):
         Tensor, the shape of the output tensor is :math:`(N * H_O * W_O, C1 * K_W * K_H * C0)`.
     Examples:
         >>> input_x = Tensor(np.ones(shape=[32, 3, 224, 224]), mindspore.float16)
-        >>> cusimg2col = P.CusImg2Col()
+        >>> cusimg2col = ops.CusImg2Col()
         >>> output = cusimg2col(input_x)
     """
 
@@ -233,7 +233,7 @@ class CusMatMulCubeDenseLeft(PrimitiveWithInfer):
     Examples:
         >>> input_x = Tensor(np.ones(shape=[16, 16, 16, 16]), mindspore.float16)
         >>> input_y = Tensor(np.ones(shape=[256, 256]), mindspore.float16)
-        >>> matmulcubedenseleft = P.CusMatMulCubeDenseLeft()
+        >>> matmulcubedenseleft = ops.CusMatMulCubeDenseLeft()
         >>> output = matmulcubedenseleft(input_x, input_y)
     """
 
@@ -268,7 +268,7 @@ class CusMatMulCubeFraczRightMul(PrimitiveWithInfer):
         >>> input_x1 = Tensor(np.ones(shape=[256, 256]), mindspore.float16)
         >>> input_x2 = Tensor(np.ones(shape=[16, 16, 16, 16]), mindspore.float16)
         >>> input_x3 = Tensor(np.ones(shape=[1, ]), mindspore.float16)
-        >>> cusmatmulfraczrightmul = P.CusMatMulCubeFraczRightMul()
+        >>> cusmatmulfraczrightmul = ops.CusMatMulCubeFraczRightMul()
         >>> output = cusmatmulfraczrightmul(input_x1, input_x2, input_x3)
     """
 
@@ -307,7 +307,7 @@ class CusMatMulCube(PrimitiveWithInfer):
     Examples:
         >>> input_x = Tensor(np.ones(shape=[256, 256]), mindspore.float16)
         >>> input_y = Tensor(np.ones(shape=[256, 256]), mindspore.float16)
-        >>> cusmatmulcube = P.CusMatMulCube()
+        >>> cusmatmulcube = ops.CusMatMulCube()
         >>> output = matmul(input_x, input_y)
     """
 
@@ -349,7 +349,7 @@ class CusMatrixCombine(PrimitiveWithInfer):
 
     Examples:
         >>> input_x = Tensor(np.ones(shape=[2, 128, 128]), mindspore.float32)
-        >>> cusmatrixcombine = P.CusMatrixCombine()
+        >>> cusmatrixcombine = ops.CusMatrixCombine()
         >>> output = cusmatrixcombine(input_x)
     """
 
@@ -383,7 +383,7 @@ class CusTranspose02314(PrimitiveWithInfer):
 
     Examples:
         >>> input_x = Tensor(np.ones(shape=[32, 1, 224, 224, 16]), mindspore.float16)
-        >>> custranspose02314 = P.CusTranspose02314()
+        >>> custranspose02314 = ops.CusTranspose02314()
         >>> output = custranspose02314(input_x)
     """
 
@@ -429,7 +429,7 @@ class CusMatMulCubeDenseRight(PrimitiveWithInfer):
     Examples:
         >>> input_x = Tensor(np.ones(shape=[256, 256]), mindspore.float16)
         >>> input_y = Tensor(np.ones(shape=[16, 16, 16, 16]), mindspore.float16)
-        >>> cusmatmulcubedenseright = P.CusMatMulCubeDenseRight()
+        >>> cusmatmulcubedenseright = ops.CusMatMulCubeDenseRight()
         >>> output = cusmatmulcubedenseright(input_x, input_y)
     """
 
@@ -464,7 +464,7 @@ class CusMatMulCubeFraczLeftCast(PrimitiveWithInfer):
     Examples:
         >>> input_x = Tensor(np.ones(shape=[16, 16, 16, 16]), mindspore.float16)
         >>> input_y = Tensor(np.ones(shape=[256, 256]), mindspore.float16)
-        >>> cusmatmulcubefraczleftcast = P.CusMatMulCubeFraczLeftCast()
+        >>> cusmatmulcubefraczleftcast = ops.CusMatMulCubeFraczLeftCast()
         >>> output = cusmatmulcubefraczleftcast(input_x, input_y)
     """
 
@@ -494,9 +494,10 @@ class Im2Col(PrimitiveWithInfer):
         Tensor.
     Examples:
         >>> input_x = Tensor(np.random.rand(32, 3, 224, 224).astype(np.float16))
-        >>> img2col = P.CusMatMulCubeDenseLeft(kernel_size=7, pad=3, stride=2)
+        >>> img2col = ops.CusMatMulCubeDenseLeft(kernel_size=7, pad=3, stride=2)
         >>> output = img2col(input_x)
     """
+
     @prim_attr_register
     def __init__(self,
                  kernel_size,
@@ -520,7 +521,7 @@ class Im2Col(PrimitiveWithInfer):
         self.add_prim_attr('data_format', "NCHW")
 
     def infer_shape(self, x_shape):
-        validator.check_integer("x rank", len(x_shape), 4, Rel.EQ, self.name)
+        validator.check_equal_int(len(x_shape), 4, "x rank", self.name)
         kernel_size_h = self.kernel_size[0]
         kernel_size_w = self.kernel_size[1]
         stride_h = self.stride[2]
@@ -556,9 +557,8 @@ class Im2Col(PrimitiveWithInfer):
         return out_shape
 
     def infer_dtype(self, x_dtype):
-        args = {'x': x_dtype}
-        valid_types = [mstype.float16, mstype.float32]
-        validator.check_tensor_type_same(args, valid_types, self.name)
+        valid_dtypes = [mstype.float16, mstype.float32]
+        validator.check_tensor_dtype_valid('x', x_dtype, valid_dtypes, self.name)
         return x_dtype
 
 
@@ -585,9 +585,9 @@ class UpdateThorGradient(PrimitiveWithInfer):
         >>> temp_x3 = np.random.rand(8, 128, 128).astype(np.float32)
         >>> input_x3 = np.zeros(16,8,128,128).astype(np.float32)
         >>> for i in range(16):
-        >>>     input_x3[i,:,:,:] = temp_x3
+        ...     input_x3[i,:,:,:] = temp_x3
         >>> input_x3 = Tensor(input_x3)
-        >>> update_thor_gradient = P.UpdateThorGradient(split_dim=128)
+        >>> update_thor_gradient = ops.UpdateThorGradient(split_dim=128)
         >>> output = update_thor_gradient(input_x1, input_x2, input_x3)
     """
 
@@ -602,14 +602,17 @@ class UpdateThorGradient(PrimitiveWithInfer):
         return x2_shape
 
     def infer_dtype(self, x1_dtype, x2_dtype, x3_dtype):
-        validator.check_tensor_type_same({'x1_dtype': x1_dtype, 'x2_dtype': x2_dtype, 'x3_dtype': x3_dtype},
-                                         [mstype.float32], self.name)
+        validator.check_tensors_dtypes_same_and_valid(
+            {'x1_dtype': x1_dtype, 'x2_dtype': x2_dtype, 'x3_dtype': x3_dtype},
+            [mstype.float32], self.name)
         return x2_dtype
+
 
 class Cholesky(PrimitiveWithInfer):
     """
-    Inner API for resnet50 THOR GPU backend
+    Inner API for positive-definite matrix Cholesky decomposition GPU backend.
     """
+
     @prim_attr_register
     def __init__(self, split_dim=0):
         self.init_prim_io_names(inputs=['x1'], outputs=['y'])
@@ -634,5 +637,94 @@ class Cholesky(PrimitiveWithInfer):
         return out_shape
 
     def infer_dtype(self, x1_dtype):
-        validator.check_tensor_type_same({'x1_dtype': x1_dtype}, [mstype.float32], self.name)
+        validator.check_tensor_dtype_valid('x1', x1_dtype, [mstype.float32], self.name)
+        return x1_dtype
+
+
+class CholeskyTrsm(PrimitiveWithInfer):
+    """
+    Inner API for resnet50 THOR GPU backend.
+    """
+
+    @prim_attr_register
+    def __init__(self, split_dim=0):
+        self.init_prim_io_names(inputs=['x1'], outputs=['y'])
+        self.split_dim = split_dim
+        self.add_prim_attr('split_dim', self.split_dim)
+
+    def infer_shape(self, x1_shape):
+        if self.split_dim != 0:
+            assert len(x1_shape) == 2
+            height = x1_shape[0]
+            width = x1_shape[1]
+            assert height == width
+            if height <= self.split_dim:
+                out_shape = [1, height, width]
+            else:
+                batch = height // self.split_dim
+                if height != batch * self.split_dim:
+                    batch += 1
+                out_shape = [batch, self.split_dim, self.split_dim]
+        else:
+            out_shape = x1_shape
+        return out_shape
+
+    def infer_dtype(self, x1_dtype):
+        validator.check_tensor_dtype_valid('x1', x1_dtype, [mstype.float32], self.name)
+        return x1_dtype
+
+
+class DetTriangle(PrimitiveWithInfer):
+    """
+    Calculate the determinant of triangle matrices.
+
+    Args:
+        fill_mode (tuple): The target shape to broadcast.
+
+    Inputs:
+        - **input_x** (Tensor) - The input tensor.
+
+    Outputs:
+        Tensor, with the given `shape` and the same data type as `input_x`.
+
+    Examples:
+        >>> shape = (2, 3)
+        >>> input_x = Tensor(np.array([1, 2, 3]).astype(np.float32))
+        >>> broadcast_to = P.BroadcastTo(shape)
+        >>> broadcast_to(input_x)
+        [[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]]
+    """
+
+    @prim_attr_register
+    def __init__(self, fill_mode=0):
+        self.init_prim_io_names(inputs=['x1'], outputs=['y'])
+        self.fill_mode = fill_mode
+        self.add_prim_attr('fill_mode', self.fill_mode)
+
+    def infer_shape(self, x1_shape):
+        out_shape = x1_shape
+        del out_shape[-2:]
+        return out_shape
+
+    def infer_dtype(self, x1_dtype):
+        validator.check_tensor_dtype_valid('x1', x1_dtype, [mstype.float32], self.name)
+        return x1_dtype
+
+
+class ProdForceSeA(PrimitiveWithInfer):
+    """
+    ProdForceSeA.
+    """
+
+    @prim_attr_register
+    def __init__(self, natoms=192):
+        self.init_prim_io_names(inputs=['net_deriv_tensor', "in_deriv_tensor", "nlist_tensor"], outputs=['y'])
+        self.natoms = natoms
+        self.add_prim_attr('natoms', self.natoms)
+
+    def infer_shape(self, x1_shape, x2_shape, x3_shape):
+        out_shape = [x3_shape[0], x3_shape[1], 3]
+        return out_shape
+
+    def infer_dtype(self, x1_dtype, x2_dtype, x3_dtype):
         return x1_dtype

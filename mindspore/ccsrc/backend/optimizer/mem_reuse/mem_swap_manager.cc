@@ -237,6 +237,10 @@ void MemSwapManager::SaveUserKernelTopoOrder() {
         continue;
       }
 
+      if (opt::IsNopNode(user_kernel)) {
+        continue;
+      }
+
       size_t user_kernel_topo_sort = SearchKernelExecutionInfo(user_kernel).topo_order_;
       auto kernel_with_index = AnfAlgo::GetPrevNodeOutput(user_kernel, node_pair.second - 1);
       auto &output_idx = kernel_with_index.second;
@@ -342,7 +346,6 @@ bool MemSwapManager::RetreatSwapInfo() {
     ResetSwapInfo();
     RetreatSwapThreshold();
     if (tensor_size_threshold_idx_ == ordered_tensors_.size() - 1 && distance_threshold_ < kDistanceLowerBound) {
-      MS_LOG(ERROR) << "Retreat swap info failed";
       return false;
     }
   } else {
@@ -450,13 +453,13 @@ size_t MemSwapManager::BestSwapInPerformPos(const AnfNodePtr &trigger_kernel, co
   return pos;
 }
 
-void MemSwapManager::MoveSwapInfoPos(size_t des_pos, size_t src_pos, const MemSwapInfo &mem_swap_info) {
-  if (des_pos == src_pos) {
+void MemSwapManager::MoveSwapInfoPos(size_t dest_pos, size_t src_pos, const MemSwapInfo &mem_swap_info) {
+  if (dest_pos == src_pos) {
     MS_LOG(EXCEPTION) << "destination pos can not equal source pos";
   }
-  auto des_kernel = QueryKernelByTopoOrder(des_pos);
+  auto dest_kernel = QueryKernelByTopoOrder(dest_pos);
   auto src_kernel = QueryKernelByTopoOrder(src_pos);
-  AddKernelMemSwapInfo(des_kernel, mem_swap_info);
+  AddKernelMemSwapInfo(dest_kernel, mem_swap_info);
   RemoveKernelMemSwapInfo(src_kernel, mem_swap_info);
 }
 

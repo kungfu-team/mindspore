@@ -20,6 +20,7 @@
 #include "nnacl/op_base.h"
 
 typedef struct SqueezeParameter {
+  // primitive parameter
   OpParameter op_parameter_;
   int axes_[8];
 } SqueezeParameter;
@@ -27,7 +28,7 @@ typedef struct SqueezeParameter {
 #ifdef __cplusplus
 extern "C" {
 #endif
-int DoSqueeze(float *input_ptr, float *output_ptr, size_t data_size);
+int DoSqueeze(const float *input_ptr, float *output_ptr, size_t data_size);
 int DoSqueezeInt32(int32_t *in_data, int32_t *out_data, size_t data_size);
 #ifdef __cplusplus
 }

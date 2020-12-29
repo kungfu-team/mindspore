@@ -38,9 +38,9 @@
 namespace common = mindspore::common;
 
 using namespace mindspore::dataset;
-using mindspore::MsLogLevel::ERROR;
-using mindspore::ExceptionType::NoExceptionType;
 using mindspore::LogStream;
+using mindspore::ExceptionType::NoExceptionType;
+using mindspore::MsLogLevel::ERROR;
 
 std::shared_ptr<BatchOp> Batch(int batch_size = 1, bool drop = false, int rows_per_buf = 2);
 
@@ -49,19 +49,22 @@ std::shared_ptr<RepeatOp> Repeat(int repeat_cnt);
 std::shared_ptr<ExecutionTree> Build(std::vector<std::shared_ptr<DatasetOp>> ops);
 
 std::shared_ptr<ImageFolderOp> ImageFolder(int64_t num_works, int64_t rows, int64_t conns, std::string path,
-                                           bool shuf = false, std::shared_ptr<Sampler> sampler = nullptr,
+                                           bool shuf = false, std::shared_ptr<SamplerRT> sampler = nullptr,
                                            std::map<std::string, int32_t> map = {}, bool decode = false) {
   std::shared_ptr<ImageFolderOp> so;
   ImageFolderOp::Builder builder;
   Status rc = builder.SetNumWorkers(num_works)
-                     .SetImageFolderDir(path)
-                     .SetRowsPerBuffer(rows)
-                     .SetOpConnectorSize(conns)
-                     .SetExtensions({".jpg", ".JPEG"})
-                     .SetSampler(std::move(sampler))
-                     .SetClassIndex(map)
-                     .SetDecode(decode)
-                     .Build(&so);
+                .SetImageFolderDir(path)
+                .SetRowsPerBuffer(rows)
+                .SetOpConnectorSize(conns)
+                .SetExtensions({".jpg", ".JPEG"})
+                .SetSampler(std::move(sampler))
+                .SetClassIndex(map)
+                .SetDecode(decode)
+                .Build(&so);
+  if (rc.IsError()) {
+    MS_LOG(ERROR) << "Fail to build ImageFolderOp: " << rc.ToString() << "\n";
+  }
   return so;
 }
 
@@ -133,7 +136,7 @@ TEST_F(MindDataTestImageFolderSampler, TestRandomSamplerImageFolder) {
   int32_t original_seed = GlobalContext::config_manager()->seed();
   GlobalContext::config_manager()->set_seed(0);
   int64_t num_samples = 12;
-  std::shared_ptr<Sampler> sampler = std::make_unique<RandomSampler>(num_samples, true, true);
+  std::shared_ptr<SamplerRT> sampler = std::make_unique<RandomSamplerRT>(num_samples, true, true);
   int32_t res[] = {2, 2, 2, 3, 2, 3, 2, 3, 1, 2, 2, 1};  // ground truth label
   std::string folder_path = datasets_root_path_ + "/testPK/data";
   auto tree = Build({ImageFolder(16, 2, 32, folder_path, false, std::move(sampler))});
@@ -166,9 +169,9 @@ TEST_F(MindDataTestImageFolderSampler, TestSequentialImageFolderWithRepeatBatch)
   auto tree = Build({ImageFolder(16, 2, 32, folder_path, false), Repeat(2), Batch(11)});
   tree->Prepare();
   int32_t res[4][11] = {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-                         {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
-                         {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2},
-                         {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3}};
+                        {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+                        {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2},
+                        {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3}};
   Status rc = tree->Launch();
   if (rc.IsError()) {
     MS_LOG(ERROR) << "Return code error detected during tree launch: " << common::SafeCStr(rc.ToString()) << ".";
@@ -184,7 +187,7 @@ TEST_F(MindDataTestImageFolderSampler, TestSequentialImageFolderWithRepeatBatch)
       Create1DTensor(&label, 11, reinterpret_cast<unsigned char *>(res[i % 4]), DataType::DE_INT32);
       EXPECT_TRUE((*label) == (*tensor_map["label"]));
       MS_LOG(DEBUG) << "row: " << i << " " << tensor_map["image"]->shape() << " (*label):" << (*label)
-                << " *tensor_map[label]: " << *tensor_map["label"] << std::endl;
+                    << " *tensor_map[label]: " << *tensor_map["label"] << std::endl;
       i++;
       di.GetNextAsMap(&tensor_map);
     }
@@ -196,7 +199,7 @@ TEST_F(MindDataTestImageFolderSampler, TestSubsetRandomSamplerImageFolder) {
   // id range 0 - 10 is label 0, and id range 11 - 21 is label 1
   std::vector<int64_t> indices({0, 1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 11});
   int64_t num_samples = 0;
-  std::shared_ptr<Sampler> sampler = std::make_shared<SubsetRandomSampler>(num_samples, indices);
+  std::shared_ptr<SamplerRT> sampler = std::make_shared<SubsetRandomSamplerRT>(num_samples, indices);
   std::string folder_path = datasets_root_path_ + "/testPK/data";
   // Expect 6 samples for label 0 and 1
   int res[2] = {6, 6};
@@ -233,8 +236,8 @@ TEST_F(MindDataTestImageFolderSampler, TestWeightedRandomSamplerImageFolder) {
   std::vector<double> weights(total_samples, std::rand() % 100);
 
   // create sampler with replacement = replacement
-  std::shared_ptr<Sampler> sampler =
-    std::make_shared<WeightedRandomSampler>(num_samples, weights, true, samples_per_buffer);
+  std::shared_ptr<SamplerRT> sampler =
+    std::make_shared<WeightedRandomSamplerRT>(num_samples, weights, true, samples_per_buffer);
 
   std::string folder_path = datasets_root_path_ + "/testPK/data";
   auto tree = Build({ImageFolder(16, 2, 32, folder_path, false, std::move(sampler))});
@@ -292,7 +295,7 @@ TEST_F(MindDataTestImageFolderSampler, TestImageFolderClassIndex) {
 
 TEST_F(MindDataTestImageFolderSampler, TestDistributedSampler) {
   int64_t num_samples = 0;
-  std::shared_ptr<Sampler> sampler = std::make_shared<DistributedSampler>(num_samples, 11, 10, false);
+  std::shared_ptr<SamplerRT> sampler = std::make_shared<DistributedSamplerRT>(num_samples, 11, 10, false);
   std::string folder_path = datasets_root_path_ + "/testPK/data";
   auto tree = Build({ImageFolder(16, 2, 32, folder_path, false, std::move(sampler)), Repeat(4)});
   tree->Prepare();
@@ -320,7 +323,7 @@ TEST_F(MindDataTestImageFolderSampler, TestDistributedSampler) {
 
 TEST_F(MindDataTestImageFolderSampler, TestPKSamplerImageFolder) {
   int64_t num_samples = 0;
-  std::shared_ptr<Sampler> sampler = std::make_shared<PKSampler>(num_samples, 3, false, 4);
+  std::shared_ptr<SamplerRT> sampler = std::make_shared<PKSamplerRT>(num_samples, 3, false, 4);
   int32_t res[] = {0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3};  // ground truth label
   std::string folder_path = datasets_root_path_ + "/testPK/data";
   auto tree = Build({ImageFolder(16, 2, 32, folder_path, false, std::move(sampler))});
@@ -355,7 +358,7 @@ TEST_F(MindDataTestImageFolderSampler, TestImageFolderDecode) {
   map["wrong folder name"] = 1234;  // this is skipped
   int64_t num_samples = 20;
   int64_t start_index = 0;
-  auto seq_sampler = std::make_shared<SequentialSampler>(num_samples, start_index);
+  auto seq_sampler = std::make_shared<SequentialSamplerRT>(num_samples, start_index);
   auto tree = Build({ImageFolder(16, 2, 32, folder_path, false, std::move(seq_sampler), map, true)});
   int64_t res[2] = {111, 333};
   tree->Prepare();
@@ -373,8 +376,8 @@ TEST_F(MindDataTestImageFolderSampler, TestImageFolderDecode) {
     while (tensor_map.size() != 0) {
       tensor_map["label"]->GetItemAt<int32_t>(&label, {});
       EXPECT_TRUE(label == res[i / 11]);
-      EXPECT_TRUE(
-        tensor_map["image"]->shape() == TensorShape({2268, 4032, 3}));  // verify shapes are correct after decode
+      EXPECT_TRUE(tensor_map["image"]->shape() ==
+                  TensorShape({2268, 4032, 3}));  // verify shapes are correct after decode
       MS_LOG(DEBUG) << "row: " << i << "\t" << tensor_map["image"]->shape() << "label:" << label << "\n";
       i++;
       di.GetNextAsMap(&tensor_map);
@@ -385,7 +388,7 @@ TEST_F(MindDataTestImageFolderSampler, TestImageFolderDecode) {
 
 TEST_F(MindDataTestImageFolderSampler, TestImageFolderSharding1) {
   int64_t num_samples = 5;
-  std::shared_ptr<Sampler> sampler = std::make_shared<DistributedSampler>(num_samples, 4, 0, false);
+  std::shared_ptr<SamplerRT> sampler = std::make_shared<DistributedSamplerRT>(num_samples, 4, 0, false);
   std::string folder_path = datasets_root_path_ + "/testPK/data";
   // numWrks, rows, conns, path, shuffle, sampler, map, numSamples, decode
   auto tree = Build({ImageFolder(16, 2, 32, folder_path, false, std::move(sampler), {})});
@@ -415,7 +418,7 @@ TEST_F(MindDataTestImageFolderSampler, TestImageFolderSharding1) {
 
 TEST_F(MindDataTestImageFolderSampler, TestImageFolderSharding2) {
   int64_t num_samples = 12;
-  std::shared_ptr<Sampler> sampler = std::make_shared<DistributedSampler>(num_samples, 4, 3, false);
+  std::shared_ptr<SamplerRT> sampler = std::make_shared<DistributedSamplerRT>(num_samples, 4, 3, false);
   std::string folder_path = datasets_root_path_ + "/testPK/data";
   // numWrks, rows, conns, path, shuffle, sampler, map, numSamples, decode
   auto tree = Build({ImageFolder(16, 16, 32, folder_path, false, std::move(sampler), {})});

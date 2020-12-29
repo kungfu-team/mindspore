@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2020 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,11 @@ namespace mindspore {
 namespace kernel {
 enum UnaryOptype {
   UNARY_OP_EXP = 0,
+  UNARY_OP_EXPM1,
   UNARY_OP_LOG,
+  UNARY_OP_LOG1P,
+  UNARY_OP_ERF,
+  UNARY_OP_ERFC,
   UNARY_OP_NEG,
   UNARY_OP_RECIPROCAL,
   UNARY_OP_ZEROSLIKE,
@@ -38,12 +42,21 @@ enum UnaryOptype {
   UNARY_OP_RSQRT,
   UNARY_OP_SIN,
   UNARY_OP_COS,
+  UNARY_OP_ASIN,
+  UNARY_OP_ACOS,
+  UNARY_OP_ATAN,
+  UNARY_OP_ASINH,
+  UNARY_OP_ACOSH,
   UNARY_OP_ABS,
   UNARY_OP_FLOOR,
   UNARY_OP_INVALID_TYPE = 255
 };
 static const std::map<std::string, UnaryOptype> kUnaryOpTypeMap = {{"Exp", UNARY_OP_EXP},
+                                                                   {"Expm1", UNARY_OP_EXPM1},
                                                                    {"Log", UNARY_OP_LOG},
+                                                                   {"Log1p", UNARY_OP_LOG1P},
+                                                                   {"Erf", UNARY_OP_ERF},
+                                                                   {"Erfc", UNARY_OP_ERFC},
                                                                    {"Neg", UNARY_OP_NEG},
                                                                    {"Reciprocal", UNARY_OP_RECIPROCAL},
                                                                    {"ZerosLike", UNARY_OP_ZEROSLIKE},
@@ -52,26 +65,25 @@ static const std::map<std::string, UnaryOptype> kUnaryOpTypeMap = {{"Exp", UNARY
                                                                    {"Rsqrt", UNARY_OP_RSQRT},
                                                                    {"Sin", UNARY_OP_SIN},
                                                                    {"Cos", UNARY_OP_COS},
+                                                                   {"Asin", UNARY_OP_ASIN},
+                                                                   {"ACos", UNARY_OP_ACOS},
+                                                                   {"Atan", UNARY_OP_ATAN},
+                                                                   {"Asinh", UNARY_OP_ASINH},
+                                                                   {"Acosh", UNARY_OP_ACOSH},
                                                                    {"Abs", UNARY_OP_ABS},
                                                                    {"Floor", UNARY_OP_FLOOR}};
 template <typename T>
 class UnaryOpGpuKernel : public GpuKernel {
  public:
-  UnaryOpGpuKernel()
-      : unary_op_type_(UNARY_OP_INVALID_TYPE),
-        input_size_(sizeof(T)),
-        output_size_(sizeof(T)),
-        workspace_size_(0),
-        is_null_input_(false) {}
+  UnaryOpGpuKernel() { ResetResource(); }
   ~UnaryOpGpuKernel() override = default;
 
   const std::vector<size_t> &GetInputSizeList() const override { return input_size_list_; }
   const std::vector<size_t> &GetOutputSizeList() const override { return output_size_list_; }
   const std::vector<size_t> &GetWorkspaceSizeList() const override { return workspace_size_list_; }
 
-  bool Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
+  bool Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &,
               const std::vector<AddressPtr> &outputs, void *stream_ptr) override {
-    VARIABLE_NOT_USED(workspace);
     T *input_addr = GetDeviceAddress<T>(inputs, 0);
     T *output_addr = GetDeviceAddress<T>(outputs, 0);
 
@@ -80,8 +92,24 @@ class UnaryOpGpuKernel : public GpuKernel {
         Exponential(input_addr, output_addr, inputs[0]->size / sizeof(T), reinterpret_cast<cudaStream_t>(stream_ptr));
         break;
       }
+      case UNARY_OP_EXPM1: {
+        Expm1(input_addr, output_addr, inputs[0]->size / sizeof(T), reinterpret_cast<cudaStream_t>(stream_ptr));
+        break;
+      }
       case UNARY_OP_LOG: {
         Logarithm(input_addr, output_addr, inputs[0]->size / sizeof(T), reinterpret_cast<cudaStream_t>(stream_ptr));
+        break;
+      }
+      case UNARY_OP_LOG1P: {
+        Log1p(input_addr, output_addr, inputs[0]->size / sizeof(T), reinterpret_cast<cudaStream_t>(stream_ptr));
+        break;
+      }
+      case UNARY_OP_ERF: {
+        Erf(input_addr, output_addr, inputs[0]->size / sizeof(T), reinterpret_cast<cudaStream_t>(stream_ptr));
+        break;
+      }
+      case UNARY_OP_ERFC: {
+        Erfc(input_addr, output_addr, inputs[0]->size / sizeof(T), reinterpret_cast<cudaStream_t>(stream_ptr));
         break;
       }
       case UNARY_OP_NEG: {
@@ -110,6 +138,26 @@ class UnaryOpGpuKernel : public GpuKernel {
       }
       case UNARY_OP_COS: {
         Cos(input_addr, output_addr, inputs[0]->size / sizeof(T), reinterpret_cast<cudaStream_t>(stream_ptr));
+        break;
+      }
+      case UNARY_OP_ASIN: {
+        Asin(input_addr, output_addr, inputs[0]->size / sizeof(T), reinterpret_cast<cudaStream_t>(stream_ptr));
+        break;
+      }
+      case UNARY_OP_ACOS: {
+        ACos(input_addr, output_addr, inputs[0]->size / sizeof(T), reinterpret_cast<cudaStream_t>(stream_ptr));
+        break;
+      }
+      case UNARY_OP_ATAN: {
+        Atan(input_addr, output_addr, inputs[0]->size / sizeof(T), reinterpret_cast<cudaStream_t>(stream_ptr));
+        break;
+      }
+      case UNARY_OP_ASINH: {
+        Asinh(input_addr, output_addr, inputs[0]->size / sizeof(T), reinterpret_cast<cudaStream_t>(stream_ptr));
+        break;
+      }
+      case UNARY_OP_ACOSH: {
+        Acosh(input_addr, output_addr, inputs[0]->size / sizeof(T), reinterpret_cast<cudaStream_t>(stream_ptr));
         break;
       }
       case UNARY_OP_ZEROSLIKE: {
@@ -148,7 +196,7 @@ class UnaryOpGpuKernel : public GpuKernel {
       MS_LOG(ERROR) << "Output number is " << output_num << ", but unary op needs 1 output.";
       return false;
     }
-    auto input_shape = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 0);
+    auto input_shape = AnfAlgo::GetInputRealDeviceShapeIfExist(kernel_node, 0);
     is_null_input_ = CHECK_NULL_INPUT(input_shape);
     if (is_null_input_) {
       MS_LOG(WARNING) << "UnaryOpGpuKernel input is null";
@@ -161,6 +209,16 @@ class UnaryOpGpuKernel : public GpuKernel {
     output_size_ = input_size_;
     InitSizeLists();
     return true;
+  }
+  void ResetResource() noexcept override {
+    unary_op_type_ = UNARY_OP_INVALID_TYPE;
+    input_size_ = sizeof(T);
+    output_size_ = sizeof(T);
+    workspace_size_ = 0;
+    is_null_input_ = false;
+    input_size_list_.clear();
+    output_size_list_.clear();
+    workspace_size_list_.clear();
   }
 
  protected:

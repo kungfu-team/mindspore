@@ -30,10 +30,11 @@
 #include "minddata/dataset/engine/db_connector.h"
 #include "minddata/dataset/engine/execution_tree.h"
 #include "minddata/dataset/engine/opt/pass.h"
-#include "utils/log_adapter.h"
+#include "minddata/dataset/util/log_adapter.h"
 
 namespace mindspore {
 namespace dataset {
+
 using mindrecord::kInt64Len;
 using mindrecord::MSRStatus;
 using mindrecord::Schema;
@@ -472,5 +473,6 @@ Status MindRecordOp::ComputeColMap() {
   }
   return Status::OK();
 }
+
 }  // namespace dataset
 }  // namespace mindspore

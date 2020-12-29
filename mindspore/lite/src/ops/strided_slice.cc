@@ -15,6 +15,12 @@
  */
 
 #include "src/ops/strided_slice.h"
+#include "src/ops/populate/strided_slice_populate.h"
+#include <algorithm>
+
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
 
 namespace mindspore {
 namespace lite {
@@ -68,22 +74,22 @@ int StridedSlice::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr
       MS_LOG(ERROR) << "new StridedSlice failed";
       return RET_ERROR;
     }
-    attr->beginMask = GetValue<int>(prim.GetAttr("begin_mask"));
-    attr->endMask = GetValue<int>(prim.GetAttr("end_mask"));
-    attr->ellipsisMask = GetValue<int>(prim.GetAttr("ellipsis_mask"));
-    attr->newAxisMask = GetValue<int>(prim.GetAttr("new_axis_mask"));
-    attr->shrinkAxisMask = GetValue<int>(prim.GetAttr("shrink_axis_mask"));
-    auto inputNodeFirst = inputs[kAnfPopulaterOne];
+    attr->beginMask = CastToInt(prim.GetAttr("begin_mask")).front();
+    attr->endMask = CastToInt(prim.GetAttr("end_mask")).front();
+    attr->ellipsisMask = CastToInt(prim.GetAttr("ellipsis_mask")).front();
+    attr->newAxisMask = CastToInt(prim.GetAttr("new_axis_mask")).front();
+    attr->shrinkAxisMask = CastToInt(prim.GetAttr("shrink_axis_mask")).front();
+    auto inputNodeFirst = inputs[kAnfPopulaterInputNumOne];
     std::vector<int> beginVec;
     GetAttrDataFromInput(inputNodeFirst, &beginVec);
     attr->begin = beginVec;
 
-    auto inputNodeSecond = inputs[kAnfPopulaterTwo];
+    auto inputNodeSecond = inputs[kAnfPopulaterInputNumTwo];
     std::vector<int> endVec;
     GetAttrDataFromInput(inputNodeSecond, &endVec);
     attr->end = endVec;
 
-    auto inputNodeThird = inputs[kAnfPopulaterThree];
+    auto inputNodeThird = inputs[kAnfPopulaterInputNumThree];
     std::vector<int> strideVec;
     GetAttrDataFromInput(inputNodeThird, &strideVec);
     attr->stride = strideVec;
@@ -158,12 +164,28 @@ int StridedSlice::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbu
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *StridedSliceCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<StridedSlice>(primitive);
+}
+Registry StridedSliceRegistry(schema::PrimitiveType_StridedSlice, StridedSliceCreator);
 #endif
+
 namespace {
 constexpr size_t kStridedSliceOutputNum = 1;
 constexpr size_t kStridedSliceInputNum = 1;
-constexpr size_t kStridedSliceMultiInputNum = 4;
+constexpr size_t kStridedSliceMultiInputNumMin = 3;
+constexpr size_t kStridedSliceMultiInputNumMax = 5;
 }  // namespace
+bool StridedSlice::CheckInputs(std::vector<lite::Tensor *> inputs_) {
+  for (size_t i = 1; i < inputs_.size(); ++i) {
+    if (inputs_.at(i)->data_c() == nullptr) {
+      MS_LOG(DEBUG) << "strided_slice has input from other node, which only can be obtained when running.";
+      return false;
+    }
+  }
+  return true;
+}
 
 void StridedSlice::ApplyNewAxisMask() {
   for (size_t i = 0; i < new_axis_mask_.size(); i++) {
@@ -241,36 +263,124 @@ void StridedSlice::TransIndexToPositive() {
   }
 }
 
+int StridedSlice::HandleAxesInputExist(const std::vector<lite::Tensor *> &inputs) {
+  // when axes input exist:
+  // input order: data, begin, end, axes(opt), stride(opt)
+  auto input_tensor = inputs.at(0);
+  MS_ASSERT(input_tensor != nullptr);
+  auto begin_tensor = inputs.at(1);
+  MS_ASSERT(begin_tensor != nullptr);
+  int *begin_data = reinterpret_cast<int *>(begin_tensor->MutableData());
+  auto end_tensor = inputs.at(2);
+  MS_ASSERT(end_tensor != nullptr);
+  int *end_data = reinterpret_cast<int *>(end_tensor->MutableData());
+  if (begin_data == nullptr || end_data == nullptr) {
+    return RET_INFER_ERR;
+  }
+  // when input contains axes, begins, ends, strides will be expand to the same length as input rank
+  ndim_ = static_cast<int>(input_tensor->shape().size());
+  int begin_ndim = begin_tensor->ElementsNum();
+
+  int *axes_data = nullptr;
+  auto axes_tensor = inputs.at(3);
+  if (axes_tensor->ElementsNum() != 0) {
+    MS_ASSERT(axes_tensor->ElementsNum() == begin_ndim);
+    axes_data = reinterpret_cast<int *>(axes_tensor->MutableData());
+    if (axes_data == nullptr) {
+      return RET_INFER_ERR;
+    }
+  }
+
+  int *stride_data = nullptr;
+  auto stride_tensor = inputs.at(4);
+  if (stride_tensor->ElementsNum() != 0) {
+    MS_ASSERT(stride_tensor->ElementsNum() == begin_ndim);
+    stride_data = reinterpret_cast<int *>(stride_tensor->MutableData());
+    if (stride_data == nullptr) {
+      return RET_INFER_ERR;
+    }
+  }
+
+  std::vector<int> axes;
+  if (axes_data == nullptr) {
+    for (int i = 0; i < begin_ndim; ++i) {
+      axes.push_back(i);
+    }
+  } else {
+    axes.assign(axes_data, axes_data + begin_ndim);
+    for (int i = 0; i < begin_ndim; ++i) {
+      if (axes.at(i) < 0) {
+        axes.at(i) += ndim_;
+      }
+    }
+  }
+
+  in_shape_.assign(ndim_, 0);
+  begins_.assign(ndim_, 0);
+  ends_.assign(ndim_, 0);
+  strides_.assign(ndim_, 0);
+  auto input_shape = input_tensor->shape();
+  for (int i = 0; i < ndim_; ++i) {
+    in_shape_.at(i) = input_shape.at(i);
+  }
+  for (int i = 0; i < ndim_; ++i) {
+    auto axes_it = std::find(axes.begin(), axes.end(), i);
+    if (axes_it != axes.end()) {
+      auto axis = axes_it - axes.begin();
+      // begins or ends exceed limit will be set to limit
+      begins_.at(i) = std::max(std::min(begin_data[axis], input_shape.at(i) - 1), -input_shape.at(i));
+      ends_.at(i) = std::max(std::min(end_data[axis], input_shape.at(i)), -input_shape.at(i) - 1);
+      strides_.at(i) = stride_data[axis];
+    } else {
+      begins_.at(i) = 0;
+      ends_.at(i) = input_shape.at(i);
+      strides_.at(i) = 1;
+    }
+  }
+  return RET_OK;
+}
+
+// note: begin, end, stride length are equal, but may less than rank of input
 int StridedSlice::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Tensor *> outputs) {
   MS_ASSERT(this->primitive_ != nullptr);
   if (outputs.size() != kStridedSliceOutputNum) {
     MS_LOG(ERROR) << "Invalid output size:" << outputs.size();
     return RET_PARAM_INVALID;
   }
-  if (inputs.size() != kStridedSliceInputNum && inputs.size() != kStridedSliceMultiInputNum) {
+  if (inputs.size() != kStridedSliceInputNum &&
+      !(inputs.size() <= kStridedSliceMultiInputNumMax && inputs.size() >= kStridedSliceMultiInputNumMin)) {
     MS_LOG(ERROR) << "Invalid input size " << inputs.size();
     return RET_PARAM_INVALID;
   }
   auto input = inputs.at(0);
   outputs.front()->set_data_type(input->data_type());
-  outputs[0]->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
-  }
+  outputs.at(0)->set_format(input->format());
   MS_ASSERT(input != nullptr);
   auto input_shape = input->shape();
-  std::vector<int> output_shape;
+  auto inferflag = infer_flag();
 
+  in_shape_.clear();
+  if (inferflag) {
+    in_shape_.assign(input_shape.begin(), input_shape.end());
+  }
+  begins_.clear();
+  ends_.clear();
+  strides_.clear();
   if (inputs.size() == kStridedSliceInputNum) {
     ndim_ = static_cast<int>(GetBegin().size());
 
     for (int i = 0; i < ndim_; i++) {
-      in_shape_.emplace_back(input_shape.at(i));
-      begins_.emplace_back((GetBegin())[i]);
-      ends_.emplace_back((GetEnd())[i]);
-      strides_.emplace_back((GetStride())[i]);
+      begins_.emplace_back((GetBegin()).at(i));
+      ends_.emplace_back((GetEnd()).at(i));
+      strides_.emplace_back((GetStride()).at(i));
     }
-  } else {
+  }
+  if (!CheckInputs(inputs)) {
+    MS_LOG(DEBUG) << "Do infer shape in runtime.";
+    return RET_INFER_INVALID;
+  }
+  if (inputs.size() == 4) {
+    // input order: input, begins, ends, strides.
     auto begin_tensor = inputs.at(1);
     int *begin_data = reinterpret_cast<int *>(begin_tensor->MutableData());
     auto end_tensor = inputs.at(2);
@@ -282,10 +392,16 @@ int StridedSlice::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lit
     }
     ndim_ = begin_tensor->ElementsNum();
     for (int i = 0; i < ndim_; ++i) {
-      in_shape_.emplace_back(input_shape.at(i));
       begins_.emplace_back(begin_data[i]);
       ends_.emplace_back(end_data[i]);
       strides_.emplace_back(stride_data[i]);
+    }
+  }
+  if (inputs.size() == 5) {
+    // input order: input, begins, end, axes, strides
+    auto ret = HandleAxesInputExist(inputs);
+    if (ret != RET_OK) {
+      return ret;
     }
   }
 
@@ -310,16 +426,19 @@ int StridedSlice::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lit
   ApplyEndMask();
   ApplyEllipsisMask();
 
-  output_shape.clear();
-  output_shape.resize(in_shape_.size());
+  if (!inferflag) {
+    return RET_OK;
+  }
+  std::vector<int> output_shape(in_shape_);
 
   TransIndexToPositive();
-  for (int i = 0; i < static_cast<int>(in_shape_.size()); i++) {
-    if (i < ndim_ && new_axis_mask_.at(i)) {
-      output_shape.at(i) = 1;
-    } else {
-      output_shape.at(i) = (ends_.at(i) - begins_.at(i)) / strides_.at(i);
+  for (int i = 0; i < ndim_; i++) {
+    if (strides_.at(i) == 0) {
+      MS_LOG(ERROR) << "strides should not be 0.";
+      return RET_INFER_ERR;
     }
+    output_shape.at(i) =
+      (ends_.at(i) - begins_.at(i) + strides_.at(i) + (strides_.at(i) < 0 ? 1 : -1)) / strides_.at(i);
   }
 
   output_shape = ApplyShrinkMask(output_shape);

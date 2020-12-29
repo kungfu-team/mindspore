@@ -78,18 +78,19 @@ class TensorData {
 
 using TensorDataPtr = std::shared_ptr<TensorData>;
 
-struct WaitEvent {
-  bool need_wait_{false};
-  mutable std::mutex mutex_;
-  mutable std::condition_variable cond_var_;
+class WaitEvent : public ExceptionListener {
+ public:
+  void OnException() override { set_need_wait(false); }
 
   void Wait() const {
     std::unique_lock<std::mutex> lock(mutex_);
     if (!need_wait_) {
       return;
     }
+    MsException::Instance().AddExceptionListener(const_cast<WaitEvent *>(this));
     cond_var_.wait(lock, [this] { return !need_wait_; });
-    MsException::GetInstance().CheckException();
+    MsException::Instance().CheckException();
+    MsException::Instance().RemoveExceptionListener(const_cast<WaitEvent *>(this));
   }
 
   void set_need_wait(bool need_wait) {
@@ -101,6 +102,11 @@ struct WaitEvent {
   }
 
   bool need_wait() const { return need_wait_; }
+
+ private:
+  bool need_wait_{false};
+  mutable std::mutex mutex_;
+  mutable std::condition_variable cond_var_;
 };
 
 // Tensor entity class
@@ -160,7 +166,7 @@ class Tensor : public MetaTensor {
   // param data_type [TypeId] data type
   explicit Tensor(const std::vector<double> &input, const TypePtr &data_type = nullptr);
 
-  // brief Create 0 dimension tensor from an int scalar.
+  // brief Create 0 dimension tensor from an int64_t scalar.
   //
   // param input [int64] the data for tensor
   // param data_type [TypeId] data type
@@ -171,6 +177,18 @@ class Tensor : public MetaTensor {
   // param input [double] the data for tensor
   // param data_type [TypeId] data type
   explicit Tensor(double input, const TypePtr &data_type = nullptr);
+
+  // brief Create 0 dimension tensor from a uint scalar.
+  //
+  // param input [uint] the data for tensor
+  // param data_type [TypeId] data type
+  explicit Tensor(uint64_t input, const TypePtr &data_type = nullptr);
+
+  // brief Create 0 dimension tensor from a bool scalar.
+  //
+  // param input [bool] the data for tensor
+  // param data_type [TypeId] data type
+  explicit Tensor(bool input, const TypePtr &data_type = nullptr);
 
   ~Tensor() override = default;
 
@@ -227,7 +245,7 @@ class Tensor : public MetaTensor {
   // brief Get Tensor data byte-size for c++ type
   //
   // return byte size of Tensor data
-  size_t Size() const { return data().nbytes(); }
+  size_t Size() const { return static_cast<size_t>(data().nbytes()); }
 
   void *data_c() const { return data_->data(); }
 
@@ -306,12 +324,16 @@ class Tensor : public MetaTensor {
 
   bool NeedSyncHostToDevice() const { return sync_status_ == kNeedSyncHostToDevice; }
 
+  bool IsGraphOutput() { return graph_output_; }
+  void SetIsGraphOutput() { graph_output_ = true; }
+
  private:
   bool init_flag_{false};
   TensorDataPtr data_{nullptr};
   std::string id_{""};
   mutable std::shared_ptr<WaitEvent> event_{nullptr};
   mutable TensorSyncStatus sync_status_{kNeedSyncHostToDevice};
+  bool graph_output_{false};
   DeviceSyncPtr device_sync_{nullptr};
   std::vector<Axis> padding_type_;
   TypePtr cast_dtype_{nullptr};

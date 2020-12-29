@@ -20,6 +20,7 @@
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
 #include "src/runtime/runtime_api.h"
+#include "src/runtime/kernel/arm/base/dequant.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
@@ -34,7 +35,7 @@ DeconvolutionDepthwiseFp16CPUKernel::~DeconvolutionDepthwiseFp16CPUKernel() {
     sliding_ = nullptr;
   }
   if (packed_weight_ != nullptr) {
-    delete packed_weight_;
+    free(packed_weight_);
     packed_weight_ = nullptr;
   }
 }
@@ -52,28 +53,31 @@ int DeconvolutionDepthwiseFp16CPUKernel::InitSlideParam() {
   return RET_OK;
 }
 
-int DeconvolutionDepthwiseFp16CPUKernel::InitBuffer() {
-  int C8 = UP_DIV(conv_param_->input_channel_, C8NUM);
-  int pack_input_size = conv_param_->input_batch_ * conv_param_->input_h_ * conv_param_->input_w_ * C8NUM * C8;
-  packed_input_ = reinterpret_cast<float16_t *>(context_->allocator->Malloc(pack_input_size * sizeof(float16_t)));
-  if (packed_input_ == nullptr) {
-    MS_LOG(ERROR) << "Malloc buffer failed.";
-    return RET_ERROR;
-  }
+int DeconvolutionDepthwiseFp16CPUKernel::InitPackedInputOutput() {
+  if (conv_param_->input_channel_ % C8NUM != 0) {
+    need_align_ = true;
+    int C8 = UP_DIV(conv_param_->input_channel_, C8NUM);
+    int pack_input_size = conv_param_->input_batch_ * conv_param_->input_h_ * conv_param_->input_w_ * C8NUM * C8;
+    packed_input_ = reinterpret_cast<float16_t *>(context_->allocator->Malloc(pack_input_size * sizeof(float16_t)));
+    if (packed_input_ == nullptr) {
+      MS_LOG(ERROR) << "Malloc buffer failed.";
+      return RET_ERROR;
+    }
 
-  int pack_output_size = conv_param_->output_batch_ * conv_param_->output_h_ * conv_param_->output_w_ * C8NUM * C8;
-  packed_output_ = reinterpret_cast<float16_t *>(context_->allocator->Malloc(pack_output_size * sizeof(float16_t)));
-  if (packed_output_ == nullptr) {
-    MS_LOG(ERROR) << "Malloc buffer failed.";
-    return RET_ERROR;
+    int pack_output_size = conv_param_->output_batch_ * conv_param_->output_h_ * conv_param_->output_w_ * C8NUM * C8;
+    packed_output_ = reinterpret_cast<float16_t *>(context_->allocator->Malloc(pack_output_size * sizeof(float16_t)));
+    if (packed_output_ == nullptr) {
+      MS_LOG(ERROR) << "Malloc buffer failed.";
+      return RET_ERROR;
+    }
+    memset(packed_output_, 0, pack_output_size * sizeof(float16_t));
   }
-  memset(packed_output_, 0, pack_output_size * sizeof(float16_t));
   return RET_OK;
 }
 
 int DeconvolutionDepthwiseFp16CPUKernel::InitWeightBias() {
   // init weight: o, h, w, i; o == group, i == 1
-  auto weight_tensor = in_tensors_[kWeightIndex];
+  auto weight_tensor = in_tensors_.at(kWeightIndex);
   int OC8 = UP_DIV(weight_tensor->Batch(), C8NUM);
   auto origin_weight = reinterpret_cast<float *>(weight_tensor->MutableData());
   int pack_weight_size = C8NUM * OC8 * weight_tensor->Height() * weight_tensor->Width();
@@ -152,20 +156,18 @@ int DeconvolutionDepthwiseFp16CPUKernel::Run() {
     MS_LOG(ERROR) << "Only support input channel equals output channel.";
     return RET_ERROR;
   }
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare failed.";
-    return RET_ERROR;
-  }
-  ret = InitBuffer();
+  auto ret = InitPackedInputOutput();
   if (ret != 0) {
-    MS_LOG(ERROR) << "Deconvolution depthwise fp16 InitBuffer failed.";
+    MS_LOG(ERROR) << "Deconvolution depthwise fp16 InitPackedInputOutput failed.";
+    FreePackedInputOutput();
     return RET_ERROR;
   }
 
   ret = ConvolutionBaseFP16CPUKernel::GetExecuteTensor();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Get Execute tensor failed.";
+    FreePackedInputOutput();
+    ConvolutionBaseFP16CPUKernel::FreeTmpBuffer();
     return ret;
   }
   if (need_align_) {
@@ -182,18 +184,25 @@ int DeconvolutionDepthwiseFp16CPUKernel::Run() {
   ret = ParallelLaunch(this->context_->thread_pool_, DeconvDwFp16Run, this, conv_param_->thread_num_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "DeconvDwFp16Run error: error_code[" << ret << "]";
-    return RET_ERROR;
   }
 
   if (need_align_) {
     PackNHWC8ToNHWCFp16(packed_output_, execute_output_, conv_param_->output_batch_,
                         conv_param_->output_h_ * conv_param_->output_w_, conv_param_->output_channel_);
-    context_->allocator->Free(packed_input_);
-    context_->allocator->Free(packed_output_);
   }
   ConvolutionBaseFP16CPUKernel::IfCastOutput();
   ConvolutionBaseFP16CPUKernel::FreeTmpBuffer();
-  return RET_OK;
+  FreePackedInputOutput();
+  return ret;
+}
+
+void DeconvolutionDepthwiseFp16CPUKernel::FreePackedInputOutput() {
+  if (need_align_) {
+    context_->allocator->Free(packed_input_);
+    context_->allocator->Free(packed_output_);
+    packed_input_ = nullptr;
+    packed_output_ = nullptr;
+  }
 }
 
 kernel::LiteKernel *CpuDeconvDwFp16KernelCreator(const std::vector<lite::Tensor *> &inputs,
@@ -204,16 +213,19 @@ kernel::LiteKernel *CpuDeconvDwFp16KernelCreator(const std::vector<lite::Tensor 
   MS_ASSERT(desc.type == schema::PrimitiveType_DeDepthwiseConv2D);
 
   auto *weight_tensor = inputs.at(kWeightIndex);
-  auto *restore_data = weight_tensor->MutableData();
-  auto dequant_flag = (weight_tensor->data_type() == kNumberTypeInt8) ? true : false;
+  auto *restore_data = weight_tensor->data_c();
+  auto restore_type = weight_tensor->data_type();
+  auto dequant_flag =
+    !weight_tensor->quant_params().empty() && weight_tensor->quant_params().front().inited && restore_data != nullptr;
   if (dequant_flag) {
-    auto *dequant_weight = kernel::LiteKernelUtil::DequantWeight(weight_tensor);
+    auto *dequant_weight = kernel::DequantUtil::DequantWeight(weight_tensor);
     if (dequant_weight == nullptr) {
       MS_LOG(ERROR) << "dequant data is nullptr.";
+      free(opParameter);
       return nullptr;
     }
     weight_tensor->set_data_type(kNumberTypeFloat32);
-    weight_tensor->SetData(dequant_weight);
+    weight_tensor->set_data(dequant_weight);
   }
 
   auto kernel = new (std::nothrow) DeconvolutionDepthwiseFp16CPUKernel(opParameter, inputs, outputs, ctx, primitive);
@@ -221,27 +233,28 @@ kernel::LiteKernel *CpuDeconvDwFp16KernelCreator(const std::vector<lite::Tensor 
     MS_LOG(ERROR) << "kernel is nullptr.";
     if (dequant_flag) {
       weight_tensor->FreeData();
-      weight_tensor->set_data_type(kNumberTypeInt8);
-      weight_tensor->SetData(restore_data);
+      weight_tensor->set_data(restore_data);
+      weight_tensor->set_data_type(restore_type);
     }
+    free(opParameter);
     return nullptr;
   }
   auto ret = kernel->Init();
   if (ret != RET_OK) {
-    delete kernel;
     MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
                   << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
     if (dequant_flag) {
       weight_tensor->FreeData();
-      weight_tensor->set_data_type(kNumberTypeInt8);
-      weight_tensor->SetData(restore_data);
+      weight_tensor->set_data(restore_data);
+      weight_tensor->set_data_type(restore_type);
     }
+    delete kernel;
     return nullptr;
   }
   if (dequant_flag) {
     weight_tensor->FreeData();
-    weight_tensor->set_data_type(kNumberTypeInt8);
-    weight_tensor->SetData(restore_data);
+    weight_tensor->set_data(restore_data);
+    weight_tensor->set_data_type(restore_type);
   }
   return kernel;
 }

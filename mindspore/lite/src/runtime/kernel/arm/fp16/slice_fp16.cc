@@ -20,6 +20,8 @@
 #include "nnacl/fp16/slice_fp16.h"
 
 using mindspore::lite::KernelRegistrar;
+using mindspore::lite::RET_ERROR;
+using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_Slice;
 
 namespace mindspore::kernel {
@@ -29,11 +31,6 @@ int SliceFp16CPUKernel::SliceParallelRun(int thread_id) {
 }
 
 int SliceFp16CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << ret;
-    return ret;
-  }
   input_fp16_ = ConvertInputFp32toFp16(in_tensors_.at(0), context_);
   output_fp16_ = MallocOutputFp16(out_tensors_.at(0), context_);
   if (input_fp16_ == nullptr || output_fp16_ == nullptr) {
@@ -45,7 +42,7 @@ int SliceFp16CPUKernel::Run() {
     DoSliceFp16NoParallel(input_fp16_, output_fp16_, param_);
     return RET_OK;
   }
-  ret = ParallelLaunch(this->context_->thread_pool_, SliceLaunch, this, op_parameter_->thread_num_);
+  auto ret = ParallelLaunch(this->context_->thread_pool_, SliceLaunch, this, op_parameter_->thread_num_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "slice launch fail!ret: " << ret;
   }
@@ -68,24 +65,5 @@ void SliceFp16CPUKernel::FreeInputAndOutput() {
   }
 }
 
-kernel::LiteKernel *CpuSliceFp16KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                              const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                              const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                              const mindspore::lite::PrimitiveC *primitive) {
-  auto *kernel = new (std::nothrow) SliceFp16CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new SliceFp16CPUKernel fail!";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Slice, CpuSliceFp16KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Slice, LiteKernelCreator<SliceFp16CPUKernel>)
 }  // namespace mindspore::kernel

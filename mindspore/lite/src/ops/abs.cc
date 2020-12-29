@@ -15,6 +15,9 @@
  */
 
 #include "src/ops/abs.h"
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
 
 namespace mindspore {
 namespace lite {
@@ -27,6 +30,9 @@ int Abs::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::Fl
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+PrimitiveC *AbsCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Abs>(primitive); }
+Registry AbsRegistry(schema::PrimitiveType_Abs, AbsCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

@@ -48,12 +48,10 @@ class MaxPoolWithArgmaxGradGpuKernel : public GpuKernel {
   const std::vector<size_t> &GetWorkspaceSizeList() const override { return workspace_size_list_; }
   bool Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
               const std::vector<AddressPtr> &outputs, void *stream_ptr) {
-    T *x_addr = GetDeviceAddress<T>(inputs, 0);
     T *dy_addr = GetDeviceAddress<T>(inputs, 1);
     S *index_addr = GetDeviceAddress<S>(inputs, 2);
     T *dx_addr = GetDeviceAddress<T>(outputs, 0);
-    CalMaxPoolWithArgmaxGrad(x_addr, dy_addr, index_addr, n_, c_, x_height_, x_width_, dy_height_, dy_width_,
-                             window_height_, window_width_, stride_height_, stride_width_, pad_top_, pad_left_, dx_addr,
+    CalMaxPoolWithArgmaxGrad(dy_addr, index_addr, n_, c_, x_height_, x_width_, dy_height_, dy_width_, dx_addr,
                              reinterpret_cast<cudaStream_t>(stream_ptr));
     return true;
   }
@@ -95,49 +93,19 @@ class MaxPoolWithArgmaxGradGpuKernel : public GpuKernel {
     x_width_ = SizeToInt(x_shape[3]);
     dy_height_ = SizeToInt(dy_shape[2]);
     dy_width_ = SizeToInt(dy_shape[3]);
-    auto window = GetValue<std::vector<int>>(AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr("ksize"));
-    window_height_ = window[1];
-    window_width_ = window[2];
-    auto stride = GetValue<std::vector<int>>(AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr("strides"));
-    stride_height_ = stride[1];
-    stride_width_ = stride[2];
-    pad_mode_ = GetValue<std::string>(AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr("padding"));
-    pad_top_ = 0;
-    pad_left_ = 0;
-    if (pad_mode_ == kSamePadModeUpperCase || pad_mode_ == kSamePadModeLowerCase) {
-      SetPad();
-    }
+
     InitSizeLists();
     return true;
   }
 
  protected:
   void InitSizeLists() override {
-    input_size_list_.push_back(x_size_);
     input_size_list_.push_back(dy_size_);
     input_size_list_.push_back(index_size_);
     output_size_list_.push_back(dx_size_);
   }
 
  private:
-  void SetPad() {
-    pad_height_ = std::max<int>(
-      0, (((x_height_ / stride_height_) * stride_height_ == x_height_ ? (x_height_ / stride_height_)
-                                                                      : (x_height_ / stride_height_) + 1) -
-          1) *
-             stride_height_ +
-           window_height_ - x_height_);
-    pad_width_ =
-      std::max<int>(0, (((x_width_ / stride_width_) * stride_width_ == x_width_ ? (x_width_ / stride_width_)
-                                                                                : (x_width_ / stride_width_) + 1) -
-                        1) *
-                           stride_width_ +
-                         window_width_ - x_width_);
-    pad_top_ = pad_height_ / 2;
-    pad_left_ = pad_width_ / 2;
-  }
-
-  std::string pad_mode_;
   std::vector<size_t> input_size_list_;
   std::vector<size_t> output_size_list_;
   std::vector<size_t> workspace_size_list_;
@@ -148,14 +116,6 @@ class MaxPoolWithArgmaxGradGpuKernel : public GpuKernel {
   int x_width_;
   int dy_height_;
   int dy_width_;
-  int window_height_;
-  int window_width_;
-  int pad_height_;
-  int pad_width_;
-  int pad_top_;
-  int pad_left_;
-  int stride_height_;
-  int stride_width_;
 
   size_t x_size_;
   size_t dy_size_;

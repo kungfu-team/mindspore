@@ -28,14 +28,7 @@ namespace kernel {
 template <typename T>
 class SplitGpuFwdKernel : public GpuKernel {
  public:
-  SplitGpuFwdKernel()
-      : axis_(0),
-        output_num_(1),
-        input_size_(1),
-        axis_step_(1),
-        all_size_before_axis_(1),
-        all_size_axis_(1),
-        outputs_host_(nullptr) {}
+  SplitGpuFwdKernel() { ResetResource(); }
   ~SplitGpuFwdKernel() override = default;
   const std::vector<size_t> &GetInputSizeList() const override { return input_size_list_; }
   const std::vector<size_t> &GetOutputSizeList() const override { return output_size_list_; }
@@ -48,7 +41,8 @@ class SplitGpuFwdKernel : public GpuKernel {
     for (size_t i = 0; i < outputs.size(); i++) {
       outputs_host_[i] = GetDeviceAddress<T>(outputs, i);
     }
-    CHECK_CUDA_RET_WITH_EXCEPT(cudaMemcpyAsync(outputs_device, outputs_host_.get(), sizeof(T *) * output_num_,
+    CHECK_CUDA_RET_WITH_EXCEPT(kernel_node_,
+                               cudaMemcpyAsync(outputs_device, outputs_host_.get(), sizeof(T *) * output_num_,
                                                cudaMemcpyHostToDevice, reinterpret_cast<cudaStream_t>(stream_ptr)),
                                "Split opt cudaMemcpyAsync outputs failed");
     SplitKernel(input_size_, axis_step_, all_size_before_axis_, all_size_axis_, input, outputs_device,
@@ -57,18 +51,19 @@ class SplitGpuFwdKernel : public GpuKernel {
   }
 
   bool Init(const CNodePtr &kernel_node) override {
-    axis_ = GetAttr<int>(kernel_node, "axis");
+    kernel_node_ = kernel_node;
+    axis_ = static_cast<int64_t>(GetAttr<int64_t>(kernel_node, "axis"));
     if (axis_ < 0) {
-      auto input_shape = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 0);
+      auto input_shape = AnfAlgo::GetInputRealDeviceShapeIfExist(kernel_node, 0);
       axis_ += SizeToInt(input_shape.size());
     }
-    output_num_ = GetAttr<int>(kernel_node, "output_num");
+    output_num_ = static_cast<int64_t>(GetAttr<int64_t>(kernel_node, "output_num"));
 
     if (!CheckParam(kernel_node)) {
       return false;
     }
 
-    auto input_shape = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 0);
+    auto input_shape = AnfAlgo::GetInputRealDeviceShapeIfExist(kernel_node, 0);
     input_size_ = 1;
     all_size_before_axis_ = 1;
     all_size_axis_ = 1;
@@ -88,7 +83,7 @@ class SplitGpuFwdKernel : public GpuKernel {
 
     for (int i = 0; i < output_num_; i++) {
       size_t output_size = 1;
-      auto output_shape = AnfAlgo::GetOutputInferShape(kernel_node, i);
+      auto output_shape = AnfAlgo::GetOutputRealDeviceShapeIfExist(kernel_node, i);
       for (size_t j = 0; j < output_shape.size(); j++) {
         output_size *= output_shape[j];
       }
@@ -98,6 +93,19 @@ class SplitGpuFwdKernel : public GpuKernel {
     InitSizeLists();
     outputs_host_ = std::make_unique<T *[]>(output_num_);
     return true;
+  }
+
+  void ResetResource() noexcept override {
+    axis_ = 0;
+    output_num_ = 1;
+    input_size_ = 1;
+    axis_step_ = 1;
+    all_size_before_axis_ = 1;
+    all_size_axis_ = 1;
+    outputs_host_ = nullptr;
+    input_size_list_.clear();
+    output_size_list_.clear();
+    workspace_size_list_.clear();
   }
 
  protected:
@@ -124,10 +132,6 @@ class SplitGpuFwdKernel : public GpuKernel {
     }
     if (output_num_ > SizeToInt(input_shape[axis_])) {
       MS_LOG(ERROR) << "Attr output_num " << output_num_ << "must less than" << input_shape[axis_];
-      return false;
-    }
-    if (input_shape[axis_] % output_num_ != 0) {
-      MS_LOG(ERROR) << "Attr output_num " << output_num_ << "must be divided by" << input_shape[axis_];
       return false;
     }
     if (output_num_ != output_num) {

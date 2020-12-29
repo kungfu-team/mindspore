@@ -21,7 +21,11 @@
 #include <string>
 #include <vector>
 #include "./securec.h"
+#ifndef ENABLE_ANDROID
 #include "utils/log_adapter.h"
+#else
+#include "mindspore/lite/src/common/log_adapter.h"
+#endif
 #if defined(_WIN32) || defined(_WIN64)
 #undef HAVE_STDDEF_H
 #undef HAVE_STDLIB_H
@@ -747,7 +751,6 @@ inline Status Tensor::CreateFromVector<std::string>(const std::vector<std::strin
     num_bytes -= str.length() + 1;
   }
   // store one more offset value so we can get the length of the last string
-  // length[last_element] = offset_arr[last_element + 1] - offset_arr[last_element]
   offset_arr[i] = offset;
 
   (*out)->data_end_ = (*out)->data_ + offset_arr[i];

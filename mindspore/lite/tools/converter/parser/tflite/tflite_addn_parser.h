@@ -29,8 +29,8 @@ class TfliteAddNParser : public TfliteNodeParser {
  public:
   TfliteAddNParser() : TfliteNodeParser("AddN") {}
 
-  STATUS Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-               const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) override;
+  lite::PrimitiveC *ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                       const std::unique_ptr<tflite::ModelT> &tflite_model) override;
 };
 }  // namespace lite
 }  // namespace mindspore

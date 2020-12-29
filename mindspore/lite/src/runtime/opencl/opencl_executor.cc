@@ -21,15 +21,24 @@
 
 namespace mindspore::lite::opencl {
 
-int OpenCLExecutor::Prepare(const std::vector<kernel::LiteKernel *> &kernels) { return RET_OK; }
-
 int OpenCLExecutor::Run(std::vector<Tensor *> &inputs, std::vector<Tensor *> &outputs,
-                        std::vector<kernel::LiteKernel *> &kernels, Allocator *allocator,
-                        const session::KernelCallBack &before, const session::KernelCallBack &after) {
-  kernel::LiteKernelUtil::InitTensorRefCount(kernels);
+                        std::vector<kernel::LiteKernel *> &kernels, Allocator *allocator, const KernelCallBack &before,
+                        const KernelCallBack &after) {
+  return RunOrTune(inputs, outputs, kernels, allocator, before, after, false);
+}
+
+int OpenCLExecutor::RunOrTune(std::vector<Tensor *> &inputs, std::vector<Tensor *> &outputs,
+                              std::vector<kernel::LiteKernel *> &kernels, Allocator *allocator,
+                              const KernelCallBack &before, const KernelCallBack &after, bool is_tune) {
+  int ret{RET_OK};
+  auto opencl_runtime_ins = ocl_runtime.GetInstance();
+  auto profiling_tmp = opencl_runtime_ins->isProfiling();
+  if (is_tune) {
+    opencl_runtime_ins->SetProfiling(true);
+  }
   for (auto *kernel : kernels) {
-    MS_ASSERT(nullptr != kernel);
-    session::CallBackParam callbackParam;
+    MS_ASSERT(kernel);
+    CallBackParam callbackParam;
     callbackParam.node_name = kernel->name();
 
     if (before != nullptr) {
@@ -37,40 +46,67 @@ int OpenCLExecutor::Run(std::vector<Tensor *> &inputs, std::vector<Tensor *> &ou
         MS_LOG(ERROR) << "run kernel before_callback failed, name: " << kernel->name();
       }
     }
-    kernel::OpenCLKernel *op_kernel = reinterpret_cast<kernel::OpenCLKernel *>(kernel);
-    auto &cur_outputs = kernel->out_tensors();
+    auto *op_kernel = reinterpret_cast<kernel::OpenCLKernel *>(kernel);
+    auto cur_outputs = kernel->out_tensors();
     for (auto i = 0; i < cur_outputs.size(); ++i) {
       auto *output = cur_outputs.at(i);
-      MS_ASSERT(nullptr != output);
-      if (op_kernel->GetMemType() == kernel::OpenCLMemType::IMG) {
+      MS_ASSERT(output);
+      if (op_kernel->GetMemType() == lite::opencl::MemType::IMG) {
         std::vector<size_t> img_size;
-        op_kernel->GetImageSize(i, &img_size);
+        ret = op_kernel->GetImageSize(i, &img_size);
+        if (ret != RET_OK) {
+          MS_LOG(ERROR) << "GetImageSize failed";
+          return ret;
+        }
         auto data_ptr = allocator_->Malloc(output->Size(), img_size);
-        output->SetData(data_ptr);
+        if (data_ptr == nullptr) {
+          MS_LOG(ERROR) << "Malloc data failed";
+          return RET_ERROR;
+        }
+        output->set_data(data_ptr);
       } else {
-        output->MallocData(allocator_);
+        ret = output->MallocData(allocator_);
+        if (ret != RET_OK) {
+          MS_LOG(ERROR) << "MallocData failed";
+          return ret;
+        }
+      }
+      output->set_allocator(allocator_);
+    }
+    if (is_tune) {
+      ret = op_kernel->Tune();
+      if (ret != RET_OK) {
+        MS_LOG(ERROR) << "tuning kernel failed, name: " << kernel->name();
+        return ret;
+      }
+      ret = kernel->PostProcess();
+      if (ret != RET_OK) {
+        MS_LOG(ERROR) << "PostProcess kernel failed, name: " << kernel->name();
+        return ret;
+      }
+    } else {
+      ret = kernel->Run();
+      if (ret != RET_OK) {
+        MS_LOG(ERROR) << "run kernel failed, name: " << kernel->name();
+        return ret;
+      }
+      ret = kernel->PostProcess();
+      if (ret != RET_OK) {
+        MS_LOG(ERROR) << "PostProcess kernel failed, name: " << kernel->name();
+        return ret;
+      }
+      if (profiling_tmp) {
+        MS_LOG(INFO) << "OpenCl kernel " << kernel->name() << "(" << kernel->type_str()
+                     << ") execute time is: " << op_kernel->GetProfilingTimeMs() << "ms";
       }
     }
-
-    auto ret = kernel->Run();
-    if (0 != ret) {
-      MS_LOG(ERROR) << "run kernel failed, name: " << kernel->name();
-      return ret;
-    }
-
     if (after != nullptr) {
       if (!after(TensorVectorCast(kernel->in_tensors()), TensorVectorCast(kernel->out_tensors()), callbackParam)) {
         MS_LOG(ERROR) << "run kernel after_callback failed, name: " << kernel->name();
       }
     }
-    for (auto input_kernel : kernel->in_kernels()) {
-      MS_ASSERT(nullptr != input_kernel);
-      ret = input_kernel->DecOutTensorRefCount();
-      if (0 != ret) {
-        MS_LOG(WARNING) << "DecOutTensorRefCount for kernel" << kernel->name() << " failed";
-      }
-    }
   }
-  return RET_OK;
+  opencl_runtime_ins->SetProfiling(profiling_tmp);
+  return ret;
 }
 }  // namespace mindspore::lite::opencl

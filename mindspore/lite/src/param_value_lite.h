@@ -27,7 +27,7 @@ namespace mindspore {
 class ParamValueLite : public Value {
  public:
   ParamValueLite() : tensor_addr_(nullptr), tensor_size_(0) {}
-  virtual ~ParamValueLite() {
+  ~ParamValueLite() override {
     if (tensor_addr_ != nullptr) {
       auto tensor_mem = reinterpret_cast<char *>(tensor_addr_);
       delete[](tensor_mem);
@@ -35,17 +35,22 @@ class ParamValueLite : public Value {
       tensor_size_ = 0;
     }
   }
-
+  MS_DECLARE_PARENT(ParamValueLite, Value)
   size_t tensor_size() const { return tensor_size_; }
-  void set_tensor_size(size_t size) { tensor_size_ = size; }
+  void set_tensor_size(const size_t size) { tensor_size_ = size; }
   void *tensor_addr() const { return tensor_addr_; }
   void set_tensor_addr(void *addr) { tensor_addr_ = addr; }
 
   std::vector<int> tensor_shape() const { return tensor_shape_; }
-  void set_tensor_shape(std::vector<int> tensor_shape) { tensor_shape_ = std::move(tensor_shape); }
+  void set_tensor_shape(const std::vector<int> &tensor_shape) { tensor_shape_ = tensor_shape; }
 
   TypeId tensor_type() const { return type_id_; }
-  void set_tensor_type(TypeId type_id) { type_id_ = type_id; }
+  void set_tensor_type(const TypeId type_id) { type_id_ = type_id; }
+
+  void SetTensorData(void *addr, const size_t size) {
+    this->tensor_addr_ = addr;
+    this->tensor_size_ = size;
+  }
 
   int tensor_shape_size() const {
     int size = 1;

@@ -141,15 +141,15 @@ class _ConvVariational(_Conv):
         return outputs
 
     def extend_repr(self):
-        str_info = 'in_channels={}, out_channels={}, kernel_size={}, stride={},  pad_mode={}, ' \
-                    'padding={}, dilation={}, group={}, weight_mean={}, weight_std={}, has_bias={}'\
+        s = 'in_channels={}, out_channels={}, kernel_size={}, stride={},  pad_mode={}, ' \
+            'padding={}, dilation={}, group={}, weight_mean={}, weight_std={}, has_bias={}'\
             .format(self.in_channels, self.out_channels, self.kernel_size, self.stride, self.pad_mode, self.padding,
                     self.dilation, self.group, self.weight_posterior.mean, self.weight_posterior.untransformed_std,
                     self.has_bias)
         if self.has_bias:
-            str_info = str_info + ', bias_mean={}, bias_std={}'\
+            s += ', bias_mean={}, bias_std={}'\
                 .format(self.bias_posterior.mean, self.bias_posterior.untransformed_std)
-        return str_info
+        return s
 
     def _apply_variational_bias(self, inputs):
         bias_posterior_tensor = self.bias_posterior("sample")
@@ -157,18 +157,16 @@ class _ConvVariational(_Conv):
 
     def compute_kl_loss(self):
         """Compute kl loss"""
-        weight_post_mean = self.weight_posterior("mean")
-        weight_post_sd = self.weight_posterior("sd")
+        weight_args_list = self.weight_posterior("get_dist_args")
+        weight_type = self.weight_posterior("get_dist_type")
 
-        kl = self.weight_prior("kl_loss", "Normal",
-                               weight_post_mean, weight_post_sd)
+        kl = self.weight_prior("kl_loss", weight_type, *weight_args_list)
         kl_loss = self.sum(kl)
         if self.has_bias:
-            bias_post_mean = self.bias_posterior("mean")
-            bias_post_sd = self.bias_posterior("sd")
+            bias_args_list = self.bias_posterior("get_dist_args")
+            bias_type = self.bias_posterior("get_dist_type")
 
-            kl = self.bias_prior("kl_loss", "Normal",
-                                 bias_post_mean, bias_post_sd)
+            kl = self.bias_prior("kl_loss", bias_type, *bias_args_list)
             kl = self.sum(kl)
             kl_loss += kl
         return kl_loss
@@ -249,10 +247,14 @@ class ConvReparam(_ConvVariational):
     Outputs:
         Tensor, with the shape being :math:`(N, C_{out}, H_{out}, W_{out})`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> net = ConvReparam(120, 240, 4, has_bias=False)
         >>> input = Tensor(np.ones([1, 120, 1024, 640]), mindspore.float32)
-        >>> net(input).shape
+        >>> output = net(input).shape
+        >>> print(output)
         (1, 240, 1024, 640)
     """
 

@@ -90,12 +90,27 @@ class VirtualDatasetEliminater : public AnfVisitor {
 
     std::vector<AnfNodePtr> args;
     (void)std::copy(inputs.begin() + 1, inputs.end(), std::back_inserter(args));
-    if (args.size() == 1) {
-      return args.front();
-    }
-
     (void)args.insert(args.begin(), NewValueNode(prim::kPrimMakeTuple));
 
+    return node->func_graph()->NewCNode(args);
+  }
+
+  void Visit(const AnfNodePtr &) override {}
+};
+
+// {prim::kPrimReceive, X} -> prim::kPrimReceive
+class ReceiveEliminater : public AnfVisitor {
+ public:
+  AnfNodePtr operator()(const OptimizerPtr &, const AnfNodePtr &node) override {
+    if (!IsPrimitiveCNode(node, prim::kPrimReceive) || node->func_graph() == nullptr) {
+      return nullptr;
+    }
+    auto cnode = node->cast<CNodePtr>();
+    MS_EXCEPTION_IF_NULL(cnode);
+    if (cnode->inputs().size() == 1) {
+      return nullptr;
+    }
+    std::vector<AnfNodePtr> args = {cnode->input(0)};
     return node->func_graph()->NewCNode(args);
   }
 
@@ -172,16 +187,23 @@ class ZeroLikeFillZero : public AnfVisitor {
       auto fg = node->func_graph();
       auto dtype = fg->NewCNode({NewValueNode(PrimDType_), y_});
       auto shape = fg->NewCNode({NewValueNode(PrimShape_), y_});
-      return fg->NewCNode({NewValueNode(PrimFill_), dtype, shape, NewValueNode(MakeValue(0))});
+      return fg->NewCNode({NewValueNode(PrimFill_), dtype, shape, NewValueNode(MakeValue(static_cast<int64_t>(0)))});
     }
 
     abstract::AbstractTensorPtr tensor_abstract = y_->abstract()->cast<abstract::AbstractTensorPtr>();
 
     TypePtr tensor_type_ptr = tensor_abstract->element()->BuildType();
-    std::vector<int> tensor_shape = tensor_abstract->shape()->shape();
+    std::vector<int64_t> tensor_shape = tensor_abstract->shape()->shape();
+
+    // if shape is unknown, don't optimize this operator away
+    for (const int64_t &dimension : tensor_shape) {
+      if (dimension < 0) {
+        return node;
+      }
+    }
 
     tensor::TensorPtr new_tensor_ptr = std::make_shared<tensor::Tensor>(tensor_type_ptr->type_id(), tensor_shape);
-    size_t mem_size = GetTypeByte(tensor_type_ptr) * IntToSize(new_tensor_ptr->ElementsNum());
+    size_t mem_size = GetTypeByte(tensor_type_ptr) * LongToSize(new_tensor_ptr->ElementsNum());
     char *data = reinterpret_cast<char *>(new_tensor_ptr->data_c());
     (void)memset_s(data, mem_size, 0, mem_size);
 
@@ -237,7 +259,7 @@ class PynativeEliminater : public OptimizerCaller {
 
   ValuePtr FillGetItem(const ValuePtr &value, const ValuePtr &idx) {
     MS_LOG(DEBUG) << "Start FillGetItem" << value->ToString() << idx->ToString();
-    if (!idx->isa<Int32Imm>()) {
+    if (!idx->isa<Int64Imm>()) {
       MS_LOG(EXCEPTION) << "Getitem idx must int:" << idx->ToString();
     }
 
@@ -246,7 +268,7 @@ class PynativeEliminater : public OptimizerCaller {
     }
 
     auto value_tuple = value->cast<ValueTuplePtr>();
-    int idx_t = idx->cast<Int32ImmPtr>()->value();
+    int idx_t = idx->cast<Int64ImmPtr>()->value();
     MS_LOG(DEBUG) << "Fill getitem" << idx_t << (*value_tuple)[idx_t]->ToString();
     return (*value_tuple)[idx_t];
   }
@@ -254,8 +276,8 @@ class PynativeEliminater : public OptimizerCaller {
   ValuePtr FillZero(const ValuePtr &value) {
     MS_LOG(DEBUG) << "Start FillZero";
     ValuePtr out = nullptr;
-    if (value->isa<Int32Imm>()) {
-      return MakeValue(value->cast<Int32ImmPtr>()->value());
+    if (value->isa<Int64Imm>()) {
+      return MakeValue(value->cast<Int64ImmPtr>()->value());
     }
 
     if (value->isa<tensor::Tensor>()) {
@@ -286,11 +308,14 @@ class PynativeEliminater : public OptimizerCaller {
  public:
   AnfNodePtr operator()(const OptimizerPtr &, const AnfNodePtr &node) override {
     MS_LOG(DEBUG) << "Start replace node " << node->DebugString(4);
-    PatternNode<AnfNodePtr> symbol_str_vnode, c_vnode, zeros_like_vnode, getitem_vnode, arg, arg1;
+    PatternNode<AnfNodePtr> symbol_str_vnode;
+    PatternNode<AnfNodePtr> c_vnode;
+    PatternNode<AnfNodePtr> zeros_like_vnode;
+    PatternNode<AnfNodePtr> arg;
     auto resolve = PPrimitive(prim::kPrimResolve, symbol_str_vnode, c_vnode);
     auto getattr = PPrimitive(prim::kPrimGetAttr, resolve, zeros_like_vnode);
     auto pattern = PCNode(getattr, arg);
-
+    // {{prim:getattr, {prim::resolve, SymbolStr, C}, zeros_like}, Xy} ->Tensor(0, shape(Xy))
     if ((pattern).TryCapture(node) &&
         (CheckNameSpaceVNode(symbol_str_vnode.GetNode(node), "SymbolStr") &&
          CheckSymbolVNode(c_vnode.GetNode(node), "C") && CheckStrVNode(zeros_like_vnode.GetNode(node), "zeros_like"))) {
@@ -305,8 +330,8 @@ class PynativeEliminater : public OptimizerCaller {
         }
       }
     }
-
     MS_LOG(DEBUG) << "End replace 1 " << node->DebugString(4);
+    // {prim:getattr, {prim::resolve, SymbolStr, zeros_like}, Xy} ->Tensor(0, shape(Xy))
     auto resolve1 = PPrimitive(prim::kPrimResolve, symbol_str_vnode, zeros_like_vnode);
     auto pattern1 = PCNode(resolve1, arg);
 
@@ -323,8 +348,34 @@ class PynativeEliminater : public OptimizerCaller {
         }
       }
     }
-
+    // {prim:getattr, {prim::resolve, SymbolStr, binop_grad_common}, x, y, out, dout} -> {shape(x), shape(y), out, dout}
+    PatternNode<AnfNodePtr> binop_grad_common;
+    PatternNode<AnfNodePtr> getitem_vnode;
+    std::vector<PatternNode<AnfNodePtr>> args(4);
+    auto resolve_binop = PPrimitive(prim::kPrimResolve, symbol_str_vnode, binop_grad_common);
+    auto pattern_binop = PCNode(resolve_binop, args[0], args[1], args[2], args[3]);
+    if ((pattern_binop).TryCapture(node) && (CheckNameSpaceVNode(symbol_str_vnode.GetNode(node), "SymbolStr") &&
+                                             CheckSymbolVNode(binop_grad_common.GetNode(node), "binop_grad_common"))) {
+      for (size_t i = 0; i < 2; i++) {
+        auto rep = (args[i]).GetNode(node);
+        if (rep != nullptr && rep->isa<ValueNode>()) {
+          auto value_node = rep->cast<ValueNodePtr>();
+          MS_EXCEPTION_IF_NULL(value_node);
+          auto &value = value_node->value();
+          MS_EXCEPTION_IF_NULL(value);
+          // when the use count of value node equals to one, it only used in binop_grad_common function
+          if (value->isa<tensor::Tensor>() && value_node->used_graph_count() == 1) {
+            auto tensor = value->cast<tensor::TensorPtr>();
+            MS_EXCEPTION_IF_NULL(tensor);
+            auto new_tensor = std::make_shared<tensor::Tensor>(tensor->Dtype()->type_id(), tensor->shape());
+            value_node->set_value(new_tensor);
+          }
+        }
+      }
+      return nullptr;
+    }
     // resolve(CommonOPS, getitem)((tensors), 3)
+    PatternNode<AnfNodePtr> arg1;
     auto resolve2 = PPrimitive(prim::kPrimResolve, symbol_str_vnode, getitem_vnode);
     auto pattern2 = PCNode(resolve2, arg, arg1);
     if ((pattern2).TryCapture(node) && (CheckNameSpaceVNode(symbol_str_vnode.GetNode(node), "CommonOPS") &&
@@ -375,7 +426,7 @@ class AllReduceConstElim : public OptimizerCaller {
       auto group = primitive->GetAttr("group")->ToString();
       // For sum operation, multiply constant tensor by number of devices
       if (reduce_op->ToString() == "sum") {
-        unsigned int num_of_devices;
+        uint32_t num_of_devices;
         // Get number of devices
         if (!CommManager::GetInstance().GetRankSize(group, &num_of_devices)) {
           MS_LOG(EXCEPTION) << "Failed to get num of devices for group [" + group + "]";

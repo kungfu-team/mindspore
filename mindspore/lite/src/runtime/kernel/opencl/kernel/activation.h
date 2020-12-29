@@ -18,37 +18,33 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_OPENCL_KERNEL_ACTIVATION_H_
 
 #include <vector>
+#include <string>
 
 #include "src/runtime/kernel/opencl/opencl_kernel.h"
-#include "nnacl/fp32/activation.h"
+#include "nnacl/fp32/activation_fp32.h"
 
 namespace mindspore::kernel {
 
-class ActivationOpenClKernel : public OpenCLKernel {
+class ActivationOpenCLKernel : public OpenCLKernel {
  public:
-  explicit ActivationOpenClKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                                  const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs) {
-    type_ = (reinterpret_cast<ActivationParameter *>(parameter))->type_;
-    alpha_ = (reinterpret_cast<ActivationParameter *>(parameter))->alpha_;
-  }
-  ~ActivationOpenClKernel() override{};
+  ActivationOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
+                         const std::vector<lite::Tensor *> &outputs)
+      : OpenCLKernel(parameter, inputs, outputs),
+        type_(reinterpret_cast<ActivationParameter *>(parameter)->type_),
+        alpha_(reinterpret_cast<ActivationParameter *>(parameter)->alpha_) {}
+  ~ActivationOpenCLKernel() override = default;
 
-  int Init() override;
   int Run() override;
-  int GetImageSize(size_t idx, std::vector<size_t> *img_size) override;
-  cl_int4 GetImg2dShape();
-  void InitBuffer() {}
+  int Prepare() override;
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
 
  private:
-  cl::Kernel kernel_;
+  static std::string GetActTypeString(int act_type);
   int type_;
   float alpha_;
-  int in_size_;
-  int out_size_;
-  size_t fp_size;
-  bool enable_fp16_{false};
-  std::vector<size_t> nhwc_shape_;
+  GpuTensorInfo outShape = GpuTensorInfo(nullptr);
 };
 
 }  // namespace mindspore::kernel

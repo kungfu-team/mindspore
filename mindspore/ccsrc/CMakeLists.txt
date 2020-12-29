@@ -2,8 +2,20 @@
 include_directories(${CMAKE_SOURCE_DIR}/mindspore/core)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_BINARY_DIR})
-link_directories(${CMAKE_SOURCE_DIR}/build/mindspore/graphengine)
 link_directories(${CMAKE_SOURCE_DIR}/third_party/kungfu/lib)
+
+if (ENABLE_ACL)
+    set(ASCEND_PATH /usr/local/Ascend)
+    include_directories(${ASCEND_PATH}/acllib/include)
+    link_directories(${ASCEND_PATH}/acllib/lib64/)
+    find_library(ascendcl acl_dvpp ${ASCEND_PATH}/acllib/lib64)
+endif ()
+
+if (NOT(CMAKE_SYSTEM_NAME MATCHES "Darwin"))
+    link_directories(${CMAKE_SOURCE_DIR}/build/mindspore/graphengine)
+else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-delete-non-abstract-non-virtual-dtor")
+endif ()
 
 if (CMAKE_SYSTEM_NAME MATCHES "Windows")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-attributes -DHAVE_SNPRINTF")
@@ -101,6 +113,11 @@ message("onnx proto path is :" ${ONNX_PROTO})
 ms_protobuf_generate(ONNX_PROTO_SRCS ONNX_PROTO_HDRS ${ONNX_PROTO})
 list(APPEND MINDSPORE_PROTO_LIST ${ONNX_PROTO_SRCS})
 
+include_directories("${CMAKE_BINARY_DIR}/ps/core")
+file(GLOB_RECURSE COMM_PROTO_IN RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "ps/core/protos/*.proto")
+ms_protobuf_generate(COMM_PROTO_SRCS COMM_PROTO_HDRS ${COMM_PROTO_IN})
+list(APPEND MINDSPORE_PROTO_LIST ${COMM_PROTO_SRCS})
+
 if (ENABLE_DEBUGGER)
     # debugger: compile proto files
     include_directories("${CMAKE_BINARY_DIR}/debug/debugger")
@@ -121,7 +138,8 @@ if (ENABLE_DUMP_PROTO)
         "utils/lineage.proto"
         "utils/checkpoint.proto"
         "utils/print.proto"
-	"utils/node_strategy.proto"
+        "utils/node_strategy.proto"
+        "utils/mind_ir.proto"
     )
     ms_protobuf_generate_py(PY_SRCS PY_HDRS PY_PYS ${PROTO_PY})
 
@@ -152,11 +170,12 @@ endif()
 ## make sub objects
 set(SUB_COMP
         transform/graph_ir
-        transform/onnx
+        transform/express_ir
         backend/optimizer
         backend/kernel_compiler
         backend/session
         runtime/device
+        runtime/hccl_adapter
         frontend/optimizer
         frontend/parallel
         frontend/operator
@@ -170,7 +189,7 @@ foreach (_comp ${SUB_COMP})
     string(REPLACE "/" "_" sub ${_comp})
     if (TARGET _mindspore_${sub}_obj)
         list(APPEND SUB_OBJECTS_SRC $<TARGET_OBJECTS:_mindspore_${sub}_obj>)
-        add_dependencies(_mindspore_${sub}_obj proto_input )
+        add_dependencies(_mindspore_${sub}_obj proto_input)
     endif ()
 endforeach ()
 
@@ -226,24 +245,37 @@ if (ENABLE_D)
         set(ASCEND_DRIVER_BACK_PATH ${ASCEND_PATH}/driver/lib64/driver)
         set(ASCEND_RUNTIME_PATH ${ASCEND_PATH}/fwkacllib/lib64)
         set(ASCEND_OPP_PATH ${ASCEND_PATH}/opp/op_impl/built-in/ai_core/tbe/op_tiling)
+        set(ASCEND_TOOLKIT_RUNTIME_PATH ${ASCEND_PATH}/ascend-toolkit/latest/fwkacllib/lib64)
     endif()
 
     MESSAGE("USE DAV LIB PATH: ${ASCEND_PATH}")
-    find_library(HCCL hccl ${ASCEND_RUNTIME_PATH})
-    find_library(CCE_LIB cce ${ASCEND_RUNTIME_PATH})
-    find_library(RUNTIME_LIB runtime ${ASCEND_RUNTIME_PATH})
-    find_library(TSDCLIENT tsdclient HINTS ${ASCEND_RUNTIME_PATH} ${ASCEND_DRIVER_BACK_PATH})
-    find_library(DATATRANSFER datatransfer HINTS ${ASCEND_RUNTIME_PATH} ${ASCEND_DRIVER_BACK_PATH})
-    find_library(PROFILING msprofiler ${ASCEND_RUNTIME_PATH})
-    find_library(PROFILING_SHARED msprof ${ASCEND_DRIVER_PATH})
+    find_library(HCCL hccl ${ASCEND_RUNTIME_PATH} ${ASCEND_TOOLKIT_RUNTIME_PATH})
+    find_library(CCE_LIB cce ${ASCEND_RUNTIME_PATH} ${ASCEND_TOOLKIT_RUNTIME_PATH})
+    find_library(RUNTIME_LIB runtime ${ASCEND_RUNTIME_PATH} ${ASCEND_TOOLKIT_RUNTIME_PATH})
+    find_library(TSDCLIENT tsdclient HINTS ${ASCEND_RUNTIME_PATH} ${ASCEND_TOOLKIT_RUNTIME_PATH} ${ASCEND_DRIVER_BACK_PATH})
+    find_library(DATATRANSFER datatransfer HINTS ${ASCEND_RUNTIME_PATH} ${ASCEND_TOOLKIT_RUNTIME_PATH} ${ASCEND_DRIVER_BACK_PATH})
+    find_library(PROFILING msprofiler_fwk ${ASCEND_RUNTIME_PATH} ${ASCEND_TOOLKIT_RUNTIME_PATH})
+    find_library(REGISTER register ${ASCEND_RUNTIME_PATH} ${ASCEND_TOOLKIT_RUNTIME_PATH})
     find_library(OPTILING optiling ${ASCEND_OPP_PATH})
-    target_link_libraries(mindspore ge_runtime ${CCE_LIB} ${RUNTIME_LIB} ${TSDCLIENT} ${HCCL} ${DATATRANSFER} ${OPTILING})
-    target_link_libraries(mindspore -Wl,--start-group proto_input ${PROFILING_SHARED} ${PROFILING} mindspore::protobuf -Wl,--end-group)
+    # hccl_adpter
+    find_library(HCCL_ADPTER hcom_graph_adaptor ${ASCEND_RUNTIME_PATH} ${ASCEND_TOOLKIT_RUNTIME_PATH})
+    find_library(HCCL_RA ra ${ASCEND_RUNTIME_PATH} ${ASCEND_TOOLKIT_RUNTIME_PATH})
+    find_library(HCCL_BUILDER hcom_opskernel_builder ${ASCEND_RUNTIME_PATH}/plugin/opskernel ${ASCEND_TOOLKIT_RUNTIME_PATH}/plugin/opskernel)
+
+    add_library(ms_profile SHARED ${CMAKE_CURRENT_SOURCE_DIR}/runtime/device/ascend/profiling/profiling_callback_register.cc)
+    set_target_properties(ms_profile PROPERTIES LINKER_LANGUAGE CXX)
+    target_link_options(ms_profile PRIVATE -Wl,-init,common_log_init)
+    target_link_libraries(ms_profile -Wl,--start-group -Wl,--whole-archive ${PROFILING} -Wl,--no-whole-archive mindspore::protobuf -Wl,--end-group)
+    target_link_libraries(mindspore ge_runtime ${CCE_LIB} ${RUNTIME_LIB} ${TSDCLIENT} ${HCCL} ${DATATRANSFER}
+                          ${HCCL_ADPTER} ${REGISTER} -Wl,--no-as-needed ${OPTILING} ${HCCL_BUILDER} ${HCCL_RA})
+    target_link_libraries(mindspore -Wl,--start-group proto_input mindspore::protobuf -Wl,--end-group)
 elseif (CMAKE_SYSTEM_NAME MATCHES "Windows")
     target_link_libraries(mindspore -Wl,--start-group proto_input mindspore::protobuf mindspore::sentencepiece -Wl,--end-group)
+elseif (CMAKE_SYSTEM_NAME MATCHES "Darwin")
+    target_link_libraries(mindspore -Wl proto_input mindspore::protobuf mindspore::sentencepiece -Wl)
 else ()
     target_link_libraries(mindspore -Wl,--start-group proto_input mindspore::protobuf -Wl,--end-group)
-endif()
+endif ()
 
 # set c_expression building
 set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
@@ -262,29 +294,46 @@ elseif (CMAKE_SYSTEM_NAME MATCHES "Windows")
 else ()
     MESSAGE(FATAL_ERROR "other platform: ${CMAKE_SYSTEM_NAME}")
 endif ()
-set(MINDSPORE_RPATH ${ORIGIN_PATH}/lib)
+
 if (ENABLE_D)
+    set(MINDSPORE_RPATH ${MINDSPORE_RPATH}:/usr/local/Ascend/nnae/latest/fwkacllib/lib64)
     set(MINDSPORE_RPATH ${MINDSPORE_RPATH}:/usr/local/Ascend/ascend-toolkit/latest/fwkacllib/lib64)
     set(MINDSPORE_RPATH ${MINDSPORE_RPATH}:/usr/local/Ascend/fwkacllib/lib64)
+    set(MINDSPORE_RPATH ${MINDSPORE_RPATH}:/usr/local/Ascend/nnae/latest/fwkacllib/lib64/plugin/opskernel)
+    set(MINDSPORE_RPATH ${MINDSPORE_RPATH}:/usr/local/Ascend/ascend-toolkit/latest/fwkacllib/lib64/plugin/opskernel)
+    set(MINDSPORE_RPATH ${MINDSPORE_RPATH}:/usr/local/Ascend/fwkacllib/lib64/plugin/opskernel)
     set(MINDSPORE_RPATH ${MINDSPORE_RPATH}:/usr/local/Ascend/add-ons)
     set(MINDSPORE_RPATH ${MINDSPORE_RPATH}:/usr/local/Ascend/opp/op_impl/built-in/ai_core/tbe/op_tiling)
+    set(MINDSPORE_RPATH ${MINDSPORE_RPATH}:/usr/local/Ascend/nnae/latest/opp/op_impl/built-in/ai_core/tbe/op_tiling)
+    set(MINDSPORE_RPATH ${MINDSPORE_RPATH}:/usr/local/Ascend/ascend-toolkit/latest/opp/op_impl/built-in/ai_core/tbe/op_tiling)
 elseif (ENABLE_GPU)
     set(MINDSPORE_RPATH ${MINDSPORE_RPATH}:/usr/local/cuda/lib64)
 endif ()
-
+set(MINDSPORE_RPATH ${ORIGIN_PATH}/lib:${MINDSPORE_RPATH})
 set_target_properties(_c_expression PROPERTIES INSTALL_RPATH ${MINDSPORE_RPATH})
 
 if (CMAKE_SYSTEM_NAME MATCHES "Windows")
     target_link_libraries(mindspore mindspore::pybind11_module)
     target_link_libraries(mindspore mindspore_gvar)
     target_link_libraries(_c_expression PRIVATE -Wl,--whole-archive mindspore -Wl,--no-whole-archive)
+elseif (CMAKE_SYSTEM_NAME MATCHES "Darwin")
+    target_link_libraries(mindspore mindspore::pybind11_module)
+    target_link_libraries(mindspore mindspore_gvar)
+    target_link_libraries(_c_expression PRIVATE -Wl,-force_load mindspore -Wl,-noall_load)
 else ()
     if (ENABLE_CPU AND (ENABLE_D OR ENABLE_GPU))
-        target_link_libraries(mindspore mindspore::pslite mindspore::protobuf ${zeromq_DIRPATH}/zmq_install/lib/libzmq.a)
+        target_link_libraries(mindspore mindspore::pslite proto_input mindspore::protobuf mindspore::event mindspore::event_pthreads ${zeromq_DIRPATH}/zmq_install/lib/libzmq.a)
+        target_link_libraries(mindspore -Wl,--no-as-needed mindspore::event_core ps_cache)
         if (${ENABLE_IBVERBS} STREQUAL "ON")
             target_link_libraries(mindspore ibverbs rdmacm)
         endif()
     endif()
+    if (ENABLE_D)
+        target_link_libraries(_c_expression PRIVATE ms_profile)
+    endif ()
+    if (ENABLE_ACL)
+        target_link_libraries(_c_expression PRIVATE graph)
+    endif ()
     target_link_libraries(_c_expression PRIVATE -Wl,--whole-archive mindspore proto_input -Wl,--no-whole-archive)
     target_link_libraries(_c_expression PRIVATE mindspore::pybind11_module)
     target_link_libraries(_c_expression PRIVATE mindspore_gvar)
@@ -304,7 +353,13 @@ if (ENABLE_GPU)
                           ${CUDA_PATH}/lib64/libcusolver.so)
     if (ENABLE_MPI)
         set_target_properties(_ms_mpi PROPERTIES INSTALL_RPATH ${MINDSPORE_RPATH})
-    endif()
+    endif ()
+endif ()
+
+if (CMAKE_SYSTEM_NAME MATCHES "Darwin")
+    set(CMAKE_MACOSX_RPATH 1)
+    set(CMAKE_INSTALL_RPATH "@loader_path/lib;@loader_path")
+    set_target_properties(_c_expression PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}")
 endif ()
 
 if (ENABLE_CPU)
@@ -316,35 +371,9 @@ if (ENABLE_MINDDATA)
     add_subdirectory(minddata/dataset)
 endif ()
 
-# build inference
-set(LOAD_ONNX_SRC
-        ${CMAKE_CURRENT_SOURCE_DIR}/utils/load_onnx/anf_converter.cc
-        ${CMAKE_CURRENT_SOURCE_DIR}/utils/load_onnx/anf_model_parser.cc
-        )
-add_library(inference SHARED
-        ${CMAKE_CURRENT_SOURCE_DIR}/backend/session/infer_session.cc
-        ${LOAD_ONNX_SRC}
-        )
-
-set_target_properties(inference PROPERTIES INSTALL_RPATH ${MINDSPORE_RPATH})
-target_link_libraries(inference PRIVATE ${PYTHON_LIBRARIES} ${SECUREC_LIBRARY}
-        -Wl,--whole-archive mindspore proto_input -Wl,--no-whole-archive mindspore_gvar)
-
 if (ENABLE_D)
-    target_link_libraries(_c_expression PRIVATE ${ASCEND_PATH}/fwkacllib/lib64/libadump_server.a)
-    target_link_libraries(inference PRIVATE ${ASCEND_PATH}/fwkacllib/lib64/libadump_server.a)
+    find_library(adump_server libadump_server.a ${ASCEND_RUNTIME_PATH} ${ASCEND_TOOLKIT_RUNTIME_PATH})
+    target_link_libraries(_c_expression PRIVATE ${adump_server})
 endif()
 
-if (ENABLE_CPU)
-    target_link_libraries(inference PRIVATE mindspore::dnnl mindspore::mkldnn)
-endif ()
-
-if (USE_GLOG)
-    target_link_libraries(inference PRIVATE mindspore::glog)
-endif()
-
-if (CMAKE_SYSTEM_NAME MATCHES "Linux")
-    target_link_options(inference PRIVATE -Wl,-init,common_log_init)
-elseif (CMAKE_SYSTEM_NAME MATCHES "Darwin")
-    set_target_properties(inference PROPERTIES MACOSX_RPATH ON)
-endif ()
+add_subdirectory(cxx_api)

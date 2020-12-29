@@ -15,7 +15,7 @@
 # ============================================================================
 
 echo "=============================================================================================================="
-echo "Please run the scipt as: "
+echo "Please run the script as: "
 echo "bash run_eval_cpu.sh ACLIMDB_DIR GLOVE_DIR CKPT_FILE"
 echo "for example: bash run_eval_cpu.sh ./aclimdb ./glove_dir lstm-20_390.ckpt"
 echo "=============================================================================================================="

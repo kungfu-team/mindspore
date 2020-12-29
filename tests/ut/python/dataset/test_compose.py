@@ -63,7 +63,7 @@ def test_compose():
     # Test exceptions.
     with pytest.raises(TypeError) as error_info:
         c_transforms.Compose([1, c_transforms.TypeCast(mstype.int32)])
-    assert "op_list[0] is not a c_transform op (TensorOp) nor a callable pyfunc." in str(error_info.value)
+    assert "op_list[0] is neither a c_transform op (TensorOp) nor a callable pyfunc." in str(error_info.value)
 
     # Test empty op list
     with pytest.raises(ValueError) as error_info:
@@ -235,15 +235,15 @@ def test_py_transforms_with_c_vision():
         return res
 
     with pytest.raises(ValueError) as error_info:
-        test_config(py_transforms.RandomApply([c_vision.Resize(200)]))
+        test_config(py_transforms.RandomApply([c_vision.RandomResizedCrop(200)]))
     assert "transforms[0] is not callable." in str(error_info.value)
 
     with pytest.raises(ValueError) as error_info:
-        test_config(py_transforms.RandomChoice([c_vision.Resize(200)]))
+        test_config(py_transforms.RandomChoice([c_vision.RandomResizedCrop(200)]))
     assert "transforms[0] is not callable." in str(error_info.value)
 
     with pytest.raises(ValueError) as error_info:
-        test_config(py_transforms.RandomOrder([np.array, c_vision.Resize(200)]))
+        test_config(py_transforms.RandomOrder([np.array, c_vision.RandomResizedCrop(200)]))
     assert "transforms[1] is not callable." in str(error_info.value)
 
     with pytest.raises(RuntimeError) as error_info:

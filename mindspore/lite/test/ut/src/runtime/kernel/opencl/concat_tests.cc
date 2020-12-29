@@ -13,525 +13,319 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <iostream>
-#include <memory>
-#include "src/common/log_adapter.h"
-#include "common/common_test.h"
-#include "mindspore/lite/src/runtime/opencl/opencl_runtime.h"
-#include "mindspore/lite/src/common/file_utils.h"
-#include "mindspore/lite/src/runtime/kernel/opencl/subgraph_opencl_kernel.h"
-#include "mindspore/lite/src/runtime/kernel/opencl/kernel/concat.h"
+#include "ut/src/runtime/kernel/opencl/common.h"
+#include "nnacl/concat_parameter.h"
 
-namespace mindspore {
-class TestConcatOpenCLfp32 : public mindspore::CommonTest {
- public:
-  TestConcatOpenCLfp32() {}
-};
-class TestConcatOpenCLfp16 : public mindspore::CommonTest {
- public:
-  TestConcatOpenCLfp16() {}
-};
+namespace mindspore::lite::opencl::test {
 
-class TestConcatOpenCLCI : public mindspore::CommonTest {
- public:
-  TestConcatOpenCLCI() {}
-};
+class TestOpenCL_Concat : public CommonTest {};
 
-template <typename T>
-void CompareOutputData1(T *output_data, T *correct_data, int size, float err_bound) {
-  for (size_t i = 0; i < size; i++) {
-    T abs = fabs(output_data[i] - correct_data[i]);
-    ASSERT_LE(abs, err_bound);
-  }
+namespace {
+// PrimitiveType_Concat: src/ops/populate/concat_populate.cc
+OpParameter *CreateParameter(int axis) {
+  auto *param = test::CreateParameter<ConcatParameter>(schema::PrimitiveType_Concat);
+  param->axis_ = axis;
+  return reinterpret_cast<OpParameter *>(param);
 }
+}  // namespace
 
-TEST_F(TestConcatOpenCLCI, ConcatFp32_2inputforCI) {
-  MS_LOG(INFO) << " begin test ";
-  auto ocl_runtime = lite::opencl::OpenCLRuntimeWrapper().GetInstance();
-  ocl_runtime->Init();
-  auto allocator = ocl_runtime->GetAllocator();
-
-  MS_LOG(INFO) << " init tensors ";
-  constexpr int INPUT_NUM = 2;
-  std::array<std::vector<int>, INPUT_NUM> input_shapes = {std::vector<int>{1, 1, 1, 8}, std::vector<int>{1, 1, 1, 8}};
+TEST_F(TestOpenCL_Concat, input2_axis0) {
+  std::vector<int> input0_shape = {1, 1, 1, 8};
+  std::vector<int> input1_shape = {1, 1, 1, 8};
   std::vector<int> output_shape = {2, 1, 1, 8};
-  auto data_type = kNumberTypeFloat32;
-  auto tensor_type = lite::TensorCategory(schema::NodeType_ValueNode);
-  float input_data1[] = {0.75f, 0.06f, 0.74f, 0.30f, 0.9f, 0.59f, 0.03f, 0.37f};
-  float input_data2[] = {0.5f, 0.6f, 0.74f, 0.23f, 0.46f, 0.69f, 0.13f, 0.47f};
-  float correctOutput[] = {0.75f, 0.06f, 0.74f, 0.30f, 0.9f,  0.59f, 0.03f, 0.37f,
-                           0.5f,  0.6f,  0.74f, 0.23f, 0.46f, 0.69f, 0.13f, 0.47f};
-  auto *output_tensor = new (std::nothrow) lite::Tensor(data_type, output_shape, schema::Format_NHWC, tensor_type);
-  if (output_tensor == nullptr) {
-    MS_LOG(INFO) << " new output_tensor failed ";
-    return;
+  int axis = 0;
+  float input0_data[] = {0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.03, 0.37};
+  float input1_data[] = {0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.47};
+  float output_data[] = {0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.03, 0.37, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.47};
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(axis);
+    TestMain({{input0_shape, input0_data, VAR}, {input1_shape, input1_data, VAR}}, {output_shape, output_data}, param,
+             fp16_enable, fp16_enable ? 1e-3 : 1e-9);
   }
-  std::vector<lite::Tensor *> inputs;
-  std::vector<lite::Tensor *> outputs{output_tensor};
-  for (auto &shape : input_shapes) {
-    auto input_temp = new (std::nothrow) lite::Tensor(data_type, shape, schema::Format_NHWC, tensor_type);
-    inputs.push_back(input_temp);
-    if (input_temp == nullptr) {
-      MS_LOG(INFO) << " new input_tensor failed ";
-      return;
-    }
-  }
-
-  MS_LOG(INFO) << " initialize tensors ";
-  auto param = reinterpret_cast<ConcatParameter *>(malloc(sizeof(ConcatParameter)));
-  if (param == nullptr) {
-    MS_LOG(INFO) << " new ConcatParameter failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    for (auto tensor : outputs) {
-      delete tensor;
-    }
-    return;
-  }
-  param->axis_ = 0;
-  auto *concat_kernel =
-    new (std::nothrow) kernel::ConcatOpenCLKernel(reinterpret_cast<OpParameter *>(param), inputs, outputs);
-  if (concat_kernel == nullptr) {
-    MS_LOG(INFO) << " new kernel::ConcatOpenCLKernel failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    for (auto tensor : outputs) {
-      delete tensor;
-    }
-    delete param;
-    return;
-  }
-  concat_kernel->SetFormatType(schema::Format_NC4HW4);
-  concat_kernel->Init();
-  // to do allocate memory for inputs
-  for (auto &input_tensor : inputs) {
-    input_tensor->MallocData(allocator);
-  }
-
-  MS_LOG(INFO) << " initialize sub_graph ";
-  std::vector<kernel::LiteKernel *> kernels{concat_kernel};
-  auto *sub_graph = new (std::nothrow) kernel::SubGraphOpenCLKernel(inputs, outputs, kernels, kernels, kernels);
-  if (sub_graph == nullptr) {
-    MS_LOG(INFO) << " new kernel::SubGraphOpenCLKernel failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    for (auto tensor : outputs) {
-      delete tensor;
-    }
-    delete param;
-    delete concat_kernel;
-    return;
-  }
-  sub_graph->Init();
-  MS_LOG(INFO) << " initialize input data ";
-  memcpy(inputs[0]->data_c(), input_data1, sizeof(input_data1));
-  memcpy(inputs[1]->data_c(), input_data2, sizeof(input_data2));
-
-  std::cout << "==================output data================" << std::endl;
-  sub_graph->Run();
-  auto *output_data_gpu = reinterpret_cast<float *>(output_tensor->data_c());
-  CompareOutputData1(output_data_gpu, correctOutput, output_tensor->ElementsNum(), 0.00001);
-  for (auto tensor : inputs) {
-    tensor->SetData(nullptr);
-    delete tensor;
-  }
-  for (auto tensor : outputs) {
-    tensor->SetData(nullptr);
-    delete tensor;
-  }
-  delete sub_graph;
 }
 
-TEST_F(TestConcatOpenCLfp16, ConcatFp16_4input_dim4_axis1) {
-  MS_LOG(INFO) << " begin test ";
-  auto ocl_runtime = lite::opencl::OpenCLRuntimeWrapper().GetInstance();
-  ocl_runtime->SetFp16Enable(true);
-  ocl_runtime->Init();
-  auto allocator = ocl_runtime->GetAllocator();
-
-  // get the input from .bin
-  size_t input1_size, input2_size, input3_size, input4_size, output_size;
-  std::string input1Ppath = "./test_data/concatfp16_input1.bin";
-  std::string input2Ppath = "./test_data/concatfp16_input2.bin";
-  std::string input3Ppath = "./test_data/concatfp16_input3.bin";
-  std::string input4Ppath = "./test_data/concatfp16_input4.bin";
-  std::string correctOutputPath = "./test_data/concatfp16_output.bin";
-  auto input_data1 = reinterpret_cast<float16_t *>(mindspore::lite::ReadFile(input1Ppath.c_str(), &input1_size));
-  auto input_data2 = reinterpret_cast<float16_t *>(mindspore::lite::ReadFile(input2Ppath.c_str(), &input2_size));
-  auto input_data3 = reinterpret_cast<float16_t *>(mindspore::lite::ReadFile(input3Ppath.c_str(), &input3_size));
-  auto input_data4 = reinterpret_cast<float16_t *>(mindspore::lite::ReadFile(input4Ppath.c_str(), &input4_size));
-  auto correctOutput =
-    reinterpret_cast<float16_t *>(mindspore::lite::ReadFile(correctOutputPath.c_str(), &output_size));
-
-  MS_LOG(INFO) << " init tensors ";
-  constexpr int INPUT_NUM = 4;
-  std::array<std::vector<int>, INPUT_NUM> input_shapes = {
-    std::vector<int>{1, 19, 19, 96}, std::vector<int>{1, 19, 19, 96}, std::vector<int>{1, 19, 19, 96},
-    std::vector<int>{1, 19, 19, 96}};
-  std::vector<int> output_shape = {1, 76, 19, 96};
-  auto data_type = kNumberTypeFloat16;
-  auto tensor_type = lite::TensorCategory(schema::NodeType_ValueNode);
-  std::vector<lite::Tensor *> inputs;
-  for (auto &shape : input_shapes) {
-    auto input_temp = new (std::nothrow) lite::Tensor(data_type, shape, schema::Format_NHWC, tensor_type);
-    inputs.push_back(input_temp);
-    if (input_temp == nullptr) {
-      MS_LOG(INFO) << " new input_tensor failed ";
-      return;
-    }
+TEST_F(TestOpenCL_Concat, input2_axis1_Align) {
+  std::vector<int> input0_shape = {2, 2, 2, 8};
+  std::vector<int> input1_shape = {2, 2, 2, 8};
+  std::vector<int> output_shape = {2, 4, 2, 8};
+  int axis = 1;
+  float input0_data[] = {0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39};
+  float input1_data[] = {0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41};
+  float output_data[] = {
+    0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74,
+    0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69,
+    0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,
+    0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30,
+    0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25,
+    0.39, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,
+    0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41};
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(axis);
+    TestMain({{input0_shape, input0_data, VAR}, {input1_shape, input1_data, VAR}}, {output_shape, output_data}, param,
+             fp16_enable, fp16_enable ? 1e-3 : 1e-9);
   }
-  auto *output_tensor = new (std::nothrow) lite::Tensor(data_type, output_shape, schema::Format_NHWC, tensor_type);
-  if (output_tensor == nullptr) {
-    MS_LOG(INFO) << " new output_tensor failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    return;
-  }
-  std::vector<lite::Tensor *> outputs{output_tensor};
-  MS_LOG(INFO) << " input_shapes size =: " << input_shapes.size();
-
-  MS_LOG(INFO) << " initialize tensors ";
-  auto param = reinterpret_cast<ConcatParameter *>(malloc(sizeof(ConcatParameter)));
-  if (param == nullptr) {
-    MS_LOG(INFO) << " new ConcatParameter failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    for (auto tensor : outputs) {
-      delete tensor;
-    }
-    return;
-  }
-  param->axis_ = 1;
-  auto *concat_kernel =
-    new (std::nothrow) kernel::ConcatOpenCLKernel(reinterpret_cast<OpParameter *>(param), inputs, outputs);
-  if (concat_kernel == nullptr) {
-    MS_LOG(INFO) << " new kernel::ConcatOpenCLKernel failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    for (auto tensor : outputs) {
-      delete tensor;
-    }
-    delete param;
-    return;
-  }
-  concat_kernel->SetFormatType(schema::Format_NC4HW4);
-  concat_kernel->Init();
-  // to do allocate memory for inputs and outputs
-  for (auto &input_tensor : inputs) {
-    input_tensor->MallocData(allocator);
-  }
-  MS_LOG(INFO) << " initialize sub_graph ";
-  std::vector<kernel::LiteKernel *> kernels{concat_kernel};
-  auto *sub_graph = new (std::nothrow) kernel::SubGraphOpenCLKernel(inputs, outputs, kernels, kernels, kernels);
-  if (sub_graph == nullptr) {
-    MS_LOG(INFO) << " new kernel::SubGraphOpenCLKernel failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    for (auto tensor : outputs) {
-      delete tensor;
-    }
-    delete param;
-    delete concat_kernel;
-    return;
-  }
-  sub_graph->Init();
-  MS_LOG(INFO) << " initialize input data ";
-  if (inputs.size() == 2) {
-    memcpy(inputs[0]->data_c(), input_data1, input1_size);
-    memcpy(inputs[1]->data_c(), input_data2, input2_size);
-  } else if (inputs.size() == 3) {
-    memcpy(inputs[0]->data_c(), input_data1, input1_size);
-    memcpy(inputs[1]->data_c(), input_data2, input2_size);
-    memcpy(inputs[2]->data_c(), input_data3, input3_size);
-  } else if (inputs.size() == 4) {
-    memcpy(inputs[0]->data_c(), input_data1, input1_size);
-    memcpy(inputs[1]->data_c(), input_data2, input2_size);
-    memcpy(inputs[2]->data_c(), input_data3, input3_size);
-    memcpy(inputs[3]->data_c(), input_data4, input4_size);
-  } else {
-    MS_LOG(ERROR) << " input size must be 2 or 3 or 4";
-  }
-
-  std::cout << "==================output data================" << std::endl;
-  sub_graph->Run();
-  auto *output_data_gpu = reinterpret_cast<float16_t *>(output_tensor->data_c());
-  CompareOutputData1(output_data_gpu, correctOutput, output_tensor->ElementsNum(), 0.000001);
-  for (auto tensor : inputs) {
-    tensor->SetData(nullptr);
-    delete tensor;
-  }
-  for (auto tensor : outputs) {
-    tensor->SetData(nullptr);
-    delete tensor;
-  }
-  delete sub_graph;
 }
 
-TEST_F(TestConcatOpenCLfp32, ConcatFp32_3input_dim4_axis1) {
-  MS_LOG(INFO) << " begin test ";
-  auto ocl_runtime = lite::opencl::OpenCLRuntimeWrapper().GetInstance();
-  ocl_runtime->Init();
-  auto allocator = ocl_runtime->GetAllocator();
+TEST_F(TestOpenCL_Concat, input6_axis1_Align) {
+  std::vector<int> input0_shape = {2, 3, 2, 8};
+  std::vector<int> input1_shape = {2, 3, 2, 8};
+  std::vector<int> input2_shape = {2, 3, 2, 8};
+  std::vector<int> input3_shape = {2, 3, 2, 8};
+  std::vector<int> input4_shape = {2, 3, 2, 8};
+  std::vector<int> input5_shape = {2, 3, 2, 8};
+  std::vector<int> output_shape = {2, 18, 2, 8};
+  int axis = 1;
+  float input0_data[] = {0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39};
 
-  // get the input from .bin
-  size_t input1_size, input2_size, input3_size, output_size;
-  std::string input1Ppath = "./test_data/concatfp32_input1.bin";
-  std::string input2Ppath = "./test_data/concatfp32_input2.bin";
-  std::string input3Ppath = "./test_data/concatfp32_input3.bin";
-  std::string correctOutputPath = "./test_data/concatfp32_output.bin";
-  auto input_data1 = reinterpret_cast<float *>(mindspore::lite::ReadFile(input1Ppath.c_str(), &input1_size));
-  auto input_data2 = reinterpret_cast<float *>(mindspore::lite::ReadFile(input2Ppath.c_str(), &input2_size));
-  auto input_data3 = reinterpret_cast<float *>(mindspore::lite::ReadFile(input3Ppath.c_str(), &input3_size));
-  auto correctOutput = reinterpret_cast<float *>(mindspore::lite::ReadFile(correctOutputPath.c_str(), &output_size));
+  float input1_data[] = {0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41};
 
-  MS_LOG(INFO) << " init tensors ";
-  constexpr int INPUT_NUM = 3;
-  std::array<std::vector<int>, INPUT_NUM> input_shapes = {
-    std::vector<int>{1, 16, 256, 80}, std::vector<int>{1, 16, 256, 80}, std::vector<int>{1, 16, 256, 80}};
-  std::vector<int> output_shape = {1, 48, 256, 80};
-  auto data_type = kNumberTypeFloat32;
-  auto tensor_type = lite::TensorCategory(schema::NodeType_ValueNode);
-  std::vector<lite::Tensor *> inputs;
-  for (auto &shape : input_shapes) {
-    auto input_temp = new (std::nothrow) lite::Tensor(data_type, shape, schema::Format_NHWC, tensor_type);
-    inputs.push_back(input_temp);
-    if (input_temp == nullptr) {
-      MS_LOG(INFO) << " new input_tensor failed ";
-      return;
-    }
-  }
-  auto *output_tensor = new (std::nothrow) lite::Tensor(data_type, output_shape, schema::Format_NHWC, tensor_type);
-  if (output_tensor == nullptr) {
-    MS_LOG(INFO) << " new output_tensor failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    return;
-  }
-  std::vector<lite::Tensor *> outputs{output_tensor};
-  MS_LOG(INFO) << " input_shapes size=: " << input_shapes.size();
+  float input2_data[] = {0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39};
 
-  MS_LOG(INFO) << " initialize tensors ";
-  auto param = reinterpret_cast<ConcatParameter *>(malloc(sizeof(ConcatParameter)));
-  if (param == nullptr) {
-    MS_LOG(INFO) << " new ConcatParameter failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    for (auto tensor : outputs) {
-      delete tensor;
-    }
-    return;
-  }
-  param->axis_ = 1;
-  auto *concat_kernel =
-    new (std::nothrow) kernel::ConcatOpenCLKernel(reinterpret_cast<OpParameter *>(param), inputs, outputs);
-  if (concat_kernel == nullptr) {
-    MS_LOG(INFO) << " new kernel::ConcatOpenCLKernel failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    for (auto tensor : outputs) {
-      delete tensor;
-    }
-    delete param;
-    return;
-  }
-  concat_kernel->SetFormatType(schema::Format_NC4HW4);
-  concat_kernel->Init();
-  // to do allocate memory for inputs
-  for (auto &input_tensor : inputs) {
-    input_tensor->MallocData(allocator);
-  }
+  float input3_data[] = {0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41};
 
-  MS_LOG(INFO) << " initialize sub_graph ";
-  std::vector<kernel::LiteKernel *> kernels{concat_kernel};
-  auto *sub_graph = new (std::nothrow) kernel::SubGraphOpenCLKernel(inputs, outputs, kernels, kernels, kernels);
-  if (sub_graph == nullptr) {
-    MS_LOG(INFO) << " new kernel::SubGraphOpenCLKernel failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    for (auto tensor : outputs) {
-      delete tensor;
-    }
-    delete param;
-    delete concat_kernel;
-    return;
-  }
-  sub_graph->Init();
-  MS_LOG(INFO) << " initialize input data ";
-  if (inputs.size() == 2) {
-    memcpy(inputs[0]->data_c(), input_data1, input1_size);
-    memcpy(inputs[1]->data_c(), input_data2, input2_size);
-  } else if (inputs.size() == 3) {
-    memcpy(inputs[0]->data_c(), input_data1, input1_size);
-    memcpy(inputs[1]->data_c(), input_data2, input2_size);
-    memcpy(inputs[2]->data_c(), input_data3, input3_size);
-  } else {
-    MS_LOG(ERROR) << " input size must be 2 or 3 ";
-  }
+  float input4_data[] = {0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39};
 
-  std::cout << "==================output data================" << std::endl;
-  sub_graph->Run();
-  auto *output_data_gpu = reinterpret_cast<float *>(output_tensor->data_c());
-  CompareOutputData1(output_data_gpu, correctOutput, output_tensor->ElementsNum(), 0.00001);
-  for (auto tensor : inputs) {
-    tensor->SetData(nullptr);
-    delete tensor;
+  float input5_data[] = {0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+                         0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41};
+  float output_data[] = {
+    0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74,
+    0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59,
+    0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,
+    0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23,
+    0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13,
+    0.41, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06,
+    0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,
+    0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+    0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74,
+    0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69,
+    0.13, 0.41, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75,
+    0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30,
+    0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13,
+    0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,
+    0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46,
+    0.69, 0.13, 0.41, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39,
+    0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74,
+    0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69,
+    0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,
+    0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23,
+    0.46, 0.69, 0.13, 0.41, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25,
+    0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06,
+    0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.5,  0.6,  0.74, 0.23, 0.46,
+    0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41,
+    0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74,
+    0.23, 0.46, 0.69, 0.13, 0.41, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59,
+    0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75,
+    0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.25, 0.39, 0.5,  0.6,  0.74, 0.23,
+    0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13,
+    0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.5,  0.6,
+    0.74, 0.23, 0.46, 0.69, 0.13, 0.41};
+
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(axis);
+    TestMain({{input0_shape, input0_data, VAR},
+              {input1_shape, input1_data, VAR},
+              {input2_shape, input2_data, VAR},
+              {input3_shape, input3_data, VAR},
+              {input4_shape, input4_data, VAR},
+              {input5_shape, input5_data, VAR}},
+             {output_shape, output_data}, param, fp16_enable, fp16_enable ? 1e-3 : 1e-9);
   }
-  for (auto tensor : outputs) {
-    tensor->SetData(nullptr);
-    delete tensor;
-  }
-  delete sub_graph;
 }
 
-TEST_F(TestConcatOpenCLfp16, ConcatFp16_6input_dim4_axis1) {
-  MS_LOG(INFO) << " begin test ";
-  auto ocl_runtime = lite::opencl::OpenCLRuntimeWrapper().GetInstance();
-  ocl_runtime->SetFp16Enable(true);
-  ocl_runtime->Init();
-  auto allocator = ocl_runtime->GetAllocator();
-
-  // get the input from .bin
-  size_t input1_size, input2_size, input3_size, input4_size, input5_size, input6_size, output_size;
-  std::string input1Ppath = "./test_data/concatfp16_input1.bin";
-  std::string input2Ppath = "./test_data/concatfp16_input2.bin";
-  std::string input3Ppath = "./test_data/concatfp16_input3.bin";
-  std::string input4Ppath = "./test_data/concatfp16_input4.bin";
-  std::string input5Ppath = "./test_data/concatfp16_input5.bin";
-  std::string input6Ppath = "./test_data/concatfp16_input6.bin";
-  std::string correctOutputPath = "./test_data/concatfp16_output.bin";
-  auto input_data1 = reinterpret_cast<float16_t *>(mindspore::lite::ReadFile(input1Ppath.c_str(), &input1_size));
-  auto input_data2 = reinterpret_cast<float16_t *>(mindspore::lite::ReadFile(input2Ppath.c_str(), &input2_size));
-  auto input_data3 = reinterpret_cast<float16_t *>(mindspore::lite::ReadFile(input3Ppath.c_str(), &input3_size));
-  auto input_data4 = reinterpret_cast<float16_t *>(mindspore::lite::ReadFile(input4Ppath.c_str(), &input4_size));
-  auto input_data5 = reinterpret_cast<float16_t *>(mindspore::lite::ReadFile(input5Ppath.c_str(), &input5_size));
-  auto input_data6 = reinterpret_cast<float16_t *>(mindspore::lite::ReadFile(input6Ppath.c_str(), &input6_size));
-  auto correctOutput =
-    reinterpret_cast<float16_t *>(mindspore::lite::ReadFile(correctOutputPath.c_str(), &output_size));
-
-  MS_LOG(INFO) << " init tensors ";
-  constexpr int INPUT_NUM = 6;
-  std::array<std::vector<int>, INPUT_NUM> input_shapes = {
-    std::vector<int>{1, 1200, 3, 4}, std::vector<int>{1, 600, 3, 4}, std::vector<int>{1, 150, 3, 4},
-    std::vector<int>{1, 50, 3, 4},   std::vector<int>{1, 30, 3, 4},  std::vector<int>{1, 4, 3, 4}};
-  std::vector<int> output_shape = {1, 2034, 3, 4};
-  auto data_type = kNumberTypeFloat16;
-  auto tensor_type = lite::TensorCategory(schema::NodeType_ValueNode);
-  std::vector<lite::Tensor *> inputs;
-  for (auto &shape : input_shapes) {
-    auto input_temp = new (std::nothrow) lite::Tensor(data_type, shape, schema::Format_NHWC, tensor_type);
-    inputs.push_back(input_temp);
-    if (input_temp == nullptr) {
-      MS_LOG(INFO) << " new input_tensor failed ";
-      return;
-    }
+TEST_F(TestOpenCL_Concat, input6_axis2_Align) {
+  std::vector<int> input0_shape = {1, 1, 8};
+  std::vector<int> input1_shape = {1, 1, 8};
+  std::vector<int> input2_shape = {1, 1, 8};
+  std::vector<int> input3_shape = {1, 1, 8};
+  std::vector<int> input4_shape = {1, 1, 8};
+  std::vector<int> input5_shape = {1, 1, 8};
+  std::vector<int> output_shape = {1, 1, 48};
+  int axis = 2;
+  float input0_data[] = {0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.13, 0.16};
+  float input1_data[] = {0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.47, 0.16};
+  float input2_data[] = {0.03, 0.37, 0.74, 0.23, 0.46, 0.69, 0.13, 0.16};
+  float input3_data[] = {0.52, 0.63, 0.78, 0.43, 0.56, 0.69, 0.87, 0.16};
+  float input4_data[] = {0.5, 0.6, 0.74, 0.30, 0.9, 0.59, 0.13, 0.16};
+  float input5_data[] = {0.75, 0.06, 0.74, 0.23, 0.46, 0.69, 0.47, 0.16};
+  float output_data[] = {0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.13, 0.16, 0.5,  0.6,  0.74, 0.23,
+                         0.46, 0.69, 0.47, 0.16, 0.03, 0.37, 0.74, 0.23, 0.46, 0.69, 0.13, 0.16,
+                         0.52, 0.63, 0.78, 0.43, 0.56, 0.69, 0.87, 0.16, 0.5,  0.6,  0.74, 0.30,
+                         0.9,  0.59, 0.13, 0.16, 0.75, 0.06, 0.74, 0.23, 0.46, 0.69, 0.47, 0.16};
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(axis);
+    TestMain({{input0_shape, input0_data, VAR},
+              {input1_shape, input1_data, VAR},
+              {input2_shape, input2_data, VAR},
+              {input3_shape, input3_data, VAR},
+              {input4_shape, input4_data, VAR},
+              {input5_shape, input5_data, VAR}},
+             {output_shape, output_data}, param, fp16_enable, fp16_enable ? 1e-3 : 1e-9);
   }
-  auto *output_tensor = new (std::nothrow) lite::Tensor(data_type, output_shape, schema::Format_NHWC, tensor_type);
-  if (output_tensor == nullptr) {
-    MS_LOG(INFO) << " new output_tensor failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    return;
-  }
-  std::vector<lite::Tensor *> outputs{output_tensor};
-  MS_LOG(INFO) << " input_shapes size =: " << input_shapes.size();
-
-  MS_LOG(INFO) << " initialize tensors ";
-  auto param = reinterpret_cast<ConcatParameter *>(malloc(sizeof(ConcatParameter)));
-  if (param == nullptr) {
-    MS_LOG(INFO) << " new ConcatParameter failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    for (auto tensor : outputs) {
-      delete tensor;
-    }
-    return;
-  }
-  param->axis_ = 1;
-  auto *concat_kernel =
-    new (std::nothrow) kernel::ConcatOpenCLKernel(reinterpret_cast<OpParameter *>(param), inputs, outputs);
-  if (concat_kernel == nullptr) {
-    MS_LOG(INFO) << " new kernel::ConcatOpenCLKernel failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    for (auto tensor : outputs) {
-      delete tensor;
-    }
-    delete param;
-    return;
-  }
-  concat_kernel->SetFormatType(schema::Format_NC4HW4);
-  concat_kernel->Init();
-  // to do allocate memory for inputs and outputs
-  for (auto &input_tensor : inputs) {
-    input_tensor->MallocData(allocator);
-  }
-  MS_LOG(INFO) << " initialize sub_graph ";
-  std::vector<kernel::LiteKernel *> kernels{concat_kernel};
-  auto *sub_graph = new (std::nothrow) kernel::SubGraphOpenCLKernel(inputs, outputs, kernels, kernels, kernels);
-  if (sub_graph == nullptr) {
-    MS_LOG(INFO) << " new kernel::SubGraphOpenCLKernel failed ";
-    for (auto tensor : inputs) {
-      delete tensor;
-    }
-    for (auto tensor : outputs) {
-      delete tensor;
-    }
-    delete param;
-    delete concat_kernel;
-    return;
-  }
-  sub_graph->Init();
-  MS_LOG(INFO) << " initialize input data ";
-  if (inputs.size() == 2) {
-    memcpy(inputs[0]->data_c(), input_data1, input1_size);
-    memcpy(inputs[1]->data_c(), input_data2, input2_size);
-  } else if (inputs.size() == 3) {
-    memcpy(inputs[0]->data_c(), input_data1, input1_size);
-    memcpy(inputs[1]->data_c(), input_data2, input2_size);
-    memcpy(inputs[2]->data_c(), input_data3, input3_size);
-  } else if (inputs.size() == 4) {
-    memcpy(inputs[0]->data_c(), input_data1, input1_size);
-    memcpy(inputs[1]->data_c(), input_data2, input2_size);
-    memcpy(inputs[2]->data_c(), input_data3, input3_size);
-    memcpy(inputs[3]->data_c(), input_data4, input4_size);
-  } else if (inputs.size() == 6) {
-    memcpy(inputs[0]->data_c(), input_data1, input1_size);
-    memcpy(inputs[1]->data_c(), input_data2, input2_size);
-    memcpy(inputs[2]->data_c(), input_data3, input3_size);
-    memcpy(inputs[3]->data_c(), input_data4, input4_size);
-    memcpy(inputs[4]->data_c(), input_data5, input5_size);
-    memcpy(inputs[5]->data_c(), input_data6, input6_size);
-  } else {
-    MS_LOG(ERROR) << " input size must be 2 or 3 or 4";
-  }
-
-  std::cout << "==================output data================" << std::endl;
-  sub_graph->Run();
-  auto *output_data_gpu = reinterpret_cast<float16_t *>(output_tensor->MutableData());
-  CompareOutputData1(output_data_gpu, correctOutput, output_tensor->ElementsNum(), 0.000001);
-  for (auto tensor : inputs) {
-    tensor->SetData(nullptr);
-    delete tensor;
-  }
-  for (auto tensor : outputs) {
-    tensor->SetData(nullptr);
-    delete tensor;
-  }
-  delete sub_graph;
 }
 
-}  // namespace mindspore
+TEST_F(TestOpenCL_Concat, input2_axis3_UnAlign) {
+  std::vector<int> input0_shape = {2, 2, 2, 8};
+  std::vector<int> input1_shape = {2, 2, 2, 9};
+  std::vector<int> output_shape = {2, 2, 2, 17};
+  int axis = 3;
+  float input0_data[] = {0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39,
+                         0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39};
+  float input1_data[] = {0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.52, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69,
+                         0.13, 0.41, 0.52, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.52, 0.5,  0.6,  0.74,
+                         0.23, 0.46, 0.69, 0.13, 0.41, 0.52, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.52,
+                         0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.52, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69,
+                         0.13, 0.41, 0.52, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.52};
+  float output_data[] = {
+    0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.52,
+    0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.52,
+    0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.52,
+    0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.52,
+    0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.52,
+    0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.52,
+    0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.52,
+    0.75, 0.06, 0.74, 0.30, 0.9, 0.59, 0.25, 0.39, 0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.13, 0.41, 0.52,
+  };
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(axis);
+    TestMain({{input0_shape, input0_data, VAR}, {input1_shape, input1_data, VAR}}, {output_shape, output_data}, param,
+             fp16_enable, fp16_enable ? 1e-3 : 1e-9);
+  }
+}
+
+TEST_F(TestOpenCL_Concat, input3_axis1_UnAlign) {
+  std::vector<int> input0_shape = {1, 6};
+  std::vector<int> input1_shape = {1, 7};
+  std::vector<int> input2_shape = {1, 8};
+  std::vector<int> output_shape = {1, 21};
+  int axis = 1;
+  float input0_data[] = {0.75, 0.06, 0.74, 0.30, 0.9, 0.59};
+  float input1_data[] = {0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.47};
+  float input2_data[] = {0.03, 0.37, 0.74, 0.23, 0.46, 0.69, 0.13, 0.13};
+  float output_data[] = {0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.5,  0.6,  0.74, 0.23, 0.46,
+                         0.69, 0.47, 0.03, 0.37, 0.74, 0.23, 0.46, 0.69, 0.13, 0.13};
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(axis);
+    TestMain({{input0_shape, input0_data, VAR}, {input1_shape, input1_data, VAR}, {input2_shape, input2_data, VAR}},
+             {output_shape, output_data}, param, fp16_enable, fp16_enable ? 1e-3 : 1e-9);
+  }
+}
+
+TEST_F(TestOpenCL_Concat, input4_axis3_UnAlign) {
+  std::vector<int> input0_shape = {1, 1, 1, 6};
+  std::vector<int> input1_shape = {1, 1, 1, 7};
+  std::vector<int> input2_shape = {1, 1, 1, 8};
+  std::vector<int> input3_shape = {1, 1, 1, 9};
+  std::vector<int> output_shape = {1, 1, 1, 30};
+  int axis = -1;
+  float input0_data[] = {0.75, 0.06, 0.74, 0.30, 0.9, 0.59};
+  float input1_data[] = {0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.47};
+  float input2_data[] = {0.03, 0.37, 0.74, 0.23, 0.46, 0.69, 0.13, 0.13};
+  float input3_data[] = {0.03, 0.37, 0.74, 0.23, 0.46, 0.69, 0.13, 0.13, 0.26};
+  float output_data[] = {0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.47, 0.03, 0.37,
+                         0.74, 0.23, 0.46, 0.69, 0.13, 0.13, 0.03, 0.37, 0.74, 0.23, 0.46, 0.69, 0.13, 0.13, 0.26};
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(axis);
+    TestMain({{input0_shape, input0_data, VAR},
+              {input1_shape, input1_data, VAR},
+              {input2_shape, input2_data, VAR},
+              {input3_shape, input3_data, VAR}},
+             {output_shape, output_data}, param, fp16_enable, fp16_enable ? 1e-3 : 1e-9);
+  }
+}
+
+TEST_F(TestOpenCL_Concat, input5_axis3_UnAlign) {
+  std::vector<int> input0_shape = {1, 1, 1, 6};
+  std::vector<int> input1_shape = {1, 1, 1, 7};
+  std::vector<int> input2_shape = {1, 1, 1, 8};
+  std::vector<int> input3_shape = {1, 1, 1, 9};
+  std::vector<int> input4_shape = {1, 1, 1, 10};
+  std::vector<int> output_shape = {1, 1, 1, 40};
+  int axis = 3;
+  float input0_data[] = {0.75, 0.06, 0.74, 0.30, 0.9, 0.59};
+  float input1_data[] = {0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.47};
+  float input2_data[] = {0.03, 0.37, 0.74, 0.23, 0.46, 0.69, 0.13, 0.13};
+  float input3_data[] = {0.03, 0.37, 0.74, 0.23, 0.46, 0.69, 0.13, 0.13, 0.26};
+  float input4_data[] = {0.06, 0.47, 0.74, 0.23, 0.56, 0.69, 0.73, 0.13, 0.96, 0.78};
+  float output_data[] = {0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.47, 0.03,
+                         0.37, 0.74, 0.23, 0.46, 0.69, 0.13, 0.13, 0.03, 0.37, 0.74, 0.23, 0.46, 0.69, 0.13,
+                         0.13, 0.26, 0.06, 0.47, 0.74, 0.23, 0.56, 0.69, 0.73, 0.13, 0.96, 0.78};
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(axis);
+    TestMain({{input0_shape, input0_data, VAR},
+              {input1_shape, input1_data, VAR},
+              {input2_shape, input2_data, VAR},
+              {input3_shape, input3_data, VAR},
+              {input4_shape, input4_data, VAR}},
+             {output_shape, output_data}, param, fp16_enable, fp16_enable ? 1e-3 : 1e-9);
+  }
+}
+
+TEST_F(TestOpenCL_Concat, input6_axis3_UnAlign) {
+  std::vector<int> input0_shape = {1, 1, 1, 6};
+  std::vector<int> input1_shape = {1, 1, 1, 7};
+  std::vector<int> input2_shape = {1, 1, 1, 8};
+  std::vector<int> input3_shape = {1, 1, 1, 9};
+  std::vector<int> input4_shape = {1, 1, 1, 10};
+  std::vector<int> input5_shape = {1, 1, 1, 11};
+  std::vector<int> output_shape = {1, 1, 1, 51};
+  int axis = 3;
+  float input0_data[] = {0.75, 0.06, 0.74, 0.30, 0.9, 0.59};
+  float input1_data[] = {0.5, 0.6, 0.74, 0.23, 0.46, 0.69, 0.47};
+  float input2_data[] = {0.03, 0.37, 0.74, 0.23, 0.46, 0.69, 0.13, 0.13};
+  float input3_data[] = {0.03, 0.37, 0.74, 0.23, 0.46, 0.69, 0.13, 0.13, 0.26};
+  float input4_data[] = {0.06, 0.47, 0.74, 0.23, 0.56, 0.69, 0.73, 0.13, 0.96, 0.78};
+  float input5_data[] = {0.16, 0.77, 0.84, 0.53, 0.36, 0.29, 0.53, 0.23, 0.86, 0.48, 0.36};
+  float output_data[] = {0.75, 0.06, 0.74, 0.30, 0.9,  0.59, 0.5,  0.6,  0.74, 0.23, 0.46, 0.69, 0.47,
+                         0.03, 0.37, 0.74, 0.23, 0.46, 0.69, 0.13, 0.13, 0.03, 0.37, 0.74, 0.23, 0.46,
+                         0.69, 0.13, 0.13, 0.26, 0.06, 0.47, 0.74, 0.23, 0.56, 0.69, 0.73, 0.13, 0.96,
+                         0.78, 0.16, 0.77, 0.84, 0.53, 0.36, 0.29, 0.53, 0.23, 0.86, 0.48, 0.36};
+  for (auto fp16_enable : {false, true}) {
+    auto *param = CreateParameter(axis);
+    TestMain({{input0_shape, input0_data, VAR},
+              {input1_shape, input1_data, VAR},
+              {input2_shape, input2_data, VAR},
+              {input3_shape, input3_data, VAR},
+              {input4_shape, input4_data, VAR},
+              {input5_shape, input5_data, VAR}},
+             {output_shape, output_data}, param, fp16_enable, fp16_enable ? 1e-3 : 1e-9);
+  }
+}
+
+}  // namespace mindspore::lite::opencl::test

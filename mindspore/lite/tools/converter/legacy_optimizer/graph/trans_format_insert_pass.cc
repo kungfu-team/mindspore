@@ -19,32 +19,51 @@
 #include <vector>
 #include <utility>
 #include "tools/converter/legacy_optimizer/graph/trans_format_insert_pass.h"
-#include "tools/common/converter_op_utils.h"
 #include "tools/common/node_util.h"
 #include "src/common/log_adapter.h"
 #include "src/common/utils.h"
 
 namespace mindspore {
+namespace {
+std::vector<int> nchw2nhwc_perm = {0, 2, 3, 1};
+std::vector<int> nhwc2nchw_perm = {0, 3, 1, 2};
+}  // namespace
 namespace lite {
 bool TransOpInsertPass::CanFusion(schema::MetaGraphT *graph, const std::unique_ptr<CNodeT> &node) {
+  MS_ASSERT(graph != nullptr);
+  MS_ASSERT(node != nullptr);
   auto input_node_indexes = GetInputNodeIdx(*graph, *node);
-  pre_type_ = schema::PrimitiveType_NONE;
+  pre_type_ = kNONE;
   size_t has_trans_count = 0;
   auto can_fusion = true;
   for (auto input_node_index : input_node_indexes) {
     MS_ASSERT(graph->nodes.size() > input_node_index);
     auto &pre_node = graph->nodes.at(input_node_index);
     MS_ASSERT(pre_node != nullptr);
-    if (pre_type_ == schema::PrimitiveType_NONE) {
-      if (pre_node->primitive->value.type == schema::PrimitiveType_Nchw2Nhwc ||
-          pre_node->primitive->value.type == schema::PrimitiveType_Nhwc2Nchw) {
-        pre_type_ = pre_node->primitive->value.type;
+    MS_ASSERT(pre_node->primitive != nullptr);
+    MS_ASSERT(pre_node->primitive->value != nullptr);
+    if (pre_type_ == kNONE) {
+      if (pre_node->primitive->value.type == schema::PrimitiveType_Transpose) {
+        if (pre_node->primitive->value.AsTranspose()->perm == nchw2nhwc_perm) {
+          pre_type_ = kNCHW2NHWC;
+        } else if (pre_node->primitive->value.AsTranspose()->perm == nhwc2nchw_perm) {
+          pre_type_ = kNHWC2NCHW;
+        } else {
+          return false;
+        }
         has_trans_count++;
       }
     } else {
-      if (pre_node->primitive->value.type == schema::PrimitiveType_Nchw2Nhwc ||
-          pre_node->primitive->value.type == schema::PrimitiveType_Nhwc2Nchw) {
-        if (pre_type_ != pre_node->primitive->value.type) {
+      if (pre_node->primitive->value.type == schema::PrimitiveType_Transpose) {
+        auto cur_type = kNONE;
+        if (pre_node->primitive->value.AsTranspose()->perm == nchw2nhwc_perm) {
+          cur_type = kNCHW2NHWC;
+        } else if (pre_node->primitive->value.AsTranspose()->perm == nhwc2nchw_perm) {
+          cur_type = kNHWC2NCHW;
+        } else {
+          return false;
+        }
+        if (pre_type_ != cur_type) {
           can_fusion = false;
           break;
         } else {
@@ -57,21 +76,35 @@ bool TransOpInsertPass::CanFusion(schema::MetaGraphT *graph, const std::unique_p
     return false;
   }
   auto output_node_indexes = GetOutputNodeIdx(*graph, *node);
-  post_type_ = schema::PrimitiveType_NONE;
+  post_type_ = kNONE;
   for (auto output_node_index : output_node_indexes) {
     MS_ASSERT(graph->nodes.size() > output_node_index);
     auto &post_node = graph->nodes.at(output_node_index);
     MS_ASSERT(post_node != nullptr);
-    if (post_type_ == schema::PrimitiveType_NONE) {
-      if (post_node->primitive->value.type == schema::PrimitiveType_Nchw2Nhwc ||
-          post_node->primitive->value.type == schema::PrimitiveType_Nhwc2Nchw) {
-        post_type_ = post_node->primitive->value.type;
+    MS_ASSERT(post_node->primitive != nullptr);
+    MS_ASSERT(post_node->primitive->value != nullptr);
+    if (post_type_ == kNONE) {
+      if (post_node->primitive->value.type == schema::PrimitiveType_Transpose) {
+        if (post_node->primitive->value.AsTranspose()->perm == nchw2nhwc_perm) {
+          post_type_ = kNCHW2NHWC;
+        } else if (post_node->primitive->value.AsTranspose()->perm == nhwc2nchw_perm) {
+          post_type_ = kNHWC2NCHW;
+        } else {
+          return false;
+        }
         has_trans_count++;
       }
     } else {
-      if (post_node->primitive->value.type == schema::PrimitiveType_Nchw2Nhwc ||
-          post_node->primitive->value.type == schema::PrimitiveType_Nhwc2Nchw) {
-        if (post_type_ != post_node->primitive->value.type) {
+      if (post_node->primitive->value.type == schema::PrimitiveType_Transpose) {
+        auto cur_type = kNONE;
+        if (post_node->primitive->value.AsTranspose()->perm == nchw2nhwc_perm) {
+          cur_type = kNCHW2NHWC;
+        } else if (post_node->primitive->value.AsTranspose()->perm == nhwc2nchw_perm) {
+          cur_type = kNHWC2NCHW;
+        } else {
+          return false;
+        }
+        if (post_type_ != cur_type) {
           can_fusion = false;
           break;
         } else {
@@ -83,15 +116,24 @@ bool TransOpInsertPass::CanFusion(schema::MetaGraphT *graph, const std::unique_p
   if (!can_fusion) {
     return false;
   }
-  if (pre_type_ == PrimitiveType_NONE && post_type_ == PrimitiveType_NONE) {
+  if (pre_type_ == kNONE && post_type_ == kNONE) {
     return false;
   }
-  auto total_node_count = input_node_indexes.size() + output_node_indexes.size();
+  auto output_size = output_node_indexes.empty() ? 1 : output_node_indexes.size();
+  auto total_node_count = input_node_indexes.size() + output_size;
   size_t half_count = total_node_count / 2;
   if (GetCNodeTType(*node) == schema::PrimitiveType_Activation) {
-    if (node->primitive->value.AsActivation()->type == schema::ActivationType_LEAKY_RELU) {
+    MS_ASSERT(node != nullptr);
+    MS_ASSERT(node->primitive != nullptr);
+    MS_ASSERT(node->primitive->value != nullptr);
+    MS_ASSERT(node->primitive->value.AsActivation() != nullptr);
+    if (node->primitive->value.AsActivation() != nullptr &&
+        node->primitive->value.AsActivation()->type == schema::ActivationType_LEAKY_RELU) {
       return has_trans_count >= half_count;
     }
+  }
+  if (GetCNodeTType(*node) == schema::PrimitiveType_Split) {
+    return has_trans_count >= half_count;
   }
   can_fusion = has_trans_count > half_count;
   return can_fusion;
@@ -100,92 +142,21 @@ bool TransOpInsertPass::CanFusion(schema::MetaGraphT *graph, const std::unique_p
 STATUS TransOpInsertPass::FindOutTransType() {
   pre_insert_trans_type_ = kNHWC2NCHW;
   post_insert_trans_type_ = kNHWC2NCHW;
-  if (pre_type_ == PrimitiveType_NONE && post_type_ != PrimitiveType_NONE) {
-    pre_insert_trans_type_ = post_type_ == schema::PrimitiveType_Nhwc2Nchw ? kNHWC2NCHW : kNCHW2NHWC;
-    post_insert_trans_type_ = post_type_ == schema::PrimitiveType_Nhwc2Nchw ? kNCHW2NHWC : kNHWC2NCHW;
-  } else if (pre_type_ != PrimitiveType_NONE && post_type_ == PrimitiveType_NONE) {
-    pre_insert_trans_type_ = pre_type_ == schema::PrimitiveType_Nhwc2Nchw ? kNCHW2NHWC : kNHWC2NCHW;
-    post_insert_trans_type_ = pre_type_ == schema::PrimitiveType_Nhwc2Nchw ? kNHWC2NCHW : kNCHW2NHWC;
-  } else if (pre_type_ == PrimitiveType_NONE && post_type_ == PrimitiveType_NONE) {
+  if (pre_type_ == kNONE && post_type_ != kNONE) {
+    pre_insert_trans_type_ = post_type_ == kNHWC2NCHW ? kNHWC2NCHW : kNCHW2NHWC;
+    post_insert_trans_type_ = post_type_ == kNHWC2NCHW ? kNCHW2NHWC : kNHWC2NCHW;
+  } else if (pre_type_ != kNONE && post_type_ == kNONE) {
+    pre_insert_trans_type_ = pre_type_ == kNHWC2NCHW ? kNCHW2NHWC : kNHWC2NCHW;
+    post_insert_trans_type_ = pre_type_ == kNHWC2NCHW ? kNHWC2NCHW : kNCHW2NHWC;
+  } else if (pre_type_ == kNONE && post_type_ == kNONE) {
     MS_ASSERT(false);
   } else {
     if (pre_type_ == post_type_) {
       MS_LOG(ERROR) << "Unknow error";
       return RET_ERROR;
     }
-    pre_insert_trans_type_ = pre_type_ == schema::PrimitiveType_Nhwc2Nchw ? kNCHW2NHWC : kNHWC2NCHW;
-    post_insert_trans_type_ = post_type_ == schema::PrimitiveType_Nhwc2Nchw ? kNCHW2NHWC : kNHWC2NCHW;
-  }
-  return RET_OK;
-}
-
-STATUS TransOpInsertPass::ChangeOpAxis(schema::MetaGraphT *graph, const std::unique_ptr<CNodeT> &node) {
-  if (node == nullptr && node->primitive == nullptr) {
-    MS_LOG(ERROR) << "node or primitive null";
-    return RET_NULL_PTR;
-  }
-  auto type = node->primitive->value.type;
-  auto input1_ndim = graph->allTensors.at(node->inputIndex[0])->dims.size();
-  if (input1_ndim != 4) {
-    if (node->inputIndex.size() > 1) {
-      auto input2_ndim = graph->allTensors.at(node->inputIndex[1])->dims.size();
-      if (input2_ndim != 4 && input2_ndim != 0) {
-        MS_LOG(ERROR) << "change op axis only support 4 dims";
-        return RET_NOT_SUPPORT;
-      }
-    } else {
-      MS_LOG(ERROR) << "change op axis only support 4 dims";
-      return RET_NOT_SUPPORT;
-    }
-  }
-  if (type == PrimitiveType_Concat) {
-    auto origin_axis = node->primitive->value.AsConcat()->axis;
-    auto axis_map = GetNc2NhAxisMap();
-    node->primitive->value.AsConcat()->axis = axis_map[origin_axis];
-  }
-  if (type == PrimitiveType_StridedSlice) {
-    auto attr = node->primitive->value.AsStridedSlice();
-    auto origin_begin = attr->begin;
-    attr->begin = {origin_begin[NCHW_N], origin_begin[NCHW_H], origin_begin[NCHW_W], origin_begin[NCHW_C]};
-    auto origin_end = attr->end;
-    attr->end = {origin_end[NCHW_N], origin_end[NCHW_H], origin_end[NCHW_W], origin_end[NCHW_C]};
-    auto origin_stride = attr->stride;
-    attr->stride = {origin_stride[NCHW_N], origin_stride[NCHW_H], origin_stride[NCHW_W], origin_stride[NCHW_C]};
-  }
-  if (type == PrimitiveType_Split) {
-    auto origin_axis = node->primitive->value.AsSplit()->splitDim;
-    auto axis_map = GetNc2NhAxisMap();
-    node->primitive->value.AsSplit()->splitDim = axis_map[origin_axis];
-  }
-  if (type == PrimitiveType_Crop) {
-    auto origin_axis = node->primitive->value.AsCrop()->axis;
-    auto offsets = node->primitive->value.AsCrop()->offsets;
-    auto axis_map = GetNc2NhAxisMap();
-    node->primitive->value.AsCrop()->axis = axis_map[origin_axis];
-    // nchw->nhwc,offsets need pad 0;
-    if (axis_map[origin_axis] == 0) {
-      offsets = {offsets[0], offsets[2], offsets[3], offsets[1]};
-    } else if (axis_map[origin_axis] == 1 || axis_map[origin_axis] == 2) {
-      // orgin_axis = 2 or orgin_axis = 3
-      offsets.push_back(0);
-    } else if (axis_map[origin_axis] == -1) {
-      // origin_axis = 1
-      offsets = {offsets[1], offsets[2], offsets[0]};
-    } else {
-      // axis error
-      MS_LOG(ERROR) << "Crop error";
-      return RET_ERROR;
-    }
-    node->primitive->value.AsCrop()->offsets = offsets;
-  }
-  if (type == PrimitiveType_Slice) {
-    auto attr = node->primitive->value.AsSlice();
-    auto origin_begin = attr->begin;
-    attr->begin = {origin_begin[NCHW_N], origin_begin[NCHW_H], origin_begin[NCHW_W], origin_begin[NCHW_C]};
-    auto origin_end = attr->axes;
-    attr->axes = {origin_end[NCHW_N], origin_end[NCHW_H], origin_end[NCHW_W], origin_end[NCHW_C]};
-    auto origin_stride = attr->size;
-    attr->size = {origin_stride[NCHW_N], origin_stride[NCHW_H], origin_stride[NCHW_W], origin_stride[NCHW_C]};
+    pre_insert_trans_type_ = pre_type_ == kNHWC2NCHW ? kNCHW2NHWC : kNHWC2NCHW;
+    post_insert_trans_type_ = post_type_ == kNHWC2NCHW ? kNCHW2NHWC : kNHWC2NCHW;
   }
   return RET_OK;
 }
@@ -199,6 +170,10 @@ STATUS TransOpInsertPass::Run(schema::MetaGraphT *graph) {
     changed = false;
     for (auto iter = graph->nodes.begin(); iter != graph->nodes.end(); iter++) {
       auto &node = *iter;
+      if (node == nullptr || node->primitive == nullptr) {
+        MS_LOG(ERROR) << "node or primitive null";
+        return RET_NULL_PTR;
+      }
       auto type = node->primitive->value.type;
       if (IsContain(has_insert_nodes, node.get()) || !IsContain(GetInsertOpList(), type)) {
         continue;
@@ -213,18 +188,32 @@ STATUS TransOpInsertPass::Run(schema::MetaGraphT *graph) {
         return ret;
       }
       ret = ChangeOpAxis(graph, node);
-      if (ret != RET_OK) {
-        MS_LOG(ERROR) << "ChangeOpAxis error";
+      if (ret == RET_NOT_SUPPORT) {
+        MS_LOG(INFO) << "not support to ChangeOpAxis";
+        return RET_OK;
+      } else if (ret != RET_OK) {
+        MS_LOG(INFO) << "no need to ChangeOpAxis";
         return ret;
       }
       has_insert_nodes.push_back(node.get());
       STATUS status = RET_OK;
       auto input_tensor_size = (*iter)->inputIndex.size();
       for (size_t i = 0; i < input_tensor_size; i++) {
+#ifdef SUPPORT_TRAIN
+        auto &tensor = graph->allTensors.at((*iter)->inputIndex[i]);
+        MS_ASSERT(tensor != nullptr);
+        if (tensor->nodeType == schema::NodeType_ValueNode) {
+          continue;
+        }
+#endif
         iter = InsertFormatTransNode(graph, iter, kBefore, i, pre_insert_trans_type_, &status);
         if (status != RET_OK) {
           MS_LOG(ERROR) << "Insert" << pre_insert_trans_type_ << "before " << (*iter)->name << " failed";
           return status;
+        }
+        if ((*iter)->primitive->value.type == schema::PrimitiveType_StridedSlice ||
+            (*iter)->primitive->value.type == schema::PrimitiveType_Slice) {
+          break;
         }
       }
       auto output_tensor_size = (*iter)->outputIndex.size();

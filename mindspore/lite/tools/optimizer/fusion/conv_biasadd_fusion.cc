@@ -81,6 +81,9 @@ int Get_Kenrnel_nums(const CNodePtr &conv_node) {
   }
 }
 int GenConvNewBias(const FuncGraphPtr &func_graph, const CNodePtr &conv_node, const CNodePtr &bias_node) {
+  MS_ASSERT(func_graph != nullptr);
+  MS_ASSERT(conv_node != nullptr);
+  MS_ASSERT(bias_node != nullptr);
   AnfNodePtr conv_bias_node = nullptr;
   AnfNodePtr conv_weight_node = nullptr;
   if (conv_node->inputs().size() == kConvNoBiasLen) {
@@ -158,6 +161,8 @@ const BaseRef ConvBiasaddFusion::DefinePattern() const {
 
 const AnfNodePtr ConvBiasaddFusion::Process(const FuncGraphPtr &func_graph, const AnfNodePtr &node,
                                             const EquivPtr &) const {
+  MS_ASSERT(func_graph != nullptr);
+  MS_ASSERT(node != nullptr);
   MS_LOG(DEBUG) << "Enter pass process";
   if (CheckIfFuncGraphIsNull(func_graph) != lite::RET_OK || CheckIfAnfNodeIsNull(node) != lite::RET_OK) {
     return nullptr;
@@ -186,29 +191,6 @@ const AnfNodePtr ConvBiasaddFusion::Process(const FuncGraphPtr &func_graph, cons
   }
   int ret = GenConvNewBias(func_graph, conv_node, add_node);
   if (ret != lite::RET_OK) {
-    lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(ret);
-    return nullptr;
-  }
-  auto primitive_c = GetValueNode<std::shared_ptr<lite::PrimitiveC>>(conv_node->input(0));
-  MS_ASSERT(primitive_c != nullptr);
-  auto type = primitive_c->Type();
-  if (type == schema::PrimitiveType_Conv2D) {
-    MS_ASSERT(utils::isa<std::shared_ptr<mindspore::lite::Conv2D>>(primitive_c));
-    auto primc = utils::cast<std::shared_ptr<mindspore::lite::Conv2D>>(primitive_c);
-    MS_ASSERT(primc != nullptr);
-    primc->SetHasBias(true);
-  } else if (type == schema::PrimitiveType_DepthwiseConv2D) {
-    MS_ASSERT(utils::isa<std::shared_ptr<mindspore::lite::DepthwiseConv2D>>(primitive_c));
-    auto primc = utils::cast<std::shared_ptr<mindspore::lite::DepthwiseConv2D>>(primitive_c);
-    MS_ASSERT(primc != nullptr);
-    primc->SetHasBias(true);
-  } else if (type == schema::PrimitiveType_DeConv2D) {
-    MS_ASSERT(utils::isa<std::shared_ptr<mindspore::lite::DeConv2D>>(primitive_c));
-    auto primc = utils::cast<std::shared_ptr<mindspore::lite::DeConv2D>>(primitive_c);
-    MS_ASSERT(primc != nullptr);
-    primc->SetHasBias(true);
-  } else {
-    MS_LOG(ERROR) << "Unsupported opType, " << type;
     lite::ReturnCode::GetSingleReturnCode()->UpdateReturnCode(ret);
     return nullptr;
   }

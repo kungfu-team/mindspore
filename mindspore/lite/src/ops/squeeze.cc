@@ -16,12 +16,46 @@
 
 #include "src/ops/squeeze.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
 std::vector<int> Squeeze::GetAxis() const { return this->primitive_->value.AsSqueeze()->axis; }
 
 void Squeeze::SetAxis(const std::vector<int> &axis) { this->primitive_->value.AsSqueeze()->axis = axis; }
+
+int Squeeze::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
+  if (this->primitive_ == nullptr) {
+    this->primitive_ = new (std::nothrow) schema::PrimitiveT;
+    if (this->primitive_ == nullptr) {
+      MS_LOG(ERROR) << "new primitiveT failed";
+      return RET_ERROR;
+    }
+    this->primitive_->value.type = schema::PrimitiveType_Squeeze;
+  }
+  if (this->primitive_->value.type != schema::PrimitiveType_Squeeze) {
+    MS_LOG(ERROR) << "Primitive type is error :" << this->primitive_->value.type;
+    return RET_ERROR;
+  }
+  if (this->primitive_->value.value == nullptr) {
+    auto attr = new (std::nothrow) schema::SqueezeT();
+    if (attr == nullptr) {
+      MS_LOG(ERROR) << "new primitiveT value failed";
+      return RET_ERROR;
+    }
+    if (prim.GetAttr("axis") == nullptr) {
+      MS_LOG(INFO) << "Squeeze's attr xis is set to default";
+      attr->axis = {0};
+    } else {
+      attr->axis = CastToInt(prim.GetAttr("axis"));
+    }
+    this->primitive_->value.value = attr;
+  }
+  return RET_OK;
+}
 
 #else
 
@@ -48,6 +82,9 @@ int Squeeze::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *SqueezeCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Squeeze>(primitive); }
+Registry SqueezeRegistry(schema::PrimitiveType_Squeeze, SqueezeCreator);
 #endif
 
 namespace {
@@ -66,9 +103,9 @@ int Squeeze::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> out
   }
   auto *in_tensor = inputs_.front();
   outputs_.front()->set_data_type(in_tensor->data_type());
-  outputs_.front()->SetFormat(in_tensor->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  outputs_.front()->set_format(in_tensor->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   auto in_shape = in_tensor->shape();
   std::vector<int> out_shape;
@@ -80,19 +117,19 @@ int Squeeze::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> out
   }
   if (axes_.size() == 0) {
     for (size_t i = 0; i < in_shape.size(); i++) {
-      if (in_shape[i] != 1) {
-        out_shape.push_back(in_shape[i]);
+      if (in_shape.at(i) != 1) {
+        out_shape.push_back(in_shape.at(i));
       }
     }
   } else {
     size_t axisIdx = 0;
     for (size_t i = 0; i < in_shape.size(); i++) {
-      if (axisIdx < axes_.size() && axes_[axisIdx] == static_cast<int>(i)) {
-        MS_ASSERT(in_shape[i] == 1);
+      if (axisIdx < axes_.size() && axes_.at(axisIdx) == static_cast<int>(i)) {
+        MS_ASSERT(in_shape.at(i) == 1);
         axisIdx++;
         continue;
       } else {
-        out_shape.push_back(in_shape[i]);
+        out_shape.push_back(in_shape.at(i));
       }
     }
   }

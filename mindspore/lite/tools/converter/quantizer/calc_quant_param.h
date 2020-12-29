@@ -22,8 +22,7 @@
 #include "include/errorcode.h"
 #include "schema/inner/model_generated.h"
 
-namespace mindspore {
-namespace lite {
+namespace mindspore::lite {
 static constexpr int CONVLUTION_INPUT_NUM = 3;
 
 class QuantParamCalcer {
@@ -46,6 +45,20 @@ class CommonCalcer : public QuantParamCalcer {
   int Calc(schema::MetaGraphT *subGraph, const schema::CNodeT &node) override;
 };
 
+class ConvCalcer : public CommonCalcer {
+ public:
+  ConvCalcer() = default;
+  ~ConvCalcer() override = default;
+  int Calc(schema::MetaGraphT *subGraph, const schema::CNodeT &node) override;
+};
+
+class BiasAddCalcer : public CommonCalcer {
+ public:
+  BiasAddCalcer() = default;
+  ~BiasAddCalcer() override = default;
+  int Calc(schema::MetaGraphT *subGraph, const schema::CNodeT &node) override;
+};
+
 class LinearCalcer : public QuantParamCalcer {
  public:
   LinearCalcer() = default;
@@ -63,7 +76,5 @@ class QuantParamCalcRegister {
   QuantParamCalcRegister();
   std::unordered_map<schema::PrimitiveType, std::shared_ptr<QuantParamCalcer>> _registerMap;
 };
-}  // namespace lite
-}  // namespace mindspore
-
+}  // namespace mindspore::lite
 #endif

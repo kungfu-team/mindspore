@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_LITE_SRC_BACKEND_ARM_INT8_ACTIVATION_H_
-#define MINDSPORE_LITE_SRC_BACKEND_ARM_INT8_ACTIVATION_H_
+#ifndef MINDSPORE_LITE_SRC_BACKEND_ARM_INT8_RELUX_INT8_H_
+#define MINDSPORE_LITE_SRC_BACKEND_ARM_INT8_RELUX_INT8_H_
 
 #include <vector>
 #include "src/lite_kernel.h"
-#include "nnacl/fp32/activation.h"
+#include "nnacl/fp32/activation_fp32.h"
 #include "nnacl/int8/relux_int8.h"
 
 namespace mindspore::kernel {
@@ -79,4 +79,4 @@ class Relu6Int8CPUKernel : public ReluXInt8CPUKernel {
 };
 }  // namespace mindspore::kernel
 
-#endif  // MINDSPORE_LITE_SRC_BACKEND_ARM_INT8_ACTIVATION_H_
+#endif  // MINDSPORE_LITE_SRC_BACKEND_ARM_INT8_RELUX_INT8_H_

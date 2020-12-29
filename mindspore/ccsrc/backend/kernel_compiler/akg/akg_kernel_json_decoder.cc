@@ -14,30 +14,31 @@
  * limitations under the License.
  */
 #include "backend/kernel_compiler/akg/akg_kernel_json_decoder.h"
-#include <string>
-#include <memory>
-#include <vector>
-#include <sstream>
+
 #include <algorithm>
+#include <memory>
+#include <sstream>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 #include "backend/kernel_compiler/akg/akg_kernel_json_generator.h"
-#include "ir/anf.h"
-#include "ir/func_graph.h"
-#include "ir/meta_tensor.h"
-#include "ir/manager.h"
-#include "ir/dtype.h"
-#include "frontend/operator/ops.h"
-#include "utils/convert_utils.h"
-#include "utils/convert_utils_py.h"
-#include "utils/utils.h"
-#include "ir/graph_utils.h"
-#include "runtime/device/kernel_info.h"
-#include "pipeline/jit/parse/data_converter.h"
-#include "pipeline/jit/parse/python_adapter.h"
 #include "backend/kernel_compiler/common_utils.h"
 #include "backend/session/anf_runtime_algorithm.h"
 #include "debug/anf_ir_dump.h"
+#include "frontend/operator/ops.h"
+#include "ir/anf.h"
+#include "ir/dtype.h"
+#include "ir/func_graph.h"
+#include "ir/graph_utils.h"
+#include "ir/manager.h"
+#include "ir/meta_tensor.h"
+#include "pipeline/jit/parse/data_converter.h"
+#include "pipeline/jit/parse/python_adapter.h"
+#include "runtime/device/kernel_info.h"
+#include "utils/convert_utils.h"
+#include "utils/convert_utils_py.h"
+#include "utils/utils.h"
 
 namespace mindspore {
 namespace kernel {
@@ -74,7 +75,7 @@ class CNodeDecoder {
       std::string value = attr_json[kJsonKeyValue];
       return MakeValue(value);
     } else if (type == "int") {
-      int value = attr_json[kJsonKeyValue];
+      int64_t value = attr_json[kJsonKeyValue];
       return MakeValue(value);
     } else if (type == "bool") {
       bool value = attr_json[kJsonKeyValue];
@@ -83,7 +84,7 @@ class CNodeDecoder {
       float value = attr_json[kJsonKeyValue];
       return MakeValue(value);
     } else if (type == "listInt") {
-      std::vector<int> value = attr_json[kJsonKeyValue];
+      std::vector<int64_t> value = attr_json[kJsonKeyValue];
       return MakeValue(value);
     } else if (type == "listStr") {
       std::vector<std::string> value = attr_json[kJsonKeyValue];
@@ -167,7 +168,7 @@ class CNodeDecoder {
         output_formats_.push_back(output_desc[kJsonKeyFormat]);
         output_types_.push_back(DtypeToTypeId(output_desc[kJsonKeyDataType]));
         auto get_item =
-          func_graph->NewCNode({NewValueNode(prim::kPrimTupleGetItem), cnode_, NewValueNode(SizeToInt(j))});
+          func_graph->NewCNode({NewValueNode(prim::kPrimTupleGetItem), cnode_, NewValueNode(SizeToLong(j))});
         func_graph->AddNode(get_item);
         nodes_map_[output_desc[kJsonKeyTensorName]] = get_item;
       }
@@ -183,15 +184,23 @@ class CNodeDecoder {
     const auto &inputs = cnode_->inputs();
     for (size_t index = 1; index < inputs.size(); ++index) {
       auto node = AnfAlgo::VisitKernel(inputs[index], 0);
+      if ((node.first)->isa<Parameter>()) {
+        auto parameter = (node.first)->cast<ParameterPtr>();
+        bool is_weight = AnfAlgo::IsParameterWeight(parameter);
+        kernel_info->set_feature_map_flag(!is_weight);
+        if (!is_weight) {
+          feature_map_input_indexs.push_back(index - 1);
+        }
+      }
       if (AnfAlgo::IsFeatureMapOutput(node.first)) {
-        feature_map_input_indexs.push_back(index);
+        feature_map_input_indexs.push_back(index - 1);
       }
     }
     if (AnfAlgo::GetCNodeName(cnode_) == prim::kPrimCast->name()) {
       AnfAlgo::SetNodeAttr(kIsBackendCast, MakeValue(false), cnode_);
     }
     if (inputs.size() == 1 || !feature_map_input_indexs.empty()) {
-      kernel_info->SetFeatureMapFlag(true);
+      kernel_info->set_feature_map_flag(true);
     }
     if (AnfAlgo::IsRealCNodeKernel(cnode_)) {
       AnfAlgo::SetNodeAttr(kIsFeatureMapOutput, MakeValue(kernel_info->is_feature_map()), cnode_);
@@ -239,6 +248,7 @@ class CNodeDecoder {
     {kReduceSumOpName, std::vector<std::string>{kAttrKeepDims}},
     {kReduceMaxOpName, std::vector<std::string>{kAttrKeepDims}},
     {kReduceMinOpName, std::vector<std::string>{kAttrKeepDims}},
+    {kBroadcastToOpName, std::vector<std::string>{kAttrShape}},
   };
 
   PrimitivePtr GetPrimitive(const std::string &op_name) {

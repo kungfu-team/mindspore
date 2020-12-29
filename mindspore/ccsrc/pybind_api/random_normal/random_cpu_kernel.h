@@ -19,8 +19,7 @@
 #include "pybind_api/random_normal/philox_generator.h"
 #include "pybind11/pybind11.h"
 #include "pybind_api/api_register.h"
-#include "backend/kernel_compiler/cpu/cpu_kernel.h"
-#include "backend/kernel_compiler/cpu/cpu_kernel_factory.h"
+#include "utils/log_adapter.h"
 
 namespace py = pybind11;
 
@@ -85,7 +84,7 @@ bool FillRandoms(PhiloxGenerator generator, float *output, int64_t vet_size, int
   }
   return true;
 }
-bool InitRandomNormal(float mean, float stddev, std::vector<int64_t> out_shape, int64_t seed,
+bool InitRandomNormal(float mean, float stddev, std::vector<int64_t> out_shape, int64_t seed, int64_t seed2,
                       const py::object &output_tensor);
 }  // namespace mindspore
 

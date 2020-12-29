@@ -27,7 +27,7 @@ namespace kernel {
 template <typename T, typename S>
 class UnsortedSegmentSumGpuKernel : public GpuKernel {
  public:
-  UnsortedSegmentSumGpuKernel() : input_dim0_(1), input_dim1_(1), output_dim0_(1), output_dim1_(1) {}
+  UnsortedSegmentSumGpuKernel() { ResetResource(); }
   ~UnsortedSegmentSumGpuKernel() override = default;
 
   const std::vector<size_t> &GetInputSizeList() const override { return input_size_list_; }
@@ -36,12 +36,15 @@ class UnsortedSegmentSumGpuKernel : public GpuKernel {
 
   bool Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &,
               const std::vector<AddressPtr> &outputs, void *stream_ptr) override {
+    if (is_null_input_) {
+      return true;
+    }
     T *input_addr = GetDeviceAddress<T>(inputs, 0);
     S *indices_addr = GetDeviceAddress<S>(inputs, 1);
     T *output_addr = GetDeviceAddress<T>(outputs, 0);
 
     CHECK_CUDA_RET_WITH_EXCEPT(
-      cudaMemsetAsync(output_addr, 0, outputs[0]->size, reinterpret_cast<cudaStream_t>(stream_ptr)),
+      kernel_node_, cudaMemsetAsync(output_addr, 0, outputs[0]->size, reinterpret_cast<cudaStream_t>(stream_ptr)),
       "cudaMemSet Failed");
     UnsortedSegmentSum(input_dim0_, input_dim1_, output_dim0_, output_dim1_, input_addr, indices_addr, output_addr,
                        reinterpret_cast<cudaStream_t>(stream_ptr));
@@ -49,9 +52,23 @@ class UnsortedSegmentSumGpuKernel : public GpuKernel {
   }
 
   bool Init(const CNodePtr &kernel_node) override {
-    auto input_shapes = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 0);
-    auto ids_shapes = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 1);
-    auto output_shapes = AnfAlgo::GetOutputInferShape(kernel_node, 0);
+    kernel_node_ = kernel_node;
+    auto input_shapes = AnfAlgo::GetInputRealDeviceShapeIfExist(kernel_node, 0);
+    is_null_input_ = CHECK_NULL_INPUT(input_shapes);
+    if (is_null_input_) {
+      MS_LOG(WARNING) << "UnsortedSegmentSum input is null";
+      InitSizeLists();
+      return true;
+    }
+    auto ids_shapes = AnfAlgo::GetInputRealDeviceShapeIfExist(kernel_node, 1);
+    auto output_shapes = AnfAlgo::GetOutputRealDeviceShapeIfExist(kernel_node, 0);
+
+    size_t input_num = AnfAlgo::GetInputTensorNum(kernel_node);
+    if (input_num == 3) {
+      MS_LOG(INFO) << "UnsortedSegmentSum Kernel Input count is 3 - dynamic mode";
+    } else {
+      MS_LOG(INFO) << "UnsortedSegmentSum Kernel Input count is 2";
+    }
 
     auto axis = ids_shapes.size();
     for (size_t i = 0; i < input_shapes.size(); i++) {
@@ -71,6 +88,17 @@ class UnsortedSegmentSumGpuKernel : public GpuKernel {
     return true;
   }
 
+  void ResetResource() noexcept override {
+    input_dim0_ = 1;
+    input_dim1_ = 1;
+    output_dim0_ = 1;
+    output_dim1_ = 1;
+    is_null_input_ = false;
+    input_size_list_.clear();
+    output_size_list_.clear();
+    workspace_size_list_.clear();
+  }
+
  protected:
   void InitSizeLists() override {
     input_size_list_.push_back(input_dim0_ * input_dim1_ * sizeof(T));
@@ -83,6 +111,7 @@ class UnsortedSegmentSumGpuKernel : public GpuKernel {
   size_t input_dim1_;
   size_t output_dim0_;
   size_t output_dim1_;
+  bool is_null_input_;
 
   std::vector<size_t> input_size_list_;
   std::vector<size_t> output_size_list_;

@@ -44,8 +44,8 @@ int PriorBoxCPUKernel::Init() {
     MS_LOG(ERROR) << "Size of input tensors is wrong.";
     return RET_ERROR;
   }
-  if (in_tensors_.size() != kOutputNum) {
-    MS_LOG(ERROR) << "Size of input tensors is wrong.";
+  if (out_tensors_.size() != kOutputNum) {
+    MS_LOG(ERROR) << "Size of output tensors is wrong.";
     return RET_ERROR;
   }
 
@@ -58,11 +58,11 @@ int PriorBoxCPUKernel::Init() {
 int PriorBoxCPUKernel::ReSize() { return GeneratePriorBox(); }
 
 int PriorBoxCPUKernel::GeneratePriorBox() {
-  const int fmap_w = in_tensors_[0]->Width();
-  const int fmap_h = in_tensors_[0]->Height();
+  const int fmap_w = in_tensors_.at(0)->Width();
+  const int fmap_h = in_tensors_.at(0)->Height();
 
-  const int image_w = prior_box_param_->image_size_w > 0 ? prior_box_param_->image_size_w : in_tensors_[1]->Width();
-  const int image_h = prior_box_param_->image_size_h > 0 ? prior_box_param_->image_size_h : in_tensors_[1]->Height();
+  const int image_w = prior_box_param_->image_size_w > 0 ? prior_box_param_->image_size_w : in_tensors_.at(1)->Width();
+  const int image_h = prior_box_param_->image_size_h > 0 ? prior_box_param_->image_size_h : in_tensors_.at(1)->Height();
 
   const float step_w =
     prior_box_param_->step_w > 0.0f ? prior_box_param_->step_w : static_cast<float>(image_w) / fmap_w;
@@ -79,11 +79,14 @@ int PriorBoxCPUKernel::GeneratePriorBox() {
     if (!exist) {
       different_aspect_ratios.emplace_back(ratio);
       if (prior_box_param_->flip) {
+        MS_ASSERT(fabs(ratio) > 1e-5);
         different_aspect_ratios.emplace_back(1.0f / ratio);
       }
     }
   }
 
+  MS_ASSERT(fmap_w);
+  MS_ASSERT(fmap_h);
   for (int i = 0; i < fmap_h; i++) {
     float cy = i + prior_box_param_->offset;
     for (int j = 0; j < fmap_w; j++) {
@@ -163,11 +166,6 @@ int RunPriorBox(void *cdata, int task_id) {
 }
 
 int PriorBoxCPUKernel::Run() {
-  auto prepare_ret = Prepare();
-  if (prepare_ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail! Ret error code[" << prepare_ret << "]";
-    return prepare_ret;
-  }
   int error_code = ParallelLaunch(this->context_->thread_pool_, RunPriorBox, this, thread_count_);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "PriorBox run error, error_code[" << error_code << "]";
@@ -176,33 +174,6 @@ int PriorBoxCPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuPriorBoxKernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                             const std::vector<lite::Tensor *> &outputs, OpParameter *op_parameter,
-                                             const InnerContext *ctx, const kernel::KernelKey &desc,
-                                             const mindspore::lite::PrimitiveC *primitive) {
-  if (op_parameter == nullptr) {
-    MS_LOG(ERROR) << "Input op_parameter is nullptr!";
-    return nullptr;
-  }
-  if (desc.type != schema::PrimitiveType_PriorBox) {
-    MS_LOG(ERROR) << "PriorBox invalid desc type " << desc.type;
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) PriorBoxCPUKernel(op_parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new PriorBoxCPUKernel fail!";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    delete kernel;
-    MS_LOG(ERROR) << "Init kernel failed, name: " << op_parameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(op_parameter->type_));
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_PriorBox, CpuPriorBoxKernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_PriorBox, CpuPriorBoxKernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_PriorBox, LiteKernelCreator<PriorBoxCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_PriorBox, LiteKernelCreator<PriorBoxCPUKernel>)
 }  // namespace mindspore::kernel

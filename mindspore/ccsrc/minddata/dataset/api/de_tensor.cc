@@ -14,14 +14,18 @@
  * limitations under the License.
  */
 
-#include "minddata/dataset/include/de_tensor.h"
-#include "minddata/dataset/include/type_id.h"
 #include "minddata/dataset/core/constants.h"
 #include "minddata/dataset/core/data_type.h"
+#include "minddata/dataset/include/de_tensor.h"
+#include "minddata/dataset/include/type_id.h"
 #include "mindspore/core/ir/dtype/type_id.h"
+#include "mindspore/lite/include/ms_tensor.h"
 #include "utils/hashing.h"
-#include "mindspore/lite/internal/include/ms_tensor.h"
-#include "mindspore/core/utils/convert_utils_base.h"
+#ifndef ENABLE_ANDROID
+#include "utils/log_adapter.h"
+#else
+#include "mindspore/lite/src/common/log_adapter.h"
+#endif
 
 namespace mindspore {
 namespace tensor {
@@ -44,7 +48,7 @@ MSTensor *DETensor::CreateFromMemory(TypeId data_type, const std::vector<int> &s
                  [](int s) -> dataset::dsize_t { return static_cast<dataset::dsize_t>(s); });
 
   (void)dataset::Tensor::CreateFromMemory(dataset::TensorShape(t_shape), dataset::MSTypeToDEType(data_type),
-                                          static_cast<uchar *>(data), &t);
+                                          static_cast<uint8_t *>(data), &t);
   return new DETensor(std::move(t));
 }
 
@@ -122,19 +126,6 @@ int DETensor::DimensionSize(size_t index) const {
 int DETensor::ElementsNum() const {
   MS_ASSERT(this->tensor_impl_ != nullptr);
   return this->tensor_impl_->Size();
-}
-
-std::size_t DETensor::hash() const {
-  MS_ASSERT(this->tensor_impl_ != nullptr);
-  auto shape = this->shape();
-  std::size_t hash_value = std::hash<int>{}(SizeToInt(this->data_type()));
-  hash_value = hash_combine(hash_value, std::hash<size_t>{}(shape.size()));
-  // hash all elements may costly, so only take at most 4 elements into account based on
-  // some experiments.
-  for (size_t i = 0; (i < shape.size()) && (i < 4); ++i) {
-    hash_value = hash_combine(hash_value, (std::hash<int>{}(shape[i])));
-  }
-  return hash_value;
 }
 
 size_t DETensor::Size() const {

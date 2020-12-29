@@ -14,51 +14,18 @@
 # ============================================================================
 """Operations for random number generators."""
 
-from mindspore._checkparam import Validator
+from mindspore.ops.primitive import constexpr
 from .. import operations as P
 from .. import functional as F
-from ..primitive import constexpr
 from .multitype_ops import _constexpr_utils as const_utils
 from ...common import dtype as mstype
-from ...common import get_seed as get_global_seed
-from ...common import _truncate_seed, _update_seeds, _get_op_seed
+from ...common.seed import _get_graph_seed
 
 @constexpr
-def get_seed(op_seed, kernel_name):
-    """
-    Get the graph-level seed.
-    Graph-level seed is used as a global variable, that can be used in different ops in case op-level seed is not set.
-    If op-level seed is 0, use graph-level seed; if graph-level seed is also 0, the system would generate a
-    random seed.
+def _get_seed(op_seed, kernel_name):
+    "Get the graph-level seed."
+    return _get_graph_seed(op_seed, kernel_name)
 
-    Note:
-        For each seed, either op-seed or graph-seed, a random sequence will be generated relating to this seed.
-        So, the state of the seed regarding to this op should be recorded.
-        A simple illustration should be:
-          If a random op is called twice within one program, the two results should be different:
-          print(C.uniform((1, 4), seed=1))  # generates 'A1'
-          print(C.uniform((1, 4), seed=1))  # generates 'A2'
-          If the same program runs again, it repeat the results:
-          print(C.uniform((1, 4), seed=1))  # generates 'A1'
-          print(C.uniform((1, 4), seed=1))  # generates 'A2'
-
-    Returns:
-        Interger. The current graph-level seed.
-
-    Examples:
-        >>> C.get_seed(seed, 'normal')
-    """
-    global_seed = get_global_seed()
-    if global_seed is None:
-        global_seed = 0
-    if op_seed is None:
-        temp_seed = _get_op_seed(0, kernel_name)
-    else:
-        Validator.check_non_negative_int(op_seed, "seed", kernel_name)
-        temp_seed = _get_op_seed(op_seed, kernel_name)
-    seeds = _truncate_seed(global_seed), _truncate_seed(temp_seed)
-    _update_seeds(op_seed, kernel_name)
-    return seeds
 
 def normal(shape, mean, stddev, seed=None):
     """
@@ -78,17 +45,23 @@ def normal(shape, mean, stddev, seed=None):
         of `mean` and `stddev`.
         The dtype is float32.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
-        >>> shape = (4, 16)
-        >>> mean = Tensor(1.0, mstype.float32)
+        >>> shape = (3, 1, 2)
+        >>> mean = Tensor(np.array([[3, 4], [5, 6]]), mstype.float32)
         >>> stddev = Tensor(1.0, mstype.float32)
         >>> output = C.normal(shape, mean, stddev, seed=5)
+        >>> result = output.shape
+        >>> print(result)
+        (3, 2, 2)
     """
     mean_dtype = F.dtype(mean)
     stddev_dtype = F.dtype(stddev)
     const_utils.check_valid_type(mean_dtype, mstype.int_type + (mstype.float16, mstype.float32), 'normal')
     const_utils.check_valid_type(stddev_dtype, mstype.int_type + (mstype.float16, mstype.float32), 'normal')
-    seed1, seed2 = get_seed(seed, "normal")
+    seed1, seed2 = _get_seed(seed, "normal")
     stdnormal = P.StandardNormal(seed1, seed2)
     random_normal = stdnormal(shape)
     value = random_normal * stddev + mean
@@ -115,17 +88,25 @@ def laplace(shape, mean, lambda_param, seed=None):
         Tensor. The shape should be the broadcasted shape of Input "shape" and shapes of mean and lambda_param.
         The dtype is float32.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
-        >>> shape = (4, 16)
+        >>> from mindspore import Tensor
+        >>> from mindspore.ops import composite as C
+        >>> import mindspore.common.dtype as mstype
+        >>> shape = (2, 3)
         >>> mean = Tensor(1.0, mstype.float32)
         >>> lambda_param = Tensor(1.0, mstype.float32)
         >>> output = C.laplace(shape, mean, lambda_param, seed=5)
+        >>> print(output.shape)
+        (2, 3)
     """
     mean_dtype = F.dtype(mean)
     lambda_param_dtype = F.dtype(lambda_param)
     const_utils.check_tensors_dtype_same(mean_dtype, mstype.float32, "laplace")
     const_utils.check_tensors_dtype_same(lambda_param_dtype, mstype.float32, "laplace")
-    seed1, seed2 = get_seed(seed, "laplace")
+    seed1, seed2 = _get_seed(seed, "laplace")
     stdlaplace = P.StandardLaplace(seed1, seed2)
     rnd = stdlaplace(shape)
     value = rnd * lambda_param + mean
@@ -157,25 +138,31 @@ def uniform(shape, minval, maxval, seed=None, dtype=mstype.float32):
         of `minval` and `maxval`.
         The dtype is designated as the input `dtype`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> For discrete uniform distribution, only one number is allowed for both minval and maxval:
+        >>> # For discrete uniform distribution, only one number is allowed for both minval and maxval:
         >>> shape = (4, 2)
         >>> minval = Tensor(1, mstype.int32)
         >>> maxval = Tensor(2, mstype.int32)
-        >>> output = C.uniform(shape, minval, maxval, seed=5)
+        >>> output = C.uniform(shape, minval, maxval, seed=5, dtype=mstype.int32)
         >>>
-        >>> For continuous uniform distribution, minval and maxval can be multi-dimentional:
-        >>> shape = (4, 2)
-        >>> minval = Tensor([1.0, 2.0], mstype.float32)
-        >>> maxval = Tensor([4.0, 5.0], mstype.float32)
+        >>> # For continuous uniform distribution, minval and maxval can be multi-dimentional:
+        >>> shape = (3, 1, 2)
+        >>> minval = Tensor(np.array([[3, 4], [5, 6]]), mstype.float32)
+        >>> maxval = Tensor([8.0, 10.0], mstype.float32)
         >>> output = C.uniform(shape, minval, maxval, seed=5)
+        >>> result = output.shape
+        >>> print(result)
+        (3, 2, 2)
     """
     minval_dtype = F.dtype(minval)
     maxval_dtype = F.dtype(maxval)
     const_utils.check_valid_type(dtype, [mstype.int32, mstype.float32], 'uniform')
     const_utils.check_tensors_dtype_same(minval_dtype, dtype, "uniform")
     const_utils.check_tensors_dtype_same(maxval_dtype, dtype, "uniform")
-    seed1, seed2 = get_seed(seed, "uniform")
+    seed1, seed2 = _get_seed(seed, "uniform")
     if const_utils.is_same_type(dtype, mstype.int32):
         random_uniform = P.UniformInt(seed1, seed2)
         value = random_uniform(shape, minval, maxval)
@@ -201,13 +188,19 @@ def gamma(shape, alpha, beta, seed=None):
         of `alpha` and `beta`.
         The dtype is float32.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
-        >>> shape = (4, 16)
-        >>> alpha = Tensor(1.0, mstype.float32)
-        >>> beta = Tensor(1.0, mstype.float32)
+        >>> shape = (3, 1, 2)
+        >>> alpha = Tensor(np.array([[3, 4], [5, 6]]), mstype.float32)
+        >>> beta = Tensor(np.array([1.0]), mstype.float32)
         >>> output = C.gamma(shape, alpha, beta, seed=5)
+        >>> result = output.shape
+        >>> print(result)
+        (3, 2, 2)
     """
-    seed1, seed2 = get_seed(seed, "gamma")
+    seed1, seed2 = _get_seed(seed, "gamma")
     random_gamma = P.Gamma(seed1, seed2)
     value = random_gamma(shape, alpha, beta)
     return value
@@ -226,17 +219,23 @@ def poisson(shape, mean, seed=None):
         Tensor. The shape should be equal to the broadcasted shape between the input "shape" and shapes of `mean`.
         The dtype is float32.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
-        >>> shape = (4, 16)
-        >>> mean = Tensor(1.0, mstype.float32)
+        >>> shape = (4, 1)
+        >>> mean = Tensor(np.array([5.0, 10.0]), mstype.float32)
         >>> output = C.poisson(shape, mean, seed=5)
+        >>> result = output.shape
+        >>> print(result)
+        (4, 2)
     """
-    seed1, seed2 = get_seed(seed, "poisson")
+    seed1, seed2 = _get_seed(seed, "poisson")
     random_poisson = P.Poisson(seed1, seed2)
     value = random_poisson(shape, mean)
     return value
 
-def multinomial(inputs, num_sample, replacement=True, seed=0):
+def multinomial(inputs, num_sample, replacement=True, seed=None):
     r"""
     Returns a tensor sampled from the multinomial probability distribution located in the corresponding
     row of the input tensor.
@@ -257,24 +256,29 @@ def multinomial(inputs, num_sample, replacement=True, seed=0):
         Tensor, has the same rows with input. The number of sampled indices of each row is `num_samples`.
         The dtype is float32.
 
+    Supported Platforms:
+        ``GPU``
+
     Examples:
         >>> input = Tensor([0, 9, 4, 0], mstype.float32)
         >>> output = C.multinomial(input, 2, True)
+        >>> print(output)
+        [1 1]
     """
     shape = P.Shape()
     reshape = P.Reshape()
-    if inputs.dim() != 1 and inputs.dim() != 2:
-        const_utils.raise_value_error("inputs dim must be 1d or 2d")
+    const_utils.check_valid_dim(len(shape(inputs)), "multinomial")
+    seed1, seed2 = _get_seed(seed, "multinomial")
     if not replacement:
         if shape(inputs)[-1] < num_sample:
             const_utils.raise_value_error("num_sample must be less than shape(input)[-1] without replacement")
         n_dist = 1
         if len(shape(inputs)) > 1:
             n_dist = shape(inputs)[-2]
-        random_uniform = P.UniformReal(seed=seed)((n_dist * shape(inputs)[-1],))
+        random_uniform = P.UniformReal(seed1, seed2)((n_dist * shape(inputs)[-1],))
         if n_dist != 1:
             random_uniform = reshape(random_uniform, (n_dist, shape(inputs)[-1]))
         vals = P.RealDiv()(P.Log()(random_uniform), inputs + 1e-6)
         _, indices = P.TopK()(vals, num_sample)
         return indices
-    return P.Multinomial(seed=seed)(inputs, num_sample)
+    return P.Multinomial(seed1, seed2)(inputs, num_sample)

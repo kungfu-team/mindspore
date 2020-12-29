@@ -24,7 +24,6 @@
 #include <vector>
 #include "minddata/dataset/engine/connector.h"
 #include "minddata/dataset/engine/cache/cache_client.h"
-#include "minddata/dataset/engine/cache/cache_service.h"
 #include "minddata/dataset/engine/datasetops/parallel_op.h"
 #include "minddata/dataset/engine/datasetops/repeat_op.h"
 #include "minddata/dataset/engine/datasetops/source/sampler/sampler.h"
@@ -47,14 +46,14 @@ class CacheBase : public ParallelOp {
   /// \param cache_client CacheClient for communication to the CacheServer
   /// \param sampler Sampler which is mandatory
   CacheBase(int32_t num_workers, int32_t op_connector_size, int32_t rows_per_buf,
-            std::shared_ptr<CacheClient> cache_client, std::shared_ptr<Sampler> sampler);
+            std::shared_ptr<CacheClient> cache_client, std::shared_ptr<SamplerRT> sampler);
   /// \brief Destructor
   ~CacheBase();
 
   /// \brief Overrides base class reset method.  When an operator does a reset, it cleans up any state
   /// info from it's previous execution and then initializes itself so that it can be executed
   /// again.
-  /// \return Status - The error code return
+  /// \return Status The status code returned
   Status Reset() override;
 
   /// \brief A print method typically used for debugging

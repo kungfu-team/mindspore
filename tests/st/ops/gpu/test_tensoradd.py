@@ -63,7 +63,7 @@ class TensroAdd(nn.Cell):
 @pytest.mark.level0
 @pytest.mark.platform_x86_gpu_training
 @pytest.mark.env_onecard
-def test_TensroAdd():
+def test_TensorAdd():
     add = TensroAdd()
     output = add()
     expect0 = np.array([])

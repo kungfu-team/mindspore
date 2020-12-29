@@ -234,7 +234,18 @@ std::map<AnfNodePtr, std::vector<size_t>> GetCommunicationOpInputInfo(
       for (size_t i = 0; i < input_num; i++) {
         auto input_node = kernel->input(i + 1);
         auto kernel_input = AnfAlgo::VisitKernelWithReturnType(input_node, 0, true);
-        MS_LOG(INFO) << " Add atomic clean for single communication op input, comm:" << kernel->fullname_with_scope()
+        if (!kernel_input.first->isa<CNode>()) {
+          continue;
+        }
+        auto cnode = kernel_input.first->cast<CNodePtr>();
+        if (AnfAlgo::IsCommunicationOp(cnode) || AnfAlgo::IsIndependentNode(cnode) ||
+            AnfAlgo::GetCNodeName(cnode) == kGetNextOpName) {
+          // no need to add atomic for communication/independent/getnext op 's output
+          MS_LOG(INFO) << "No need to add atomic clean for op " << kernel_input.first->fullname_with_scope()
+                       << "'s output";
+          continue;
+        }
+        MS_LOG(INFO) << "Add atomic clean for single communication op input, comm:" << kernel->fullname_with_scope()
                      << " input_node: " << kernel_input.first->fullname_with_scope()
                      << " index: " << kernel_input.second;
         auto iter = comm_input_info_map.find(kernel_input.first);

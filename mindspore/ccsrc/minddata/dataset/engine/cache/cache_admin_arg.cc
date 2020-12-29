@@ -17,7 +17,9 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include <unistd.h>
+#include <algorithm>
 #include <cerrno>
 #include <iomanip>
 #include <iostream>
@@ -26,14 +28,17 @@
 #include <vector>
 #include "minddata/dataset/engine/cache/cache_request.h"
 #include "minddata/dataset/engine/cache/cache_client.h"
+#include "minddata/dataset/engine/cache/cache_server.h"
+#include "minddata/dataset/engine/cache/cache_ipc.h"
 #include "minddata/dataset/util/path.h"
 #include "minddata/dataset/core/constants.h"
 
 namespace mindspore {
 namespace dataset {
-
+const int32_t CacheAdminArgHandler::kDefaultNumWorkers = std::thread::hardware_concurrency() > 2
+                                                           ? std::thread::hardware_concurrency() / 2
+                                                           : 1;
 const char CacheAdminArgHandler::kServerBinary[] = "cache_server";
-const char CacheAdminArgHandler::kDefaultSpillDir[] = "/tmp";
 
 CacheAdminArgHandler::CacheAdminArgHandler()
     : port_(kCfgDefaultCachePort),
@@ -43,7 +48,7 @@ CacheAdminArgHandler::CacheAdminArgHandler()
       log_level_(kDefaultLogLevel),
       memory_cap_ratio_(kMemoryCapRatio),
       hostname_(kCfgDefaultCacheHost),
-      spill_dir_(kDefaultSpillDir),
+      spill_dir_(DefaultSpillDir()),
       command_id_(CommandId::kCmdUnknown) {
   // Initialize the command mappings
   arg_map_["-h"] = ArgValue::kArgHost;
@@ -64,7 +69,7 @@ CacheAdminArgHandler::CacheAdminArgHandler()
   arg_map_["-m"] = ArgValue::kArgSharedMemorySize;
   arg_map_["--shared_memory_size"] = ArgValue::kArgSharedMemorySize;
   arg_map_["-l"] = ArgValue::kArgLogLevel;
-  arg_map_["--minloglevel"] = ArgValue::kArgLogLevel;
+  arg_map_["--loglevel"] = ArgValue::kArgLogLevel;
   arg_map_["-r"] = ArgValue::kArgMemoryCapRatio;
   arg_map_["--memory_cap_ratio"] = ArgValue::kArgMemoryCapRatio;
   arg_map_["--list_sessions"] = ArgValue::kArgListSessions;
@@ -293,6 +298,7 @@ Status CacheAdminArgHandler::Validate() {
   // Any unhandled arguments at this point is an error.
   if (!trailing_args_.empty()) {
     std::string err_msg = "Invalid arguments provided: " + trailing_args_;
+    err_msg += "\nPlease try `cache_admin --help` for more information";
     return Status(StatusCode::kSyntaxError, err_msg);
   }
 
@@ -300,12 +306,15 @@ Status CacheAdminArgHandler::Validate() {
   // run.
   if (command_id_ == CommandId::kCmdUnknown) {
     std::string err_msg = "No command provided";
+    err_msg += "\nPlease try `cache_admin --help` for more information";
     return Status(StatusCode::kSyntaxError, err_msg);
   }
 
   // Additional checks here
-  if (num_workers_ < 1 || num_workers_ > 100)
-    return Status(StatusCode::kSyntaxError, "Number of workers must be in range of 1 and 100.");
+  auto max_num_workers = std::max<int32_t>(std::thread::hardware_concurrency(), 100);
+  if (num_workers_ < 1 || num_workers_ > max_num_workers)
+    return Status(StatusCode::kSyntaxError,
+                  "Number of workers must be in range of 1 and " + std::to_string(max_num_workers) + ".");
   if (log_level_ < 0 || log_level_ > 3) return Status(StatusCode::kSyntaxError, "Log level must be in range (0..3).");
   if (memory_cap_ratio_ <= 0 || memory_cap_ratio_ > 1)
     return Status(StatusCode::kSyntaxError, "Memory cap ratio should be positive and no greater than 1");
@@ -320,9 +329,37 @@ Status CacheAdminArgHandler::RunCommand() {
       Help();
       break;
     }
-    case CommandId::kCmdStart:
+    case CommandId::kCmdStart: {
+      RETURN_IF_NOT_OK(StartServer(command_id_));
+      break;
+    }
     case CommandId::kCmdStop: {
-      RETURN_IF_NOT_OK(StartStopServer(command_id_));
+      CacheClientGreeter comm(hostname_, port_, 1);
+      RETURN_IF_NOT_OK(comm.ServiceStart());
+      SharedMessage msg;
+      RETURN_IF_NOT_OK(msg.Create());
+      auto rq = std::make_shared<ServerStopRequest>(msg.GetMsgQueueId());
+      RETURN_IF_NOT_OK(comm.HandleRequest(rq));
+      Status rc = rq->Wait();
+      if (rc.IsError()) {
+        msg.RemoveResourcesOnExit();
+        if (rc.IsNetWorkError()) {
+          std::string errMsg = "Server on port " + std::to_string(port_) + " is not up or has been shutdown already.";
+          return Status(StatusCode::kNetWorkError, errMsg);
+        }
+        return rc;
+      }
+      // OK return code only means the server acknowledge our request but we still
+      // have to wait for its complete shutdown because the server will shutdown
+      // the comm layer as soon as the request is received, and we need to wait
+      // on the message queue instead.
+      // The server will send a message back and remove the queue and we will then wake up. But on the safe
+      // side, we will also set up an alarm and kill this process if we hang on
+      // the message queue.
+      alarm(60);
+      Status dummy_rc;
+      (void)msg.ReceiveStatus(&dummy_rc);
+      std::cout << "Cache server on port " << std::to_string(port_) << " has been stopped successfully." << std::endl;
       break;
     }
     case CommandId::kCmdGenerateSession: {
@@ -331,7 +368,8 @@ Status CacheAdminArgHandler::RunCommand() {
       auto rq = std::make_shared<GenerateSessionIdRequest>();
       RETURN_IF_NOT_OK(comm.HandleRequest(rq));
       RETURN_IF_NOT_OK(rq->Wait());
-      std::cout << "Session: " << rq->GetSessionId() << std::endl;
+      std::cout << "Session created for server on port " << std::to_string(port_) << ": " << rq->GetSessionId()
+                << std::endl;
       break;
     }
     case CommandId::kCmdDestroySession: {
@@ -342,25 +380,28 @@ Status CacheAdminArgHandler::RunCommand() {
       auto rq = std::make_shared<DropSessionRequest>(cinfo);
       RETURN_IF_NOT_OK(comm.HandleRequest(rq));
       RETURN_IF_NOT_OK(rq->Wait());
-      std::cout << "Drop session successful" << std::endl;
+      std::cout << "Drop session successfully for server on port " << std::to_string(port_) << std::endl;
       break;
     }
     case CommandId::kCmdListSessions: {
       CacheClientGreeter comm(hostname_, port_, 1);
       RETURN_IF_NOT_OK(comm.ServiceStart());
       auto rq = std::make_shared<ListSessionsRequest>();
+      std::cout << "Listing sessions for server on port " << port_ << "\n" << std::endl;
       RETURN_IF_NOT_OK(comm.HandleRequest(rq));
       RETURN_IF_NOT_OK(rq->Wait());
       std::vector<SessionCacheInfo> session_info = rq->GetSessionCacheInfo();
       if (!session_info.empty()) {
         std::cout << std::setw(12) << "Session" << std::setw(12) << "Cache Id" << std::setw(12) << "Mem cached"
-                  << std::setw(12) << "Disk cached" << std::setw(16) << "Avg cache size" << std::endl;
+                  << std::setw(12) << "Disk cached" << std::setw(16) << "Avg cache size" << std::setw(10) << "Numa hit"
+                  << std::endl;
         for (auto curr_session : session_info) {
           std::string cache_id;
           std::string stat_mem_cached;
           std::string stat_disk_cached;
           std::string stat_avg_cached;
-          int32_t crc = (curr_session.connection_id & 0x00000000FFFFFFFF);
+          std::string stat_numa_hit;
+          uint32_t crc = (curr_session.connection_id & 0x00000000FFFFFFFF);
           cache_id = (curr_session.connection_id == 0) ? "n/a" : std::to_string(crc);
           stat_mem_cached =
             (curr_session.stats.num_mem_cached == 0) ? "n/a" : std::to_string(curr_session.stats.num_mem_cached);
@@ -368,10 +409,12 @@ Status CacheAdminArgHandler::RunCommand() {
             (curr_session.stats.num_disk_cached == 0) ? "n/a" : std::to_string(curr_session.stats.num_disk_cached);
           stat_avg_cached =
             (curr_session.stats.avg_cache_sz == 0) ? "n/a" : std::to_string(curr_session.stats.avg_cache_sz);
+          stat_numa_hit =
+            (curr_session.stats.num_numa_hit == 0) ? "n/a" : std::to_string(curr_session.stats.num_numa_hit);
 
           std::cout << std::setw(12) << curr_session.session_id << std::setw(12) << cache_id << std::setw(12)
                     << stat_mem_cached << std::setw(12) << stat_disk_cached << std::setw(16) << stat_avg_cached
-                    << std::endl;
+                    << std::setw(10) << stat_numa_hit << std::endl;
         }
       } else {
         std::cout << "No active sessions." << std::endl;
@@ -387,7 +430,7 @@ Status CacheAdminArgHandler::RunCommand() {
   return Status::OK();
 }
 
-Status CacheAdminArgHandler::StartStopServer(CommandId command_id) {
+Status CacheAdminArgHandler::StartServer(CommandId command_id) {
   // There currently does not exist any "install path" or method to identify which path the installed binaries will
   // exist in. As a temporary approach, we will assume that the server binary shall exist in the same path as the
   // cache_admin binary (this process).
@@ -442,12 +485,13 @@ Status CacheAdminArgHandler::StartStopServer(CommandId command_id) {
       RETURN_STATUS_UNEXPECTED(err_msg);
     }
     msg.resize(n);
-    std::cout << msg << std::endl;
     if (WIFEXITED(status)) {
       auto exit_status = WEXITSTATUS(status);
       if (exit_status) {
-        std::string errMsg = "Child exit status " + std::to_string(exit_status);
-        return Status(StatusCode::kUnexpectedError, errMsg);
+        return Status(StatusCode::kUnexpectedError, msg);
+      } else {
+        // Not an error, some info message goes to stdout
+        std::cout << msg << std::endl;
       }
     }
     return Status::OK();
@@ -468,23 +512,15 @@ Status CacheAdminArgHandler::StartStopServer(CommandId command_id) {
     std::string memory_cap_ratio_string = std::to_string(memory_cap_ratio_);
 
     char *argv[9];
-    if (command_id == CommandId::kCmdStart) {
-      argv[0] = cache_server_binary.data();
-      argv[1] = spill_dir_.data();
-      argv[2] = workers_string.data();
-      argv[3] = port_string.data();
-      argv[4] = shared_memory_string.data();
-      argv[5] = minloglevel_string.data();
-      argv[6] = daemonize_string.data();
-      argv[7] = memory_cap_ratio_string.data();
-      argv[8] = nullptr;
-    } else {
-      // We are doing a --stop. Change the name to '-' and we also need the port number.
-      // The rest we don't need.
-      argv[0] = std::string("-").data();
-      argv[1] = port_string.data();
-      argv[2] = nullptr;
-    }
+    argv[0] = cache_server_binary.data();
+    argv[1] = spill_dir_.data();
+    argv[2] = workers_string.data();
+    argv[3] = port_string.data();
+    argv[4] = shared_memory_string.data();
+    argv[5] = minloglevel_string.data();
+    argv[6] = daemonize_string.data();
+    argv[7] = memory_cap_ratio_string.data();
+    argv[8] = nullptr;
 
     // Now exec the binary
     execv(cache_server_binary.data(), argv);
@@ -498,20 +534,25 @@ Status CacheAdminArgHandler::StartStopServer(CommandId command_id) {
 
 void CacheAdminArgHandler::Help() {
   std::cerr << "Syntax:\n";
-  std::cerr << "   cache_admin [--start | --stop]\n";
-  std::cerr << "               [ [-h | --hostname] <hostname> ]\n";
-  std::cerr << "               [ [-p | --port] <port number> ]\n";
-  std::cerr << "               [ [-g | --generate_session] ]\n";
-  std::cerr << "               [ [-d | --destroy_session] <session id> ]\n";
-  std::cerr << "               [ [-w | --workers] <number of workers> ]\n";
-  std::cerr << "               [ [-s | --spilldir] <spilling directory> ]\n";
-  std::cerr << "               [ [-l | --minloglevel] <log level> ]\n";
-  std::cerr << "               [ --list_sessions ]\n";
+  std::cerr << "cache_admin [--start | --stop]\n";
+  std::cerr << "                [[-h | --hostname] <hostname>]            Default is " << kCfgDefaultCacheHost << ".\n";
+  std::cerr << "                [[-p | --port] <port number>]             Default is " << kCfgDefaultCachePort << ".\n";
+  std::cerr << "                [[-w | --workers] <number of workers>]    Default is " << kDefaultNumWorkers << ".\n";
+  std::cerr << "                [[-s | --spilldir] <spilling directory>]  Default is " << DefaultSpillDir() << ".\n";
+  std::cerr << "                [[-l | --loglevel] <log level>]           Default is 1 (warning level).\n";
+  std::cerr << "            [--destroy_session  | -d] <session id>\n";
+  std::cerr << "                [[-p | --port] <port number>]\n";
+  std::cerr << "            [--generate_session | -g]\n";
+  std::cerr << "                [[-p | --port] <port number>]\n";
+  std::cerr << "            [--list_sessions]\n";
+  std::cerr << "                [[-p | --port] <port number>]\n";
+  std::cerr << "            [--help]" << std::endl;
   // Do not expose these option to the user via help or documentation, but the options do exist to aid with
   // development and tuning.
-  // std::cerr << "               [ [-m | --shared_memory_size] <shared memory size> ]\n";
-  // std::cerr << "               [ [-r | --memory_cap_ratio] <float percent value>]\n";
-  std::cerr << "               [--help]" << std::endl;
+  // [ [-m | --shared_memory_size] <shared memory size> ]
+  //    Default is: kDefaultSharedMemorySizeInGB (Gb in unit)
+  // [ [-r | --memory_cap_ratio] <float percent value>]
+  //    Default is kMemoryCapRatio
 }
 }  // namespace dataset
 }  // namespace mindspore

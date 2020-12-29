@@ -29,19 +29,20 @@ namespace mindspore {
 namespace lite {
 class Upsample : public PrimitiveC {
  public:
+  Upsample() = default;
+  ~Upsample() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(Upsample, PrimitiveC);
-  Upsample() = default;
   explicit Upsample(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
   void SetMode(std::string mode);
   void SetScales(const std::vector<float> &scales);
 #else
-  Upsample() = default;
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 
 #endif
   std::string GetMode() const;
   std::vector<float> GetScales() const;
+  int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
 };
 }  // namespace lite
 }  // namespace mindspore

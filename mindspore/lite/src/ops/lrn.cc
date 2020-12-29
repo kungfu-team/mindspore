@@ -16,6 +16,10 @@
 
 #include "src/ops/lrn.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -49,6 +53,9 @@ int Lrn::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::Fl
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *LrnCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Lrn>(primitive); }
+Registry LrnRegistry(schema::PrimitiveType_Lrn, LrnCreator);
 #endif
 }  // namespace lite
 }  // namespace mindspore

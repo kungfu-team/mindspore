@@ -28,18 +28,24 @@ class Executor {
   Executor() = default;
   virtual ~Executor() = default;
 
-  virtual int Prepare(std::vector<kernel::LiteKernel *> &kernels) { return 0; }
+  virtual int Prepare(const std::vector<kernel::LiteKernel *> &kernels) { return RET_OK; }
 
   virtual int Run(std::vector<Tensor *> &in_tensors, std::vector<Tensor *> &out_tensors,
                   std::vector<kernel::LiteKernel *> &kernels, Allocator *allocator = nullptr,
-                  const session::KernelCallBack &before = nullptr, const session::KernelCallBack &after = nullptr);
+                  const KernelCallBack &before = nullptr, const KernelCallBack &after = nullptr);
 
  protected:
-  int TransformTensorLayoutFp32(Tensor *tensor, schema::Format dst_format, Allocator *allocator = nullptr);
+  static int CheckInputs(const std::vector<Tensor *> &in_tensors);
+};
 
-  int TransformTensorLayoutUint8(Tensor *tensor, schema::Format dst_format, Allocator *allocator = nullptr);
+class CpuExecutor : public Executor {
+ public:
+  CpuExecutor() = default;
+  virtual ~CpuExecutor() = default;
 
-  int TransformTensorLayout(Tensor *tensor, schema::Format dst_format, Allocator *allocator = nullptr);
+  int Run(std::vector<Tensor *> &in_tensors, std::vector<Tensor *> &out_tensors,
+          std::vector<kernel::LiteKernel *> &kernels, Allocator *allocator = nullptr,
+          const KernelCallBack &before = nullptr, const KernelCallBack &after = nullptr) override;
 };
 
 }  // namespace mindspore::lite

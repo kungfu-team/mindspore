@@ -14,14 +14,13 @@
  * limitations under the License.
  */
 #include "common/common.h"
-#include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/core/global_context.h"
 #include "minddata/dataset/include/datasets.h"
 
-using namespace mindspore::dataset::api;
-using mindspore::dataset::ShuffleMode;
-using mindspore::dataset::Tensor;
-using mindspore::dataset::GlobalContext;
+// need for CsvRecord
+#include "minddata/dataset/engine/ir/datasetops/source/csv_node.h"
+
+using namespace mindspore::dataset;
 
 class MindDataTestPipeline : public UT::DatasetOpTesting {
  protected:
@@ -71,6 +70,19 @@ TEST_F(MindDataTestPipeline, TestCSVDatasetBasic) {
   iter->Stop();
 }
 
+TEST_F(MindDataTestPipeline, TestCSVGetters) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCSVGetters.";
+
+  // Create a CSVDataset, with single CSV file
+  std::string train_file = datasets_root_path_ + "/testCSV/1.csv";
+  std::vector<std::string> column_names = {"col1", "col2", "col3", "col4"};
+  std::shared_ptr<Dataset> ds = CSV({train_file}, ',', {}, column_names, 0, ShuffleMode::kFalse);
+  EXPECT_NE(ds, nullptr);
+
+  EXPECT_EQ(ds->GetDatasetSize(), 3);
+  EXPECT_EQ(ds->GetColumnNames(), column_names);
+}
+
 TEST_F(MindDataTestPipeline, TestCSVDatasetMultiFiles) {
   MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCSVDatasetMultiFiles.";
 
@@ -98,12 +110,8 @@ TEST_F(MindDataTestPipeline, TestCSVDatasetMultiFiles) {
   iter->GetNextRow(&row);
   EXPECT_NE(row.find("col1"), row.end());
   std::vector<std::vector<std::string>> expected_result = {
-    {"17", "18", "19", "20"},
-    {"1", "2", "3", "4"},
-    {"5", "6", "7", "8"},
-    {"13", "14", "15", "16"},
-    {"21", "22", "23", "24"},
-    {"9", "10", "11", "12"},
+    {"17", "18", "19", "20"}, {"1", "2", "3", "4"},     {"5", "6", "7", "8"},
+    {"13", "14", "15", "16"}, {"21", "22", "23", "24"}, {"9", "10", "11", "12"},
   };
 
   uint64_t i = 0;
@@ -148,10 +156,7 @@ TEST_F(MindDataTestPipeline, TestCSVDatasetNumSamples) {
   std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
   iter->GetNextRow(&row);
   EXPECT_NE(row.find("col1"), row.end());
-  std::vector<std::vector<std::string>> expected_result = {
-    {"1", "2", "3", "4"},
-    {"5", "6", "7", "8"}
-  };
+  std::vector<std::vector<std::string>> expected_result = {{"1", "2", "3", "4"}, {"5", "6", "7", "8"}};
 
   uint64_t i = 0;
   while (row.size() != 0) {
@@ -191,10 +196,7 @@ TEST_F(MindDataTestPipeline, TestCSVDatasetDistribution) {
   std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
   iter->GetNextRow(&row);
   EXPECT_NE(row.find("col1"), row.end());
-  std::vector<std::vector<std::string>> expected_result = {
-    {"1", "2", "3", "4"},
-    {"5", "6", "7", "8"}
-  };
+  std::vector<std::vector<std::string>> expected_result = {{"1", "2", "3", "4"}, {"5", "6", "7", "8"}};
 
   uint64_t i = 0;
   while (row.size() != 0) {
@@ -327,8 +329,8 @@ TEST_F(MindDataTestPipeline, TestCSVDatasetHeader) {
   iter->Stop();
 }
 
-TEST_F(MindDataTestPipeline, TestCSVDatasetException) {
-  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCSVDatasetException.";
+TEST_F(MindDataTestPipeline, TestCSVDatasetFail) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCSVDatasetFail.";
   // Create a CSV Dataset
   std::string file = datasets_root_path_ + "/testCSV/1.csv";
   std::string invalid_csv_file = "./NotExistFile";
@@ -336,27 +338,51 @@ TEST_F(MindDataTestPipeline, TestCSVDatasetException) {
 
   // Test empty file list
   std::shared_ptr<Dataset> ds0 = CSV({});
-  EXPECT_EQ(ds0, nullptr);
+  EXPECT_NE(ds0, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter0 = ds0->CreateIterator();
+  // Expect failure: invalid CSV input
+  EXPECT_EQ(iter0, nullptr);
 
   // Test invalid file
   std::shared_ptr<Dataset> ds1 = CSV({invalid_csv_file});
-  EXPECT_EQ(ds1, nullptr);
+  EXPECT_NE(ds1, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter1 = ds1->CreateIterator();
+  // Expect failure: invalid CSV input
+  EXPECT_EQ(iter1, nullptr);
 
   // Test invalid num_samples < -1
   std::shared_ptr<Dataset> ds2 = CSV({file}, ',', {}, column_names, -1);
-  EXPECT_EQ(ds2, nullptr);
+  EXPECT_NE(ds2, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter2 = ds2->CreateIterator();
+  // Expect failure: invalid CSV input
+  EXPECT_EQ(iter2, nullptr);
 
   // Test invalid num_shards < 1
   std::shared_ptr<Dataset> ds3 = CSV({file}, ',', {}, column_names, 0, ShuffleMode::kFalse, 0);
-  EXPECT_EQ(ds3, nullptr);
+  EXPECT_NE(ds3, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter3 = ds3->CreateIterator();
+  // Expect failure: invalid CSV input
+  EXPECT_EQ(iter3, nullptr);
 
   // Test invalid shard_id >= num_shards
   std::shared_ptr<Dataset> ds4 = CSV({file}, ',', {}, column_names, 0, ShuffleMode::kFalse, 2, 2);
-  EXPECT_EQ(ds4, nullptr);
+  EXPECT_NE(ds4, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter4 = ds4->CreateIterator();
+  // Expect failure: invalid CSV input
+  EXPECT_EQ(iter4, nullptr);
 
   // Test invalid field_delim
   std::shared_ptr<Dataset> ds5 = CSV({file}, '"', {}, column_names);
-  EXPECT_EQ(ds5, nullptr);
+  EXPECT_NE(ds5, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter5 = ds5->CreateIterator();
+  // Expect failure: invalid CSV input
+  EXPECT_EQ(iter5, nullptr);
 }
 
 TEST_F(MindDataTestPipeline, TestCSVDatasetShuffleFilesA) {
@@ -386,12 +412,8 @@ TEST_F(MindDataTestPipeline, TestCSVDatasetShuffleFilesA) {
   iter->GetNextRow(&row);
   EXPECT_NE(row.find("col1"), row.end());
   std::vector<std::vector<std::string>> expected_result = {
-    {"13", "14", "15", "16"},
-    {"1", "2", "3", "4"},
-    {"17", "18", "19", "20"},
-    {"5", "6", "7", "8"},
-    {"21", "22", "23", "24"},
-    {"9", "10", "11", "12"},
+    {"13", "14", "15", "16"}, {"1", "2", "3", "4"},     {"17", "18", "19", "20"},
+    {"5", "6", "7", "8"},     {"21", "22", "23", "24"}, {"9", "10", "11", "12"},
   };
 
   uint64_t i = 0;
@@ -445,12 +467,8 @@ TEST_F(MindDataTestPipeline, TestCSVDatasetShuffleFilesB) {
   iter->GetNextRow(&row);
   EXPECT_NE(row.find("col1"), row.end());
   std::vector<std::vector<std::string>> expected_result = {
-    {"13", "14", "15", "16"},
-    {"1", "2", "3", "4"},
-    {"17", "18", "19", "20"},
-    {"5", "6", "7", "8"},
-    {"21", "22", "23", "24"},
-    {"9", "10", "11", "12"},
+    {"13", "14", "15", "16"}, {"1", "2", "3", "4"},     {"17", "18", "19", "20"},
+    {"5", "6", "7", "8"},     {"21", "22", "23", "24"}, {"9", "10", "11", "12"},
   };
 
   uint64_t i = 0;
@@ -505,10 +523,7 @@ TEST_F(MindDataTestPipeline, TestCSVDatasetShuffleGlobal) {
   iter->GetNextRow(&row);
   EXPECT_NE(row.find("col1"), row.end());
   std::vector<std::vector<std::string>> expected_result = {
-    {"5", "6", "7", "8"},
-    {"9", "10", "11", "12"},
-    {"1", "2", "3", "4"}
-  };
+    {"5", "6", "7", "8"}, {"9", "10", "11", "12"}, {"1", "2", "3", "4"}};
 
   uint64_t i = 0;
   while (row.size() != 0) {
@@ -534,13 +549,17 @@ TEST_F(MindDataTestPipeline, TestCSVDatasetShuffleGlobal) {
   GlobalContext::config_manager()->set_num_parallel_workers(original_num_parallel_workers);
 }
 
-TEST_F(MindDataTestPipeline, TestCSVDatasetDuplicateColumnName) {
-  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCSVDatasetDuplicateColumnName.";
+TEST_F(MindDataTestPipeline, TestCSVDatasetDuplicateColumnNameFail) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCSVDatasetDuplicateColumnNameFail.";
 
   // Create a CSVDataset, with single CSV file
   std::string train_file = datasets_root_path_ + "/testCSV/1.csv";
   std::vector<std::string> column_names = {"col1", "col1", "col3", "col4"};
   std::shared_ptr<Dataset> ds = CSV({train_file}, ',', {}, column_names, 0, ShuffleMode::kFalse);
-  // Expect failure: duplicate column names
-  EXPECT_EQ(ds, nullptr);
+  EXPECT_NE(ds, nullptr);
+
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter = ds->CreateIterator();
+  // Expect failure: invalid CSV input, duplicate column names
+  EXPECT_EQ(iter, nullptr);
 }

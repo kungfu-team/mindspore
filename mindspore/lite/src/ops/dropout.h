@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef LITE_MINDSPORE_LITE_C_OPS_DROPOUT_H_
-#define LITE_MINDSPORE_LITE_C_OPS_DROPOUT_H_
+#ifndef MINDSPORE_LITE_SRC_OPS_DROPOUT_H_
+#define MINDSPORE_LITE_SRC_OPS_DROPOUT_H_
 
 #include <vector>
 #include <set>
@@ -26,20 +26,22 @@ namespace mindspore {
 namespace lite {
 class Dropout : public PrimitiveC {
  public:
+  Dropout() = default;
+  ~Dropout() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(Dropout, PrimitiveC);
-  Dropout() = default;
   explicit Dropout(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
   void SetRatio(float ratio);
+  int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
 
 #else
-  Dropout() = default;
-
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
   float GetRatio() const;
+  int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
 };
+
 }  // namespace lite
 }  // namespace mindspore
 
-#endif  // LITE_MINDSPORE_LITE_C_OPS_DROPOUT_H_
+#endif  // MINDSPORE_LITE_SRC_OPS_DROPOUT_H_

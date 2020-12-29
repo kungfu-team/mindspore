@@ -169,7 +169,7 @@ static const char *GetSubModuleName(SubModuleId module_id) {
     "KERNEL",     // SM_KERNEL
     "MD",         // SM_MD
     "ME",         // SM_ME
-    "ONNX",       // SM_ONNX
+    "EXPRESS",    // SM_EXPRESS
     "OPTIMIZER",  // SM_OPTIMIZER
     "PARALLEL",   // SM_PARALLEL
     "PARSER",     // SM_PARSER
@@ -181,7 +181,8 @@ static const char *GetSubModuleName(SubModuleId module_id) {
     "VM",         // SM_VM
     "PROFILER",   // SM_PROFILER
     "PS",         // SM_PS
-    "LITE"        // SM_LITE
+    "LITE",       // SM_LITE
+    "HCCL_ADPT"   // SM_HCCL_ADPT
   };
 
   return sub_module_names[module_id % NUM_SUBMODUES];

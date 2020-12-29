@@ -15,6 +15,9 @@
  */
 
 #include "src/ops/softmax.h"
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
 
 namespace mindspore {
 namespace lite {
@@ -40,7 +43,7 @@ int SoftMax::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &in
       MS_LOG(ERROR) << "new primitiveT value failed";
       return RET_ERROR;
     }
-    auto prim_axis = GetValue<int>(prim.GetAttr("axis"));
+    auto prim_axis = CastToInt(prim.GetAttr("axis")).front();
     attr->axis = prim_axis;
     this->primitive_->value.value = attr;
     if (this->primitive_->value.value == nullptr) {
@@ -69,6 +72,9 @@ int SoftMax::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *SoftMaxCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<SoftMax>(primitive); }
+Registry SoftMaxRegistry(schema::PrimitiveType_SoftMax, SoftMaxCreator);
 #endif
 
 int SoftMax::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
@@ -78,9 +84,9 @@ int SoftMax::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> out
   auto output = outputs_.front();
   MS_ASSERT(output != nullptr);
   output->set_data_type(input->data_type());
-  output->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output->set_format(input->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   if (input->shape().size() > 5) {
     MS_LOG(ERROR) << "Softmax input dim must be less than 5, get " << input->shape().size();

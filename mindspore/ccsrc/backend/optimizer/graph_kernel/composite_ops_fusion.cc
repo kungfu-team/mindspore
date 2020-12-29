@@ -15,13 +15,14 @@
  */
 #include "backend/optimizer/graph_kernel/composite_ops_fusion.h"
 
-#include <memory>
-#include <string>
 #include <algorithm>
-#include <unordered_set>
 #include <map>
-#include <set>
+#include <memory>
 #include <queue>
+#include <string>
+#include <set>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "frontend/operator/ops.h"
@@ -36,185 +37,68 @@
 #include "debug/anf_ir_dump.h"
 #include "ir/func_graph_cloner.h"
 #include "backend/optimizer/graph_kernel/graph_kernel_helper.h"
+#include "backend/optimizer/pass/getitem_tuple.h"
 
 namespace mindspore {
 namespace opt {
-bool IsBasicFuseOp(const AnfNodePtr &node, bool is_before_kernel_select) {
-#if ENABLE_D
-  std::vector<PrimitivePtr> basic_ops = {
-    prim::kPrimAddN,       prim::kPrimTensorAdd,  prim::kPrimMul,      prim::kPrimSub, prim::kPrimMaximum,
-    prim::kPrimMinimum,    prim::kPrimNeg,        prim::kPrimRealDiv,  prim::kPrimPow, prim::kPrimSqrt,
-    prim::kPrimExpandDims, prim::kPrimReciprocal, prim::kPrimLessEqual};
-  if (!is_before_kernel_select) {
-    basic_ops.push_back(prim::kPrimCast);
+namespace {
+std::vector<AnfNodePtr> DeepLinkedGraphSearch(const std::vector<AnfNodePtr> &roots, const IncludeFunc &include) {
+  std::vector<AnfNodePtr> inputs;
+  for (auto &root : roots) {
+    auto tmp = DeepLinkedGraphSearch(root, include);
+    inputs.insert(inputs.end(), tmp.begin(), tmp.end());
   }
-#elif ENABLE_GPU
-  std::vector<PrimitivePtr> basic_ops = GetFusibleOpList();
-#else
-  std::vector<PrimitivePtr> basic_ops;
-#endif
-  return std::any_of(basic_ops.begin(), basic_ops.end(),
-                     [&node](const PrimitivePtr &prim) { return IsPrimitiveCNode(node, prim); });
+  return inputs;
 }
-
-bool IsReduceOp(const AnfNodePtr &node) {
-  std::vector<PrimitivePtr> reduce_ops = {prim::kPrimReduceSum, prim::kPrimReduceMean, prim::kPrimReduceMin,
-                                          prim::kPrimReduceMax, prim::kPrimReduceAll};
-  return std::any_of(reduce_ops.begin(), reduce_ops.end(),
-                     [&node](const PrimitivePtr &prim) { return IsPrimitiveCNode(node, prim); });
-}
-
-void GetGraphKernelInfo(const FuncGraphPtr &fg, GraphKernelInfo *info) {
-  MS_EXCEPTION_IF_NULL(fg);
-  auto mng = fg->manager();
-  if (mng == nullptr) {
-    mng = Manage(fg, false);
-    fg->set_manager(mng);
-  }
-  const auto &nodes = fg->nodes();
-  info->op_type = ELEWISE;
-  info->cal_step = -1;
-  info->reduce_op_num = 0;
-  for (auto node : nodes) {
-    auto cnode = node->cast<CNodePtr>();
-    if (cnode == nullptr) {
-      continue;
-    }
-    info->cal_step++;
-    if (IsReduceOp(node)) {
-      info->op_type = REDUCE;
-      info->reduce_op_num++;
-    }
-  }
-  auto fg_flag = fg->get_attr(FUNC_GRAPH_ATTR_GRAPH_KERNEL);
-  if (fg_flag != nullptr) {
-    auto fg_name = GetValue<std::string>(fg_flag);
-    info->origin_composite_name = fg_name;
-  }
-}
-
-bool IsCompositeFuseBasic(const GraphKernelInfo &info, const AnfNodePtr &node) {
-#if ENABLE_D
-  std::vector<PrimitivePtr> fusable_with_reduce;
-  if (!info.is_before_kernel_select) {
-    fusable_with_reduce.push_back(prim::kPrimCast);
-  }
-  if (info.op_type == REDUCE &&
-      (info.cal_step >= MAX_REDUCE_OP_FUSION_CAL_STEP || info.reduce_op_num >= MAX_REDUCE_OP_FUSION_REDUCE_NUM)) {
-    return std::any_of(fusable_with_reduce.begin(), fusable_with_reduce.end(),
-                       [&node](const PrimitivePtr &prim) { return IsPrimitiveCNode(node, prim); });
-  }
-#endif
-  return IsBasicFuseOp(node, info.is_before_kernel_select);
-}
-
-bool IsFuse(const GraphKernelInfo &info, const AnfNodePtr &node) {
-  // composite fuse composite op
-  if (AnfAlgo::IsGraphKernel(node)) {
-#if ENABLE_D
-    return false;
-#else
-    return true;
-#endif
-  }
-  return IsCompositeFuseBasic(info, node);
-}
-
-void UpdateGraphKernelInfo(GraphKernelInfo *info, const AnfNodePtr &node) {
-  if (IsPrimitiveCNode(node)) {
-    info->cal_step++;
-    if (IsReduceOp(node)) {
-      info->op_type = REDUCE;
-    }
-    info->origin_composite_name += AnfAlgo::GetCNodePrimitive(node)->name() + "_";
-  } else if (AnfAlgo::IsGraphKernel(node)) {
-    auto cnode = node->cast<CNodePtr>();
-    auto composite_g = GetValueNode<FuncGraphPtr>(cnode->input(0));
-    GraphKernelInfo fuse_info;
-    GetGraphKernelInfo(composite_g, &fuse_info);
-    info->cal_step += fuse_info.cal_step;
-    info->origin_composite_name += fuse_info.origin_composite_name;
-  }
-}
-
-IncludeType IncludeFusedBasicOpForward(const AnfNodePtr &cur_node, GraphKernelInfo *info, const AnfNodePtr &node) {
-  if (cur_node == node) {
-    return FOLLOW;
-  }
-#if ENABLE_D
-  if (!IsPrimitiveCNode(node)) {
-    return EXCLUDE;
-  }
-#else
-  bool is_fuse_composite = AnfAlgo::IsGraphKernel(node);
-  if (!IsPrimitiveCNode(node) && !is_fuse_composite) {
-    return EXCLUDE;
-  }
-#endif
-
-  bool is_fusable = IsFuse(*info, node);
-  if (is_fusable) {
-    UpdateGraphKernelInfo(info, node);
-  }
-  return is_fusable ? FOLLOW : EXCLUDE;
-}
-
-IncludeType IncludeFusedBasicOpBackward(const AnfNodePtr &cur_node, GraphKernelInfo *info, const AnfNodePtr &node) {
-  if (cur_node == node) {
-    return FOLLOW;
-  }
-  if (AnfAlgo::IsGraphKernel(node)) {
-    auto cnode = node->cast<CNodePtr>();
-    auto fg = GetValueNode<FuncGraphPtr>(cnode->input(kAnfPrimitiveIndex));
-    auto fg_attr_val = fg->get_attr(FUNC_GRAPH_ATTR_GRAPH_KERNEL);
-    MS_EXCEPTION_IF_NULL(fg_attr_val);
-    auto fg_attr = GetValue<std::string>(fg_attr_val);
-    if (fg_attr == kApplyMomentumOpName) {
-      return FOLLOW;
-    }
-    return EXCLUDE;
-  }
-  if (!IsPrimitiveCNode(node)) {
-    return EXCLUDE;
-  }
-
-  bool is_fusable = IsFuse(*info, node);
-  if (is_fusable) {
-    UpdateGraphKernelInfo(info, node);
-  }
-  return is_fusable ? FOLLOW : EXCLUDE;
-}
+}  // namespace
 
 bool CheckCircle(const std::set<AnfNodePtr> &fused_op_set, const AnfNodePtr &check_node,
-                 std::set<AnfNodePtr> *cached_unconnected_set) {
-  if (!check_node->isa<CNode>()) {
+                 std::set<AnfNodePtr> *cached_unconnected_set, std::vector<AnfNodePtr> *circle_nodes,
+                 const std::multimap<AnfNodePtr, std::pair<AnfNodePtr, AnfNodePtr>> &depend_prior) {
+  if (!check_node->isa<CNode>() || !fused_op_set.count(check_node)) {
     return false;
   }
+  circle_nodes->clear();
 
+  auto InputEdges = [&depend_prior](CNodePtr cnode) {
+    std::set<AnfNodePtr> edges;
+    auto range = depend_prior.equal_range(cnode);
+    for (auto iter = range.first; iter != range.second; ++iter) {
+      edges.insert(iter->second.first);
+    }
+    auto inputs = cnode->inputs();
+    for (auto input : inputs) {
+      edges.insert(input);
+    }
+    return edges;
+  };
+
+  std::set<AnfNodePtr> cached_done_set;
   auto cnode = check_node->cast<CNodePtr>();
-  const auto &inputs = cnode->inputs();
+  const auto &inputs = InputEdges(cnode);
   // there is a input not in fused_op_set, but the input depends on the fused_op_set
-  bool has_circle = false;
   for (auto input : inputs) {
     if (input->isa<CNode>() && !fused_op_set.count(input)) {
+      bool has_circle = false;
       std::set<AnfNodePtr> done;
       std::vector<AnfNodePtr> todos = {input};
       while (!todos.empty()) {
         auto node = todos.back();
         todos.pop_back();
-        if (done.count(node) || cached_unconnected_set->count(node)) {
+        if (done.count(node) || cached_unconnected_set->count(node) || cached_done_set.count(node)) {
           continue;
         }
 
         done.insert(node);
         if (fused_op_set.count(node)) {
           has_circle = true;
-          break;
+          circle_nodes->push_back(node);
+          continue;
         }
 
         if (node->isa<CNode>()) {
           auto cnode_ptr = node->cast<CNodePtr>();
-          for (auto it : cnode_ptr->inputs()) {
+          for (auto it : InputEdges(cnode_ptr)) {
             if (it->isa<CNode>()) {
               todos.push_back(it);
             }
@@ -223,16 +107,19 @@ bool CheckCircle(const std::set<AnfNodePtr> &fused_op_set, const AnfNodePtr &che
       }
 
       if (has_circle) {
-        return true;
+        cached_done_set.insert(done.begin(), done.end());
+      } else {
+        cached_unconnected_set->insert(done.begin(), done.end());
       }
-      cached_unconnected_set->insert(done.begin(), done.end());
+      done.clear();
     }
   }
 
-  return false;
+  return !circle_nodes->empty();
 }
 
-std::vector<AnfNodePtr> RemoveCircle(const std::vector<AnfNodePtr> &fused_op, bool is_backward) {
+AnfNodePtrList RemoveCircle(const std::vector<AnfNodePtr> &fused_op,
+                            const std::multimap<AnfNodePtr, std::pair<AnfNodePtr, AnfNodePtr>> &depend_prior) {
   std::set<AnfNodePtr> cached_unconnected_set;
   std::set<AnfNodePtr> fused_op_set(fused_op.begin(), fused_op.end());
   auto include = [&fused_op_set](const AnfNodePtr &node) {
@@ -241,17 +128,15 @@ std::vector<AnfNodePtr> RemoveCircle(const std::vector<AnfNodePtr> &fused_op, bo
     }
     return EXCLUDE;
   };
+
+  std::vector<AnfNodePtr> circle_nodes;
   for (auto iter = fused_op.rbegin(); iter != fused_op.rend(); ++iter) {
-    bool has_circle = CheckCircle(fused_op_set, *iter, &cached_unconnected_set);
+    circle_nodes.clear();
+    bool has_circle = CheckCircle(fused_op_set, *iter, &cached_unconnected_set, &circle_nodes, depend_prior);
     // delete the circle node and the node which depend on the circle node in fused op
     if (has_circle) {
-      auto mng = (*iter)->func_graph()->manager();
       std::vector<AnfNodePtr> erase_nodes;
-      if (is_backward) {
-        erase_nodes = DeepUsersSearch(*iter, include, mng);
-      } else {
-        erase_nodes = DeepLinkedGraphSearch(*iter, include);
-      }
+      erase_nodes = DeepLinkedGraphSearch(circle_nodes, include);
       for (auto erase_node : erase_nodes) {
         fused_op_set.erase(erase_node);
       }
@@ -319,63 +204,6 @@ void TopoSortForNodeList(std::vector<AnfNodePtr> *lst) {
   }
 
   lst->assign(res.begin(), res.end());
-}
-
-std::vector<AnfNodePtr> FindFuseCNodes(const CNodePtr &cnode, bool is_before_kernel_select) {
-  auto func_graph = cnode->func_graph();
-  auto graph_kernel_g = GetValueNode<FuncGraphPtr>(cnode->input(0));
-  GraphKernelInfo info;
-  info.is_before_kernel_select = is_before_kernel_select;
-  GetGraphKernelInfo(graph_kernel_g, &info);
-  auto mng = func_graph->manager();
-  // Search fusable nodes according input direction.
-  auto include_func_forward = std::bind(IncludeFusedBasicOpForward, cnode, &info, std::placeholders::_1);
-  auto used_nodes = DeepLinkedGraphSearch(cnode, include_func_forward);
-  std::reverse(used_nodes.begin(), used_nodes.end());
-  // Search fusable nodes according output direction.
-  auto include_func_backward = std::bind(IncludeFusedBasicOpBackward, cnode, &info, std::placeholders::_1);
-  auto user_nodes = DeepUsersSearch(cnode, include_func_backward, mng);
-
-  used_nodes.insert(used_nodes.end(), user_nodes.begin() + 1, user_nodes.end());
-  if (used_nodes.size() > 1) {
-    used_nodes = RemoveCircle(used_nodes);
-  }
-  TopoSortForNodeList(&used_nodes);
-  return used_nodes;
-}
-
-bool FuseCompositeOps(const std::shared_ptr<session::KernelGraph> &kernel_graph, bool is_before_kernel_select) {
-  MS_EXCEPTION_IF_NULL(kernel_graph);
-  bool changed = false;
-  auto &todos = kernel_graph->execution_order();
-  for (auto iter = todos.cbegin(); iter != todos.cend(); ++iter) {
-    auto node = *iter;
-    if (!AnfAlgo::IsGraphKernel(node) || !kernel_graph->nodes().contains(node)) {
-      continue;
-    }
-
-    auto origin_fg = AnfAlgo::GetCNodeFuncGraphPtr(node);
-    auto fg_attr = origin_fg->get_attr(FUNC_GRAPH_ATTR_GRAPH_KERNEL);
-    if (fg_attr != nullptr) {
-      auto fg_name = GetValue<std::string>(fg_attr);
-      if (graph_kernel_black_list.count(fg_name) != 0) {
-        continue;
-      }
-    }
-
-    auto fuse_nodes = FindFuseCNodes(node, is_before_kernel_select);
-    if (fuse_nodes.size() <= 1) {
-      continue;
-    }
-    changed = true;
-
-    FuseNodesToSubGraph(fuse_nodes, kernel_graph, "", is_before_kernel_select);
-  }
-  return changed;
-}
-
-bool CompositeOpsFusion::Run(const FuncGraphPtr &func_graph) {
-  return FuseCompositeOps(std::dynamic_pointer_cast<session::KernelGraph>(func_graph), false);
 }
 }  // namespace opt
 }  // namespace mindspore

@@ -26,18 +26,17 @@ namespace mindspore {
 namespace lite {
 class ConstantOfShape : public PrimitiveC {
  public:
+  ConstantOfShape() = default;
+  ~ConstantOfShape() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(ConstantOfShape, PrimitiveC);
-  ConstantOfShape() = default;
   explicit ConstantOfShape(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
-  void SetValue(float value);
 #else
-  ConstantOfShape() = default;
-
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
   int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
-  float GetValue() const;
+  std::vector<float> GetValue() const;
+  int GetDataType() const;
 };
 }  // namespace lite
 }  // namespace mindspore

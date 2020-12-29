@@ -18,49 +18,30 @@
 #include "tools/converter/parser/tflite/tflite_depth_to_space_parser.h"
 #include <vector>
 #include <memory>
-#include <map>
 
 namespace mindspore {
 namespace lite {
-STATUS TfliteDepthToSpaceParser::Parse(TfliteTensorsInfo *tensors_info,
-                                       const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                       const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TfliteDepthToSpaceParser";
-
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
+PrimitiveC *TfliteDepthToSpaceParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                         const std::unique_ptr<tflite::ModelT> &tflite_model) {
   std::unique_ptr<schema::DepthToSpaceT> attr = std::make_unique<schema::DepthToSpaceT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   const auto &tflite_attr = tflite_op->builtin_options.AsDepthToSpaceOptions();
   if (tflite_attr == nullptr) {
-    MS_LOG(ERROR) << "get op: %s attr failed", op->name.c_str();
-    return RET_NULL_PTR;
+    MS_LOG(ERROR) << "get op depthtospace attr failed";
+    return nullptr;
   }
   attr->blockSize = tflite_attr->block_size;
   attr->format = schema::Format::Format_NHWC;
-
-  op->primitive->value.type = schema::PrimitiveType_DepthToSpace;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  primitive->value.type = schema::PrimitiveType_Concat;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteDepthToSpaceParser("DepthToSpace", new TfliteDepthToSpaceParser());
+TfliteNodeRegister g_tfliteDepthToSpaceParser(tflite::BuiltinOperator_DEPTH_TO_SPACE, new TfliteDepthToSpaceParser());
 }  // namespace lite
 }  // namespace mindspore

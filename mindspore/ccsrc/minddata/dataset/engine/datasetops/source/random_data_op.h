@@ -63,7 +63,7 @@ class RandomDataOp : public ParallelOp {
     /**
      * The build method that produces the instantiated RandomDataOp as a shared pointer
      * @param out_op - The output RandomDataOperator that was constructed
-     * @return Status - The error code return
+     * @return Status The status code returned
      */
     Status Build(std::shared_ptr<RandomDataOp> *out_op);
 
@@ -120,7 +120,7 @@ class RandomDataOp : public ParallelOp {
     // Setter method
     // @param std::shared_ptr<Sampler> sampler
     // @return Builder setter method returns reference to the builder.
-    Builder &SetSampler(std::shared_ptr<Sampler> sampler) {
+    Builder &SetSampler(std::shared_ptr<SamplerRT> sampler) {
       builder_sampler_ = std::move(sampler);
       return *this;
     }
@@ -128,12 +128,12 @@ class RandomDataOp : public ParallelOp {
    private:
     /**
      * Check if the required parameters are set by the builder.
-     * @return Status - The error code return
+     * @return Status The status code returned
      */
     Status SanityCheck() const;
 
     std::unique_ptr<DataSchema> builder_data_schema_;
-    std::shared_ptr<Sampler> builder_sampler_;
+    std::shared_ptr<SamplerRT> builder_sampler_;
     int32_t builder_num_workers_;
     int32_t builder_op_connector_size_;
     int64_t builder_rows_per_buffer_;
@@ -152,7 +152,7 @@ class RandomDataOp : public ParallelOp {
    * @return Builder - The modified builder by reference
    */
   RandomDataOp(int32_t num_workers, int32_t op_connector_size, int64_t rows_per_buffer, int64_t total_rows,
-               std::unique_ptr<DataSchema> data_schema, std::shared_ptr<Sampler> sampler);
+               std::unique_ptr<DataSchema> data_schema, std::shared_ptr<SamplerRT> sampler);
 
   /**
    * Destructor
@@ -182,7 +182,7 @@ class RandomDataOp : public ParallelOp {
    * Class functor operator () override.
    * All DatasetOps operate by launching a thread (see ExecutionTree). This class functor will
    * provide the master loop that drives the logic for performing the work.
-   * @return Status - The error code return
+   * @return Status The status code returned
    */
   Status operator()() override;
 
@@ -190,7 +190,7 @@ class RandomDataOp : public ParallelOp {
    * Overrides base class reset method.  When an operator does a reset, it cleans up any state
    * info from it's previous execution and then initializes itself so that it can be executed
    * again.
-   * @return Status - The error code return
+   * @return Status The status code returned
    */
   Status Reset() override;
 
@@ -207,7 +207,7 @@ class RandomDataOp : public ParallelOp {
   /**
    * The entry point code for when workers are launched
    * @param worker_id - The worker id
-   * @return Status - The error code return
+   * @return Status The status code returned
    */
   Status WorkerEntry(int32_t worker_id) override;
 
@@ -219,7 +219,7 @@ class RandomDataOp : public ParallelOp {
   /**
    * Performs a synchronization between workers at the end of an epoch
    * @param worker_id - The worker id
-   * @return Status - The error code return
+   * @return Status The status code returned
    */
   Status EpochSync(int32_t worker_id, bool *quitting);
 
@@ -227,7 +227,7 @@ class RandomDataOp : public ParallelOp {
    * A helper function to stuff the tensor table into a buffer and send it to output connector
    * @param worker_id - The worker id
    * @param in_table - The tensor table to pack and send
-   * @return Status - The error code return
+   * @return Status The status code returned
    */
   Status PackAndSend(int32_t worker_id, std::unique_ptr<TensorQTable> in_table);
 
@@ -235,7 +235,7 @@ class RandomDataOp : public ParallelOp {
    * A helper function to create random data for the row
    * @param worker_id - The worker id
    * @param new_row - The output row to produce
-   * @return Status - The error code return
+   * @return Status The status code returned
    */
   Status CreateRandomRow(int32_t worker_id, TensorRow *new_row);
 

@@ -60,7 +60,7 @@ void InitConvDwCreator(std::vector<lite::Tensor *> *inputs, std::vector<lite::Te
 
   auto *input = new lite::Tensor;
   input->set_data_type(kNumberTypeFloat32);
-  input->SetFormat(schema::Format_NHWC);
+  input->set_format(schema::Format_NHWC);
   input->set_shape({conv_param->input_batch_, conv_param->input_h_, conv_param->input_w_, conv_param->input_channel_});
   input->MallocData();
   memcpy(input->MutableData(), input_data, input_size);
@@ -91,7 +91,7 @@ void InitConvDwCreator(std::vector<lite::Tensor *> *inputs, std::vector<lite::Te
   output->set_data_type(kNumberTypeFloat32);
   output->set_shape(
     {conv_param->output_batch_, conv_param->output_h_, conv_param->output_w_, conv_param->output_channel_});
-  output->SetFormat(schema::Format_NHWC);
+  output->set_format(schema::Format_NHWC);
   output->MallocData();
   memset(output->MutableData(), 0, output->ElementsNum() * sizeof(float));
   outputs->push_back(output);
@@ -135,14 +135,14 @@ TEST_F(TestConvolutionDwFp32, ConvDwFp32Accuracy) {
   auto correct_data = reinterpret_cast<float *>(mindspore::lite::ReadFile(output_path.c_str(), &output_size));
 
   // compare
-  CompareOutputData(output_ptr, correct_data, outputs[0]->ElementsNum(), 0.0001);
+  ASSERT_EQ(0, CompareOutputData(output_ptr, correct_data, outputs[0]->ElementsNum(), 0.0001));
 
   delete conv_param;
-  for (int i = 0; i < inputs.size(); i++) {
-    delete inputs[i];
+  for (auto &input : inputs) {
+    delete input;
   }
-  for (int i = 0; i < outputs.size(); i++) {
-    delete outputs[i];
+  for (auto &output : outputs) {
+    delete output;
   }
   delete kernel;
   delete correct_data;
@@ -189,10 +189,10 @@ TEST_F(TestConvolutionDwFp32, ConvDwFp32Performance) {
   printf("Convolution_depthwise fp32 average time : %f ms\n", time_avg / 1000.0f);
 
   delete conv_param;
-  for (int i = 0; i < inputs.size(); i++) {
+  for (unsigned int i = 0; i < inputs.size(); i++) {
     delete inputs[i];
   }
-  for (int i = 0; i < outputs.size(); i++) {
+  for (unsigned int i = 0; i < outputs.size(); i++) {
     delete outputs[i];
   }
   delete kernel;

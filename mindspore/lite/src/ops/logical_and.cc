@@ -16,6 +16,10 @@
 
 #include "src/ops/logical_and.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -28,6 +32,12 @@ int LogicalAnd::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuff
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *LogicalAndCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<LogicalAnd>(primitive);
+}
+Registry LogicalAndRegistry(schema::PrimitiveType_LogicalAnd, LogicalAndCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

@@ -19,11 +19,14 @@
 
 #include <string>
 #include <vector>
+#include <set>
 #include "CL/cl2.hpp"
 #include "src/common/log_adapter.h"
 #include "nnacl/op_base.h"
 #include "src/lite_kernel.h"
 #include "src/common/utils.h"
+#include "src/runtime/opencl/opencl_runtime.h"
+#include "src/runtime/kernel/opencl/opencl_kernel.h"
 
 namespace mindspore::lite {
 kernel::LiteKernel *GetOpenCLKernel(const std::vector<Tensor *> &in_tensors, const std::vector<Tensor *> &out_tensors,
@@ -31,6 +34,16 @@ kernel::LiteKernel *GetOpenCLKernel(const std::vector<Tensor *> &in_tensors, con
 }
 
 namespace mindspore::kernel {
+
+// for fusion
+extern const std::set<schema::PrimitiveType> ArithmeticPrimitives;
+extern const std::set<schema::PrimitiveType> ArithmeticSelfPrimitives;
+inline bool IsArithmetic(schema::PrimitiveType type) { return ArithmeticPrimitives.count(type); }
+inline bool IsArithmeticSelf(schema::PrimitiveType type) { return ArithmeticSelfPrimitives.count(type); }
+
+std::string GetActDefines();
+
+int GetUpPow2(int n);
 
 int GetMaxDivisor(int x, int divisor);
 
@@ -44,9 +57,12 @@ std::vector<size_t> GetCommonLocalSize(const std::vector<size_t> &global, int ma
 
 std::string CLErrorCode(cl_int error_code);
 
-void Write2File(void *mem, const std::string &file_name, int size);
+int WriteToBin(const std::string &file_path, void *data, size_t size);
 
-void PrintTensor(lite::Tensor *tensor, int num = 10, const std::string &out_file = "");
+void PrintTensor(const lite::Tensor *tensor, lite::opencl::MemType mem_type, int n = 10,
+                 const std::string &out_file = "");
+
+void PrintKernelOutput(OpenCLKernel *kernel, int n = 10, const std::string &out_file = "");
 
 std::vector<int> GetNHWCShape(const std::vector<int> &tensor_shape);
 
@@ -54,6 +70,8 @@ std::vector<size_t> GetImage2dShapeFromNHWC(const std::vector<int> &tensor_shape
 
 template <class T1, class T2>
 void PackNCHWToNC4HW4(void *src, void *dst, int batch, int plane, int channel, const std::function<T2(T1)> &to_dtype) {
+  MS_ASSERT(src);
+  MS_ASSERT(dst);
   int c4 = UP_DIV(channel, C4NUM);
   for (int b = 0; b < batch; b++) {
     int src_offset = b * plane * channel;
@@ -74,6 +92,8 @@ void PackNCHWToNC4HW4(void *src, void *dst, int batch, int plane, int channel, c
 
 template <class T1, class T2>
 void PackNHWCToNHWC4(void *src, void *dst, int batch, int plane, int channel, const std::function<T2(T1)> &to_dtype) {
+  MS_ASSERT(src);
+  MS_ASSERT(dst);
   int c4 = UP_DIV(channel, C4NUM);
   int nhwc4_batch_unit_offset = c4 * C4NUM * plane;
   int ic_remainder_ = channel % C4NUM;
@@ -99,6 +119,8 @@ void PackNHWCToNHWC4(void *src, void *dst, int batch, int plane, int channel, co
 
 template <class T1, class T2>
 void PackNHWCToNC4HW4(void *src, void *dst, int batch, int plane, int channel, const std::function<T2(T1)> &to_dtype) {
+  MS_ASSERT(src);
+  MS_ASSERT(dst);
   int c4 = UP_DIV(channel, C4NUM);
   for (int b = 0; b < batch; b++) {
     int src_oc_offset = b * plane * channel;
@@ -135,6 +157,11 @@ std::vector<T> MatrixMultiply(const T A[], const T B[], int M, int N, int K) {
 template <typename SRC_T, typename DST_T>
 void ConvertConvWeight4DTo7D(void *src, void *dst, size_t CO, size_t KH, size_t KW, size_t CI, size_t OGroup = 1,
                              const size_t CI_TILE = 4, const size_t CO_TILE = 4) {
+  MS_ASSERT(src);
+  MS_ASSERT(dst);
+  MS_ASSERT(CI_TILE);
+  MS_ASSERT(CO_TILE);
+  MS_ASSERT(OGroup);
   if (CO_TILE == 0 || CI_TILE == 0) return;
   auto origin_weight = reinterpret_cast<SRC_T *>(src);
   auto packed_weight = reinterpret_cast<DST_T *>(dst);

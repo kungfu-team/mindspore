@@ -15,8 +15,8 @@
  */
 
 #include <iostream>
-#include "src/runtime/kernel/arm/fp32/skip_gram.h"
-#include "nnacl/fp32/skip_gram.h"
+#include "src/runtime/kernel/arm/fp32/skip_gram_fp32.h"
+#include "nnacl/fp32/skip_gram_fp32.h"
 #include "src/common/file_utils.h"
 #include "common/common_test.h"
 #include "src/common/log_adapter.h"
@@ -33,14 +33,14 @@ class TestSkipGramFp32 : public mindspore::CommonTest {
 
 void SkipGramTestInit(std::vector<Tensor *> *inputs_, std::vector<Tensor *> *outputs_,
                       SkipGramParameter *skip_gram_param) {
-  Tensor *in_t_first = new Tensor(kObjectTypeString, {}, schema::Format_NHWC, lite::Tensor::Category::CONST);
+  Tensor *in_t_first = new Tensor(kObjectTypeString, {}, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   char sentence[] = "The quick brown fox jumps over the lazy dog";
   std::vector<StringPack> str;
   str.push_back({43, sentence});
   mindspore::lite::WriteStringsToTensor(in_t_first, str);
   inputs_->push_back(in_t_first);
 
-  Tensor *output = new Tensor(kObjectTypeString, {}, schema::Format_NHWC, lite::Tensor::Category::CONST);
+  Tensor *output = new Tensor(kObjectTypeString, {}, schema::Format_NHWC, lite::Tensor::Category::CONST_TENSOR);
   outputs_->push_back(output);
 
   skip_gram_param->ngram_size = 3;
@@ -67,7 +67,7 @@ TEST_F(TestSkipGramFp32, ElTest) {
   el->Run();
 
   std::vector<StringPack> output = mindspore::lite::ParseTensorBuffer(outputs_[0]);
-  for (int i = 0; i < output.size(); i++) {
+  for (unsigned int i = 0; i < output.size(); i++) {
     for (int j = 0; j < output[i].len; j++) {
       printf("%c", output[i].data[j]);
     }

@@ -16,16 +16,25 @@
 
 #include "src/ops/lstm.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
 bool Lstm::GetBidirection() const { return this->primitive_->value.AsLstm()->bidirection; }
 
+float Lstm::GetSmooth() const { return this->primitive_->value.AsLstm()->smooth; }
+
 void Lstm::SetBidirection(bool bidirection) { this->primitive_->value.AsLstm()->bidirection = bidirection; }
+
+void Lstm::SetSmooth(float smooth) { this->primitive_->value.AsLstm()->smooth = smooth; }
 
 #else
 
 bool Lstm::GetBidirection() const { return this->primitive_->value_as_Lstm()->bidirection(); }
+float Lstm::GetSmooth() const { return this->primitive_->value_as_Lstm()->smooth(); }
 int Lstm::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) {
   MS_ASSERT(nullptr != primitive);
   MS_ASSERT(nullptr != fbb);
@@ -34,11 +43,15 @@ int Lstm::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::F
     MS_LOG(ERROR) << "value_as_Lstm return nullptr";
     return RET_ERROR;
   }
-  auto val_offset = schema::CreateLstm(*fbb, attr->bidirection());
+  auto val_offset = schema::CreateLstm(*fbb, attr->bidirection(), attr->smooth());
   auto prim_offset = schema::CreatePrimitive(*fbb, schema::PrimitiveType_Lstm, val_offset.o);
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *LstmCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Lstm>(primitive); }
+Registry LstmRegistry(schema::PrimitiveType_Lstm, LstmCreator);
+
 #endif
 
 const int kLstmInputNum = 6;
@@ -51,16 +64,16 @@ int Lstm::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> output
   }
   auto input = inputs_.front();
   MS_ASSERT(input != nullptr);
-  auto weight_i = inputs_[1];
-  MS_ASSERT(input0 != nullptr);
+  auto weight_i = inputs_.at(1);
+  MS_ASSERT(weight_i != nullptr);
   auto output = outputs_.front();
   MS_ASSERT(output != nullptr);
   for (int i = 0; i < kLstmOutputNum; i++) {
-    outputs_[i]->set_data_type(input->data_type());
-    outputs_[i]->SetFormat(input->GetFormat());
+    outputs_.at(i)->set_data_type(input->data_type());
+    outputs_.at(i)->set_format(input->format());
   }
-  if (!GetInferFlag()) {
-    return RET_OK;
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
 
   std::vector<int> in_shape = input->shape();
@@ -76,6 +89,8 @@ int Lstm::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> output
   out_shape[2] = hidden_size;
   if (GetBidirection()) {
     out_shape.insert(out_shape.begin() + 1, 2);
+  } else {
+    out_shape.insert(out_shape.begin() + 1, 1);
   }
   output->set_shape(out_shape);
   // set hidden state, cell state

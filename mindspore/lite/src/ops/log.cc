@@ -17,6 +17,10 @@
 #include "src/ops/log.h"
 #include <memory>
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -50,6 +54,10 @@ int Log::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::Fl
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+PrimitiveC *LogCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Log>(primitive); }
+Registry LogRegistry(schema::PrimitiveType_Log, LogCreator);
+
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

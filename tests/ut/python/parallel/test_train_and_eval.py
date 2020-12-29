@@ -34,7 +34,7 @@ class Net(Cell):
         return out
 
 
-class EvalNet(Cell):
+class   EvalNet(Cell):
     def __init__(self, network, strategy2=None):
         super().__init__()
         self.network = network
@@ -46,9 +46,9 @@ class EvalNet(Cell):
         return out
 
 
-_x = Tensor(np.ones([8, 8]), dtype=ms.float32)
-_w1 = Tensor(np.ones([8, 8]), dtype=ms.float32)
-_b = Tensor(np.ones([8, 8]), dtype=ms.float32)
+_x = Tensor(np.ones([64, 64]), dtype=ms.float32)
+_w1 = Tensor(np.ones([64, 64]), dtype=ms.float32)
+_b = Tensor(np.ones([64, 64]), dtype=ms.float32)
 
 
 def test_train_and_eval():
@@ -58,8 +58,8 @@ def test_train_and_eval():
     strategy2 = ((4, 4),)
     net = Net(_w1, strategy1, strategy2)
     eval_net = EvalNet(net, strategy2=strategy2)
-    net.set_train()
     net.set_auto_parallel()
+    net.set_train()
     _executor.compile(net, _x, _b, phase='train', auto_parallel_mode=True)
 
     eval_net.set_train(mode=False)

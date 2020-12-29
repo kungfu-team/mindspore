@@ -26,9 +26,10 @@ namespace mindspore {
 namespace lite {
 class DeDepthwiseConv2D : public PrimitiveC {
  public:
+  DeDepthwiseConv2D() = default;
+  ~DeDepthwiseConv2D() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(DeDepthwiseConv2D, PrimitiveC);
-  DeDepthwiseConv2D() = default;
   explicit DeDepthwiseConv2D(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
   void SetFormat(int format);
   void SetChannelIn(int channel_in);
@@ -44,11 +45,8 @@ class DeDepthwiseConv2D : public PrimitiveC {
   void SetPadRight(int pad_right);
   void SetDilateW(int dilate_w);
   void SetDilateH(int dilate_h);
-  void SetHasBias(bool has_bias);
   void SetActivationType(int activation_type);
 #else
-  DeDepthwiseConv2D() = default;
-
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
   int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
@@ -66,7 +64,6 @@ class DeDepthwiseConv2D : public PrimitiveC {
   int GetPadRight() const;
   int GetDilateW() const;
   int GetDilateH() const;
-  bool GetHasBias() const;
   int GetActivationType() const;
 
   int PadUp() const { return this->pad_u_; }

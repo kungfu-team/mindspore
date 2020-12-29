@@ -54,3 +54,51 @@ def test_x1_3D_transpose_x1_True_x2_3D_transpose_x2_True():
     net = Net(transpose_x1, transpose_x2)
     output = net(Tensor(x1), Tensor(x2))
     assert output.shape == (2, 6, 4)
+
+def test_x1_1D_x2_1D():
+    x1 = np.random.randn(4).astype(np.float32)
+    x2 = np.random.randn(4).astype(np.float32)
+    transpose_x1 = False
+    transpose_x2 = False
+    net = Net(transpose_x1, transpose_x2)
+    output = net(Tensor(x1), Tensor(x2))
+    assert output.shape == ()
+
+def test_x1_1D_x2_3D():
+    x1 = np.random.randn(4).astype(np.float32)
+    x2 = np.random.randn(2, 4, 5).astype(np.float32)
+    transpose_x1 = False
+    transpose_x2 = False
+    net = Net(transpose_x1, transpose_x2)
+    output = net(Tensor(x1), Tensor(x2))
+    assert output.shape == (2, 5)
+
+
+def test_x1_3D_x2_1D():
+    x1 = np.random.randn(2, 4, 5).astype(np.float32)
+    x2 = np.random.randn(5).astype(np.float32)
+    transpose_x1 = False
+    transpose_x2 = False
+    net = Net(transpose_x1, transpose_x2)
+    output = net(Tensor(x1), Tensor(x2))
+    assert output.shape == (2, 4)
+
+
+def test_x1_1D_transpose_x1_True_x2_3D():
+    x1 = np.random.randn(4).astype(np.float32)
+    x2 = np.random.randn(2, 4, 5).astype(np.float32)
+    transpose_x1 = True
+    transpose_x2 = False
+    net = Net(transpose_x1, transpose_x2)
+    output = net(Tensor(x1), Tensor(x2))
+    assert output.shape == (2, 5)
+
+
+def test_x1_3D_x2_1D_transpose_x2_True():
+    x1 = np.random.randn(2, 4, 5).astype(np.float32)
+    x2 = np.random.randn(5).astype(np.float32)
+    transpose_x1 = False
+    transpose_x2 = True
+    net = Net(transpose_x1, transpose_x2)
+    output = net(Tensor(x1), Tensor(x2))
+    assert output.shape == (2, 4)

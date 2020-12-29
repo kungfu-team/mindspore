@@ -156,11 +156,11 @@ void ConvertObjectToTensors(const py::dict &dict, TensorOrderMap *const tensors)
     std::string name = py::cast<std::string>(item.first);
     if (py::isinstance<py::float_>(item.second.attr("data"))) {
       // convert float to tensor with shape([1])
-      tensor = std::make_shared<Tensor>(kNumberTypeFloat32, std::vector<int>({1}));
+      tensor = std::make_shared<Tensor>(kNumberTypeFloat32, std::vector<int64_t>({1}));
       *(static_cast<float *>(tensor->data_c())) = py::cast<float>(item.second.attr("data"));
     } else if (py::isinstance<py::int_>(item.second.attr("data"))) {
-      // convert int to tensor with shape([1])
-      tensor = std::make_shared<Tensor>(kNumberTypeInt32, std::vector<int>({1}));
+      // convert int64_t to tensor with shape([1])
+      tensor = std::make_shared<Tensor>(kNumberTypeInt32, std::vector<int64_t>({1}));
       *(static_cast<float *>(tensor->data_c())) = py::cast<float>(item.second.attr("data"));
     } else if (py::isinstance<Tensor>(item.second.attr("data"))) {
       // cast tensor
@@ -215,9 +215,9 @@ bool AddDFGraph(const std::map<std::string, ExecutorInfoPtr> &info, const py::di
   }
 
   if (MsContext::GetInstance()->get_param<bool>(MS_CTX_SAVE_GRAPHS_FLAG)) {
-    convertor.DrawComputeGraph(GetFilePathName("ge_graph.dot"));                      // for debug
-    convertor.DrawInitGraph(GetFilePathName("init_graph.dot"));                       // for debug
-    convertor.DrawSaveCheckpointGraph(GetFilePathName("save_checkpoint_graph.dot"));  // for debug
+    convertor.DrawComputeGraph(GetSaveGraphsPathName("ge_graph.dot"));                      // for debug
+    convertor.DrawInitGraph(GetSaveGraphsPathName("init_graph.dot"));                       // for debug
+    convertor.DrawSaveCheckpointGraph(GetSaveGraphsPathName("save_checkpoint_graph.dot"));  // for debug
   }
   std::string init_graph = "init_subgraph." + net_id;
   std::string checkpoint_name = "save." + net_id;
@@ -245,8 +245,8 @@ FuncGraphPtr BuildDFGraph(const std::map<std::string, ExecutorInfoPtr> &info, co
   FuncGraphPtr anf_graph = info.at(phase)->func_graph;
 
   if (MsContext::GetInstance()->get_param<bool>(MS_CTX_SAVE_GRAPHS_FLAG)) {
-    draw::Draw(GetFilePathName("anf_graph.dot"), anf_graph);  // for debug
-    DumpIR(GetFilePathName("anf_graph.ir"), anf_graph, true);
+    draw::Draw("anf_graph.dot", anf_graph);  // for debug
+    DumpIR("anf_graph.ir", anf_graph, true);
   }
 
   if (!AddDFGraph(info, init_params, phase, broadcast_params)) {
@@ -514,8 +514,9 @@ py::object ExecDFGraph(const std::map<std::string, ExecutorInfoPtr> &info, const
     MS_LOG(EXCEPTION) << "Exec graph failed";
   }
 }
+
 void ExportDFGraph(const std::string &file_name, const std::string &phase) {
-  MS_LOG(DEBUG) << "ExportGraph Begin";
+  MS_LOG(DEBUG) << "Export graph begin.";
   transform::DfGraphWrapperPtr wrap_ptr = DfGraphManager::GetInstance().GetGraphByName(phase);
   if (wrap_ptr == nullptr) {
     MS_LOG(ERROR) << "Get graph form DfGraphManager failed!";
@@ -524,13 +525,12 @@ void ExportDFGraph(const std::string &file_name, const std::string &phase) {
 
   transform::DfGraphPtr ge_graph = wrap_ptr->graph_ptr_;
   if (nullptr == ge_graph) {
-    MS_LOG(ERROR) << "The export graph is null";
+    MS_LOG(ERROR) << "Graph is null!";
     return;
   }
 
   (void)ge_graph->SaveToFile(file_name);
-
-  MS_LOG(DEBUG) << "ExportGraph End";
+  MS_LOG(DEBUG) << "Export graph end.";
 }
 }  // namespace pipeline
 }  // namespace mindspore

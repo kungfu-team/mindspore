@@ -15,19 +15,20 @@
  */
 
 #include "runtime/device/gpu/kernel_info_setter.h"
-#include <string>
+#include <algorithm>
 #include <memory>
-#include "backend/kernel_compiler/kernel.h"
-#include "utils/utils.h"
-#include "utils/ms_context.h"
-#include "backend/kernel_compiler/gpu/gpu_kernel_factory.h"
-#include "backend/kernel_compiler/kernel_build_info.h"
-#include "backend/session/anf_runtime_algorithm.h"
+#include <string>
 #include "backend/kernel_compiler/common_utils.h"
-#include "utils/ms_utils.h"
-#include "backend/kernel_compiler/oplib/oplib.h"
+#include "backend/kernel_compiler/gpu/gpu_kernel_factory.h"
+#include "backend/kernel_compiler/kernel.h"
+#include "backend/kernel_compiler/kernel_build_info.h"
 #include "backend/kernel_compiler/oplib/opinfo.h"
+#include "backend/kernel_compiler/oplib/oplib.h"
+#include "backend/session/anf_runtime_algorithm.h"
 #include "runtime/device/gpu/cuda_common.h"
+#include "utils/ms_context.h"
+#include "utils/ms_utils.h"
+#include "utils/utils.h"
 
 namespace mindspore {
 namespace device {
@@ -103,6 +104,13 @@ bool SelectAkgKernel(const CNodePtr &kernel_node, const std::shared_ptr<KernelBu
   MS_EXCEPTION_IF_NULL(kernel_node);
   MS_EXCEPTION_IF_NULL(selected_kernel_info);
   std::vector<std::shared_ptr<KernelBuildInfo>> kernel_info_list;
+
+  if (AnfAlgo::IsNodeInGraphKernel(kernel_node)) {
+    // The op_info in OpLib is only used for basic ops,
+    // we don't care it in GraphKernel.
+    return true;
+  }
+
   std::string op_name = AnfAlgo::GetCNodeName(kernel_node);
 
   auto op_info_ptr = mindspore::kernel::OpLib::FindOp(op_name, kernel::OpImplyType::kAKG);
@@ -133,29 +141,38 @@ void SetTensorDeviceInfo(const kernel::KernelBuildInfo &selected_kernel_info, co
   for (size_t input_index = 0; input_index < AnfAlgo::GetInputTensorNum(kernel_node); ++input_index) {
     auto input_kernel_node = kernel_node->input(input_index + 1);
     MS_EXCEPTION_IF_NULL(input_kernel_node);
-    if (!input_kernel_node->isa<Parameter>()) {
+    auto input_with_index = AnfAlgo::VisitKernel(input_kernel_node, 0);
+    MS_EXCEPTION_IF_NULL(input_with_index.first);
+    auto real_input_node = input_with_index.first;
+    if (!real_input_node->isa<Parameter>()) {
       continue;
     }
     std::shared_ptr<kernel::KernelBuildInfo::KernelBuildInfoBuilder> builder =
       std::make_shared<kernel::KernelBuildInfo::KernelBuildInfoBuilder>();
 
-    auto param = input_kernel_node->cast<ParameterPtr>();
+    auto param = real_input_node->cast<ParameterPtr>();
     MS_EXCEPTION_IF_NULL(param);
     if (!AnfAlgo::IsParameterWeight(param)) {
       std::vector<std::string> output_format = {kOpFormat_DEFAULT};
       builder->SetOutputsFormat(output_format);
-      std::vector<TypeId> output_type = {AnfAlgo::GetOutputInferDataType(input_kernel_node, 0)};
+      std::vector<TypeId> output_type = {AnfAlgo::GetOutputInferDataType(real_input_node, 0)};
       builder->SetOutputsDeviceType(output_type);
-      AnfAlgo::SetSelectKernelBuildInfo(builder->Build(), input_kernel_node.get());
+      AnfAlgo::SetSelectKernelBuildInfo(builder->Build(), real_input_node.get());
       continue;
     }
-    if ((AnfAlgo::GetOutputDeviceDataType(input_kernel_node, 0) == kTypeUnknown) ||
+    if ((AnfAlgo::GetOutputDeviceDataType(real_input_node, 0) == kTypeUnknown) ||
         (AnfAlgo::GetCNodeName(kernel_node) == "ApplyMomentum")) {
       std::vector<std::string> output_format = {selected_kernel_info.GetInputFormat(input_index)};
       builder->SetOutputsFormat(output_format);
-      std::vector<TypeId> output_type = {selected_kernel_info.GetInputDeviceType(input_index)};
+      auto reduce_flag = kernel::GpuKernelFactory::GetInstance().reduce_flag_;
+      std::vector<TypeId> output_type;
+      if (std::find(reduce_flag.first.begin(), reduce_flag.first.end(), input_index) != reduce_flag.first.end()) {
+        output_type = {reduce_flag.second};
+      } else {
+        output_type = {selected_kernel_info.GetInputDeviceType(input_index)};
+      }
       builder->SetOutputsDeviceType(output_type);
-      AnfAlgo::SetSelectKernelBuildInfo(builder->Build(), input_kernel_node.get());
+      AnfAlgo::SetSelectKernelBuildInfo(builder->Build(), real_input_node.get());
     }
   }
 }
@@ -324,6 +341,12 @@ void FormatTransformChecker::CheckSupportFormatTransform(const std::shared_ptr<s
       format_transform_ = false;
       return;
     }
+    auto value = AnfAlgo::GetCNodePrimitive(kernel);
+    if (value != nullptr && value->GetAttr("data_format") != nullptr &&
+        GetValue<std::string>(value->GetAttr("data_format")) == kOpFormat_NHWC) {
+      format_transform_ = false;
+      return;
+    }
     if (kernel_name == prim::kPrimConv2D->name()) {
       conv_cnt++;
     }
@@ -371,6 +394,9 @@ void SetKernelInfo(const CNodePtr &kernel_node, KernelType kernel_type) {
   if (kernel_type == UNKNOWN_KERNEL_TYPE) {
     result =
       kernel::GpuKernelFactory::GetInstance().SearchRegistered(AnfAlgo::GetCNodeName(kernel_node), builder->Build());
+    if (!result) {
+      result = kernel::GpuKernelFactory::GetInstance().ReducePrecision(AnfAlgo::GetCNodeName(kernel_node), builder);
+    }
     if (!result) {
       result = SelectAkgKernel(kernel_node, builder->Build());
       kernel_type = AKG_KERNEL;

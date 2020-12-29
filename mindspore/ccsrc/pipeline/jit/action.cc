@@ -172,9 +172,8 @@ bool CombineLikeGraphs(const ResourcePtr &res) {
     }
     auto &cloned_nodes = *cloner->cloned_node();
     for (auto &fv : fg->paramter_obj_nodes()) {
-      TraceManager::DebugTrace(std::make_shared<TraceCombileLikeGraphs>(fv->debug_info()));
+      TraceGuard guard(std::make_shared<TraceCombileLikeGraphs>(fv->debug_info()));
       auto param = base_graph->add_parameter();
-      TraceManager::EndTrace();
       auto &node_users = res->manager()->node_users()[fv];
       for (auto &n : node_users) {
         // If the user is not in this graph, no need to change.
@@ -302,6 +301,10 @@ bool OptimizeAction(const ResourcePtr &res, const std::vector<PassItem> &passes)
 }
 
 bool OptInlineAction(const ResourcePtr &res) {
+  if (parallel::ParallelContext::GetInstance()->parallel_mode() == "semi_auto_parallel" ||
+      parallel::ParallelContext::GetInstance()->parallel_mode() == "auto_parallel") {
+    return OptimizeAction(res, kInlinePasses);
+  }
   if (opt::python_pass::PyPassManager::GetInstance()->GetPassGroup(opt::python_pass::Phase::PREAD)->size() != 0) {
     return OptimizeAction(res, kInlinePasses);
   }
@@ -354,7 +357,7 @@ bool TaskEmitAction(const ResourcePtr &res) {
   auto context_ptr = MsContext::GetInstance();
   std::string backend = MsContext::GetInstance()->backend_policy();
   MS_EXCEPTION_IF_NULL(context_ptr);
-  if (CompileGraphs::ContainMixedTarget(func_graph)) {
+  if (func_graph->ContainMultiTarget()) {
     bc_ptr->set_is_multi_graph_sink(false);
     context_ptr->set_param<bool>(MS_CTX_IS_MULTI_GRAPH_SINK, false);
     context_ptr->set_param<bool>(MS_CTX_ENABLE_LOOP_SINK, false);
@@ -444,7 +447,7 @@ bool KeepValueNodeDuplication(const AnfNodePtr &value_node, const ResourcePtr &r
   auto &node_users = res->manager()->node_users();
   auto &users = node_users[value_node];
   auto used_by_keep_value_prim =
-    std::any_of(users.begin(), users.end(), [](const std::pair<AnfNodePtr, int> &user) -> bool {
+    std::any_of(users.begin(), users.end(), [](const std::pair<AnfNodePtr, int64_t> &user) -> bool {
       MS_EXCEPTION_IF_NULL(user.first);
       auto cnode = user.first->cast<CNodePtr>();
       if (cnode == nullptr) {
@@ -480,6 +483,7 @@ bool RemoveValueNodeDuplicationsAction(const ResourcePtr &res) {
   return true;
 }
 
+bool PipelineSplitAction(const ResourcePtr &res) { return PipelineSplitPass(res); }
 bool ValidateAction(const ResourcePtr &res) { return ValidatePass(res); }
 
 bool ActionPyStub(const ResourcePtr &res, opt::python_pass::Phase phase) {
@@ -559,6 +563,8 @@ static std::vector<ActionItem> CommonPipeline() {
   actions.emplace_back(std::make_pair("inline", OptInlineAction));
   // Add pre-ad, post-inline python pass stub
   actions.emplace_back(std::make_pair("py_pre_ad", PreAdActionPyStub));
+  // Do PipelineSplit
+  actions.emplace_back(std::make_pair("pipeline_split", PipelineSplitAction));
 
   return actions;
 }

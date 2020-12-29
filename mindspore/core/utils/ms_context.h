@@ -73,6 +73,7 @@ enum MsCtxParam : unsigned {
   MS_CTX_PRECOMPILE_ONLY,
   MS_CTX_ENABLE_PROFILING,
   MS_CTX_SAVE_GRAPHS_FLAG,
+  MS_CTX_ENABLE_PARALLEL_SPLIT,
   MS_CTX_TYPE_BOOL_END,
 
   // paramater of type int
@@ -102,6 +103,7 @@ enum MsCtxParam : unsigned {
   MS_CTX_SAVE_DUMP_PATH,
   MS_CTX_SAVE_GRAPHS_PATH,
   MS_CTX_VARIABLE_MEMORY_MAX_SIZE,
+  MS_CTX_PYTHON_EXE_PATH,
   MS_CTX_TYPE_STRING_END,
 
   // parameter numbers of each type

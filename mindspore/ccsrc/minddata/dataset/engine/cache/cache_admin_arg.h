@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 #include <sstream>
+#include <thread>
 #include "minddata/dataset/util/status.h"
 #include "minddata/dataset/engine/cache/cache_client.h"
 
@@ -29,12 +30,11 @@ namespace dataset {
 
 class CacheAdminArgHandler {
  public:
-  static constexpr int32_t kDefaultNumWorkers = 32;
+  static const int32_t kDefaultNumWorkers;
   static constexpr int32_t kDefaultSharedMemorySizeInGB = 4;
   static constexpr int32_t kDefaultLogLevel = 1;
   static constexpr float kMemoryCapRatio = 0.8;
   static const char kServerBinary[];
-  static const char kDefaultSpillDir[];
 
   // These are the actual command types to execute
   enum class CommandId : int16_t {
@@ -77,7 +77,7 @@ class CacheAdminArgHandler {
     kArgNumArgs = 14  // Must be the last position to provide a count
   };
 
-  Status StartStopServer(CommandId);
+  Status StartServer(CommandId command_id);
 
   Status AssignArg(std::string option, int32_t *out_arg, std::stringstream *arg_stream,
                    CommandId command_id = CommandId::kCmdUnknown);

@@ -15,8 +15,6 @@
  */
 
 #include "runtime/device/ascend/executor/ai_core_dynamic_kernel.h"
-
-#include <regex>
 #include <algorithm>
 #include <memory>
 #include "framework/common/debug/log.h"
@@ -54,15 +52,6 @@ void AiCoreDynamicKernel::Execute() {
   MS_LOG(INFO) << "End Execute node:" << cnode_ptr_->fullname_with_scope();
 }
 
-std::string ReplaceInvalidJsonStr(const std::string &str) {
-  auto ret = std::regex_replace(str, std::regex("100000000"), R"("100000000")");
-  ret = std::regex_replace(ret, std::regex("100000001"), R"("100000001")");
-  ret = std::regex_replace(ret, std::regex("100000002"), R"("100000002")");
-  ret = std::regex_replace(ret, std::regex("True"), R"(true)");
-  ret = std::regex_replace(ret, std::regex("False"), R"(false)");
-  return ret;
-}
-
 void AiCoreDynamicKernel::ParseCompileJson() {
   if (!AnfAlgo::IsDynamicShape(cnode_ptr_)) {
     return;
@@ -71,20 +60,15 @@ void AiCoreDynamicKernel::ParseCompileJson() {
     MS_LOG(EXCEPTION) << "Get compile_info failed";
   }
   auto compile_info_attr = AnfAlgo::GetNodeAttr<std::string>(cnode_ptr_, kAttrCompileInfo);
-  std::replace(compile_info_attr.begin(), compile_info_attr.end(), '\'', '\"');
-  compile_info_attr = ReplaceInvalidJsonStr(compile_info_attr);
   MS_LOG(INFO) << "Get compile_info:" << compile_info_attr;
-
-  try {
-    compile_info_json_ = std::make_shared<nlohmann::json>(nlohmann::json::parse(compile_info_attr));
-  } catch (nlohmann::json::parse_error &e) {
-    MS_LOG(EXCEPTION) << "parse json failed, error:" << e.what();
-  }
+  op_compile_info_.str = compile_info_attr;
+  op_compile_info_.key = "";
 
   if (AnfAlgo::HasNodeAttr(kAttrFusionType, cnode_ptr_)) {
     auto fusion_type = AnfAlgo::GetNodeAttr<std::string>(cnode_ptr_, kAttrFusionType);
     MS_LOG(INFO) << "Get fusion_type:" << fusion_type;
     (*compile_info_json_)["_pattern"] = fusion_type;
+    op_compile_info_.key = std::hash<std::string>{}(fusion_type);
   }
 }
 
@@ -113,13 +97,13 @@ void AiCoreDynamicKernel::UpdateArgs() {
   runtime_args_.clear();
 
   (void)std::transform(std::begin(kernel_inputs), std::end(kernel_inputs), std::back_inserter(runtime_args_),
-                       [](const AddressPtr &input) -> void * { return input->addr; });
+                       [](const AddressPtr &input) { return input->addr; });
   (void)std::transform(std::begin(kernel_outputs), std::end(kernel_outputs), std::back_inserter(runtime_args_),
-                       [](const AddressPtr &output) -> void * { return output->addr; });
+                       [](const AddressPtr &output) { return output->addr; });
   // Update workspace
   if (!workspace_addr_.empty()) {
     (void)std::transform(std::begin(workspace_addr_), std::end(workspace_addr_), std::back_inserter(runtime_args_),
-                         [](const DeviceAddressPtr &address_ptr) -> void * { return address_ptr->GetMutablePtr(); });
+                         [](const DeviceAddressPtr &address_ptr) { return address_ptr->GetMutablePtr(); });
   }
 
   if (is_dynamic_shape_ && !tiling_data_.empty() && tiling_data_ptr_ != nullptr) {
@@ -132,8 +116,8 @@ void AiCoreDynamicKernel::ComputeTiling() {
   MS_LOG(INFO) << "Start compute tiling of:" << cnode_ptr_->fullname_with_scope();
   optiling::OpRunInfo op_run_info;
 
-  OpTilingCalculater::GetInstance().CalculateTiling(NOT_NULL(cnode_ptr_), NOT_NULL(compile_info_json_),
-                                                    depend_tensor_map_, NOT_NULL(&op_run_info));
+  OpTilingCalculater::GetInstance().CalculateTiling(NOT_NULL(cnode_ptr_), op_compile_info_, depend_tensor_map_,
+                                                    NOT_NULL(&op_run_info));
   block_dim_ = op_run_info.block_dim;
   workspaces_size_ = op_run_info.workspaces;
   tiling_data_ = op_run_info.tiling_data.str();

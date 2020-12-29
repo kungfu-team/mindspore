@@ -15,8 +15,7 @@
  */
 
 #include "tools/common/graph_util.h"
-#include <stdlib.h>
-#include <time.h>
+#include <ctime>
 #include <utility>
 #include <set>
 #include "schema/inner/model_generated.h"
@@ -29,7 +28,10 @@ namespace mindspore {
 namespace lite {
 OpDefCopyer GetSimpleOpCopyer() {
   return [](CNodeT *inCNode) -> std::unique_ptr<CNodeT> {
-    std::unique_ptr<CNodeT> newCNode(new CNodeT);
+    std::unique_ptr<CNodeT> newCNode = std::make_unique<CNodeT>();
+    if (newCNode == nullptr) {
+      return nullptr;
+    }
 
     newCNode->name = inCNode->name;
     newCNode->quantType = inCNode->quantType;
@@ -163,8 +165,6 @@ STATUS IsolateNode(schema::MetaGraphT *graphT, CNodeT *node) {
     }
   }
 
-  // whether need to remove weightInputTensores
-  // remove all node's outputTensors
   RemoveTensor(graphT, outputTensorIdxes);
   node->inputIndex.clear();
   node->outputIndex.clear();
@@ -183,8 +183,11 @@ STATUS IsolateOneWayNode(schema::MetaGraphT *graphT, size_t nodeIdx, bool remove
     MS_LOG(ERROR) << "nodeIdx out of range: " << nodeIdx;
     return RET_PARAM_INVALID;
   }
-
   CNodeT *node = graphT->nodes.at(nodeIdx).get();
+  if (node == nullptr) {
+    MS_LOG(ERROR) << "node is null";
+    return RET_NULL_PTR;
+  }
   auto inputTensorIdxes = node->inputIndex;
   auto outputTensorIdxes = node->outputIndex;
   auto preNodeIdxes = GetInputNodeIdx(*graphT, nodeIdx);
@@ -244,6 +247,7 @@ STATUS IsolateOneWayNode(schema::MetaGraphT *graphT, CNodeT *node, bool removeTe
   size_t nodeIdx = 0;
   for (size_t i = 0; i < graphT->nodes.size(); i++) {
     auto &inNode = graphT->nodes.at(i);
+    MS_ASSERT(inNode != nullptr);
     if (inNode->name == node->name) {
       isSubNode = true;
       nodeIdx = i;
@@ -259,6 +263,7 @@ STATUS IsolateOneWayNode(schema::MetaGraphT *graphT, CNodeT *node, bool removeTe
 }
 
 STATUS RemoveTensor(schema::MetaGraphT *graphT, std::vector<uint32_t> toDeleteTensorIdxes, bool forceDelete) {
+  MS_ASSERT(graphT != nullptr);
   for (auto iter = toDeleteTensorIdxes.begin(); iter != toDeleteTensorIdxes.end();) {
     uint32_t deleteIdx = *iter;
     if (!forceDelete) {
@@ -267,22 +272,44 @@ STATUS RemoveTensor(schema::MetaGraphT *graphT, std::vector<uint32_t> toDeleteTe
         continue;
       }
     }
-    // update graph input indexes
+    // update graph input indices
     for (auto gInIdx = graphT->inputIndex.begin(); gInIdx != graphT->inputIndex.end(); gInIdx++) {
       if (*gInIdx > deleteIdx) {
         (*gInIdx)--;
       }
     }
-    // update graph output indexes
+    // update graph output indices
     for (auto gOutIdx = graphT->outputIndex.begin(); gOutIdx != graphT->outputIndex.end(); gOutIdx++) {
       if (*gOutIdx > deleteIdx) {
         (*gOutIdx)--;
       }
     }
+
+    for (auto &subgraph : graphT->subGraph) {
+      // update subgraph input indices
+      for (auto gInIdx = subgraph->inputIndices.begin(); gInIdx != subgraph->inputIndices.end(); gInIdx++) {
+        if (*gInIdx > deleteIdx) {
+          (*gInIdx)--;
+        }
+      }
+      // update subgraph output indices
+      for (auto gOutIdx = subgraph->outputIndices.begin(); gOutIdx != subgraph->outputIndices.end(); gOutIdx++) {
+        if (*gOutIdx > deleteIdx) {
+          (*gOutIdx)--;
+        }
+      }
+      // update subgraph output indices
+      for (auto idx = subgraph->tensorIndices.begin(); idx != subgraph->tensorIndices.end(); idx++) {
+        if (*idx > deleteIdx) {
+          (*idx)--;
+        }
+      }
+    }
+
     // update nodes indexes
-    for (auto nodeIter = graphT->nodes.begin(); nodeIter != graphT->nodes.end(); nodeIter++) {
+    for (auto node_iter = graphT->nodes.begin(); node_iter != graphT->nodes.end(); node_iter++) {
       // update nodes input indexes
-      UpdateNodeIndex((*nodeIter).get(), deleteIdx);
+      UpdateNodeIndex((*node_iter).get(), deleteIdx);
     }
     // update deleteTensorIdx
     for (auto selfIt = toDeleteTensorIdxes.begin(); selfIt != toDeleteTensorIdxes.end(); selfIt++) {
@@ -297,6 +324,7 @@ STATUS RemoveTensor(schema::MetaGraphT *graphT, std::vector<uint32_t> toDeleteTe
 }
 
 STATUS UpdateNodeIndex(CNodeT *node, uint32_t deleteIdx) {
+  MS_ASSERT(node != nullptr);
   for (auto inIdxIt = node->inputIndex.begin(); inIdxIt != node->inputIndex.end();) {
     if (*inIdxIt == deleteIdx) {
       inIdxIt = node->inputIndex.erase(inIdxIt);
@@ -330,6 +358,7 @@ STATUS AddTensor2Node(schema::MetaGraphT *graphT, uint32_t nodeIdx, std::unique_
   graphT->allTensors.emplace_back(std::move(tensor));
   uint32_t newTensorIdx = graphT->allTensors.size() - 1;
   auto node = graphT->nodes.at(nodeIdx).get();
+  MS_ASSERT(node != nullptr);
   if (place == kBefore) {
     node->inputIndex.emplace_back(newTensorIdx);
   } else {
@@ -340,11 +369,13 @@ STATUS AddTensor2Node(schema::MetaGraphT *graphT, uint32_t nodeIdx, std::unique_
 
 STATUS ReplaceTensorOfNode(schema::MetaGraphT *graphT, uint32_t nodeIdx, uint32_t inTensorIdx,
                            std::unique_ptr<TensorT> tensor) {
+  MS_ASSERT(graphT != nullptr);
   if (nodeIdx >= graphT->nodes.size()) {
     MS_LOG(ERROR) << "nodeIdx out of range: " << nodeIdx;
     return RET_PARAM_INVALID;
   }
   auto node = graphT->nodes.at(nodeIdx).get();
+  MS_ASSERT(node != nullptr);
   if (inTensorIdx >= graphT->allTensors.size()) {
     MS_LOG(ERROR) << "inTensorIdx out of range: " << nodeIdx;
     return RET_PARAM_INVALID;
@@ -358,19 +389,23 @@ STATUS ReplaceTensorOfNode(schema::MetaGraphT *graphT, uint32_t nodeIdx, uint32_
 }
 
 NodeIter InsertNode(schema::MetaGraphT *graphT, uint32_t existNodeIdx, InsertPlace place, size_t inoutIndex,
-                    std::unique_ptr<CNodeT> toAddNode, STATUS *errorCode, OpDefCopyer opDefCopyer) {
+                    std::unique_ptr<CNodeT> toAddNode, STATUS *errorCode, const OpDefCopyer &opDefCopyer) {
+  MS_ASSERT(graphT != nullptr);
+  MS_ASSERT(errorCode != nullptr);
   if (existNodeIdx >= graphT->nodes.size()) {
     MS_LOG(ERROR) << "nodeIdx out of range: " << existNodeIdx;
     return graphT->nodes.end();
   }
-  auto nodeIter = graphT->nodes.begin() + existNodeIdx;
-  MS_ASSERT(nodeIter != graphT->nodes.begin());
-  MS_ASSERT((*nodeIter) != nullptr);
-  return InsertNode(graphT, nodeIter, place, inoutIndex, std::move(toAddNode), errorCode);
+  auto node_iter = graphT->nodes.begin() + existNodeIdx;
+  MS_ASSERT(node_iter != graphT->nodes.begin());
+  MS_ASSERT((*node_iter) != nullptr);
+  return InsertNode(graphT, node_iter, place, inoutIndex, std::move(toAddNode), errorCode);
 }
 
 NodeIter InsertNode(schema::MetaGraphT *graphT, NodeIter existNodeIter, InsertPlace place, size_t inoutIndexIdx,
-                    std::unique_ptr<CNodeT> toAddNode, STATUS *errorCode, OpDefCopyer opDefCopyer) {
+                    std::unique_ptr<CNodeT> toAddNode, STATUS *errorCode, const OpDefCopyer &opDefCopyer) {
+  MS_ASSERT(graphT != nullptr);
+  MS_ASSERT(errorCode != nullptr);
   if (place == kBefore) {
     return InsertNodeBefore(graphT, existNodeIter, inoutIndexIdx, std::move(toAddNode), errorCode, opDefCopyer);
   } else if (place == kAfter) {
@@ -382,7 +417,9 @@ NodeIter InsertNode(schema::MetaGraphT *graphT, NodeIter existNodeIter, InsertPl
 }
 
 NodeIter InsertNodeBefore(schema::MetaGraphT *graphT, NodeIter existNodeIter, size_t inputIndexIdx,
-                          std::unique_ptr<CNodeT> toAddNodeIn, STATUS *errorCode, OpDefCopyer opDefCopyer) {
+                          std::unique_ptr<CNodeT> toAddNodeIn, STATUS *errorCode, const OpDefCopyer &opDefCopyer) {
+  MS_ASSERT(graphT != nullptr);
+  MS_ASSERT(errorCode != nullptr);
   auto &existNode = *existNodeIter;
   MS_ASSERT(existNode != nullptr);
   MS_ASSERT(existNode->inputIndex.size() > inputIndexIdx);
@@ -390,7 +427,7 @@ NodeIter InsertNodeBefore(schema::MetaGraphT *graphT, NodeIter existNodeIter, si
   auto preTensorIdx = existNode->inputIndex.at(inputIndexIdx);
   MS_ASSERT(graphT->allTensors.size() > preTensorIdx);
 
-  auto preNodeIdxes = GetInputNodeIdx(*graphT, *(existNode.get()), inputIndexIdx);
+  auto preNodeIdxes = GetInputNodeIdx(*graphT, *(existNode), inputIndexIdx);
   if (preNodeIdxes.empty()) {
     auto &preTensor = graphT->allTensors.at(preTensorIdx);
     MS_ASSERT(preTensor != nullptr);
@@ -400,11 +437,18 @@ NodeIter InsertNodeBefore(schema::MetaGraphT *graphT, NodeIter existNodeIter, si
       *errorCode = RET_NULL_PTR;
       return graphT->nodes.end();
     }
+    toAddTensor->nodeType = schema::NodeType_CNode;
     preTensor->refCount = 0;
     preTensor->data.clear();
+    MS_ASSERT(toAddNodeIn->primitive != nullptr);
     if (toAddNodeIn->primitive->value.type == schema::PrimitiveType_QuantDTypeCast) {
-      preTensor->dataType = toAddNodeIn->primitive->value.AsQuantDTypeCast()->srcT;
-      toAddTensor->dataType = toAddNodeIn->primitive->value.AsQuantDTypeCast()->dstT;
+      auto prim = toAddNodeIn->primitive->value.AsQuantDTypeCast();
+      MS_ASSERT(prim != nullptr);
+      preTensor->dataType = prim->srcT;
+      toAddTensor->dataType = prim->dstT;
+      if (prim->srcT == TypeId::kNumberTypeUInt8 && prim->dstT == TypeId::kNumberTypeInt8) {
+        preTensor->quantParams.front()->zeroPoint += 128;
+      }
     }
     graphT->allTensors.emplace_back(std::move(toAddTensor));
     size_t toAddTensorIdx = graphT->allTensors.size() - 1;
@@ -438,9 +482,16 @@ NodeIter InsertNodeBefore(schema::MetaGraphT *graphT, NodeIter existNodeIter, si
         MS_LOG(ERROR) << "Copy TensorT failed";
         return graphT->nodes.end();
       }
+      toAddTensor->nodeType = schema::NodeType_CNode;
+      MS_ASSERT(toAddNodeIn->primitive != nullptr);
       if (toAddNodeIn->primitive->value.type == schema::PrimitiveType_QuantDTypeCast) {
-        preTensor->dataType = toAddNodeIn->primitive->value.AsQuantDTypeCast()->srcT;
-        toAddTensor->dataType = toAddNodeIn->primitive->value.AsQuantDTypeCast()->dstT;
+        auto prim = toAddNodeIn->primitive->value.AsQuantDTypeCast();
+        MS_ASSERT(prim != nullptr);
+        preTensor->dataType = prim->srcT;
+        toAddTensor->dataType = prim->dstT;
+        if (prim->srcT == TypeId::kNumberTypeUInt8 && prim->dstT == TypeId::kNumberTypeInt8) {
+          preTensor->quantParams.front()->zeroPoint += 128;
+        }
       }
       graphT->allTensors.emplace_back(std::move(toAddTensor));
       size_t toAddTensorIdx = graphT->allTensors.size() - 1;
@@ -473,7 +524,10 @@ NodeIter InsertNodeBefore(schema::MetaGraphT *graphT, NodeIter existNodeIter, si
 }
 
 NodeIter InsertNodeAfter(schema::MetaGraphT *graphT, NodeIter existNodeIter, size_t outputIndexIdx,
-                         std::unique_ptr<schema::CNodeT> toAddNodeIn, STATUS *errorCode, OpDefCopyer opDefCopyer) {
+                         std::unique_ptr<schema::CNodeT> toAddNodeIn, STATUS *errorCode,
+                         const OpDefCopyer &opDefCopyer) {
+  MS_ASSERT(graphT != nullptr);
+  MS_ASSERT(errorCode != nullptr);
   auto &existNode = *existNodeIter;
   MS_ASSERT(existNode != nullptr);
   MS_ASSERT(existNode->outputIndex.size() > outputIndexIdx);
@@ -481,7 +535,7 @@ NodeIter InsertNodeAfter(schema::MetaGraphT *graphT, NodeIter existNodeIter, siz
   auto postTensorIdx = existNode->outputIndex.at(outputIndexIdx);
   MS_ASSERT(graphT->allTensors.size() > postTensorIdx);
 
-  auto postNodeIdxes = GetOutputNodeIdx(*graphT, *(existNode.get()), outputIndexIdx);
+  auto postNodeIdxes = GetOutputNodeIdx(*graphT, *(existNode), outputIndexIdx);
   if (postNodeIdxes.empty()) {
     auto &postTensor = graphT->allTensors.at(postTensorIdx);
     MS_ASSERT(postTensor != nullptr);
@@ -491,9 +545,16 @@ NodeIter InsertNodeAfter(schema::MetaGraphT *graphT, NodeIter existNodeIter, siz
       *errorCode = RET_NULL_PTR;
       return graphT->nodes.end();
     }
+    toAddTensor->nodeType = schema::NodeType_CNode;
+    MS_ASSERT(toAddNodeIn->primitive != nullptr);
     if (toAddNodeIn->primitive->value.type == schema::PrimitiveType_QuantDTypeCast) {
-      postTensor->dataType = toAddNodeIn->primitive->value.AsQuantDTypeCast()->srcT;
-      toAddTensor->dataType = toAddNodeIn->primitive->value.AsQuantDTypeCast()->dstT;
+      auto prim = toAddNodeIn->primitive->value.AsQuantDTypeCast();
+      MS_ASSERT(prim != nullptr);
+      postTensor->dataType = prim->srcT;
+      toAddTensor->dataType = prim->dstT;
+      if (prim->dstT == TypeId::kNumberTypeUInt8 && prim->srcT == TypeId::kNumberTypeInt8) {
+        toAddTensor->quantParams.front()->zeroPoint += 128;
+      }
     }
     graphT->allTensors.emplace_back(std::move(toAddTensor));
     size_t toAddTensorIdx = graphT->allTensors.size() - 1;
@@ -532,6 +593,7 @@ NodeIter InsertNodeAfter(schema::MetaGraphT *graphT, NodeIter existNodeIter, siz
           *errorCode = RET_NULL_PTR;
           return graphT->nodes.end();
         }
+        toAddTensor->nodeType = schema::NodeType_CNode;
         graphT->allTensors.emplace_back(std::move(toAddTensor));
         size_t toAddTensorIdx = graphT->allTensors.size() - 1;
         auto toAddNode = opDefCopyer(toAddNodeIn.get());
@@ -554,9 +616,15 @@ NodeIter InsertNodeAfter(schema::MetaGraphT *graphT, NodeIter existNodeIter, siz
         *errorCode = RET_NULL_PTR;
         return graphT->nodes.end();
       }
+      MS_ASSERT(toAddNodeIn->primitive != nullptr);
       if (toAddNodeIn->primitive->value.type == schema::PrimitiveType_QuantDTypeCast) {
-        postTensor->dataType = toAddNodeIn->primitive->value.AsQuantDTypeCast()->srcT;
-        toAddTensor->dataType = toAddNodeIn->primitive->value.AsQuantDTypeCast()->dstT;
+        auto prim = toAddNodeIn->primitive->value.AsQuantDTypeCast();
+        MS_ASSERT(prim != nullptr);
+        postTensor->dataType = prim->srcT;
+        toAddTensor->dataType = prim->dstT;
+        if (prim->dstT == TypeId::kNumberTypeUInt8 && prim->srcT == TypeId::kNumberTypeInt8) {
+          toAddTensor->quantParams.front()->zeroPoint += 128;
+        }
       }
       graphT->allTensors.emplace_back(std::move(toAddTensor));
       size_t toAddTensorIdx = graphT->allTensors.size() - 1;
@@ -589,27 +657,175 @@ NodeIter InsertNodeAfter(schema::MetaGraphT *graphT, NodeIter existNodeIter, siz
   return existNodeIter;
 }
 
-STATUS ValidateFileStr(const std::string &modelFile, std::string fileType) {
-  if (modelFile.size() > fileType.size()) {
-    if (modelFile.substr(modelFile.size() - fileType.size()) == fileType) {
-      return RET_OK;
-    } else {
-      return RET_ERROR;
-    }
+STATUS ValidateFileStr(const std::string &modelFile, const std::string &fileType) {
+  if (modelFile.size() > fileType.size() && modelFile.substr(modelFile.size() - fileType.size()) == fileType) {
+    return RET_OK;
   } else {
     return RET_ERROR;
   }
+}
+
+void TransformAttrByAxes(int *origin_attr, int *axes, int element_size) {
+  if (origin_attr == nullptr || axes == nullptr || element_size == 0) {
+    MS_LOG(INFO) << "Attr data is from other nodes.";
+    return;
+  }
+  auto axis_map = GetNc2NhAxisMap();
+  std::vector<int> cur_attr;
+  for (int dim = 0; dim < 4; ++dim) {
+    for (int index = 0; index < element_size; ++index) {
+      int nhwc_dim = axis_map[axes[index] < 0 ? axes[index] + 4 : axes[index]];
+      if (nhwc_dim == dim || (nhwc_dim + 4) == dim) {
+        cur_attr.push_back(origin_attr[index]);
+      }
+    }
+  }
+  for (int index = 0; index < element_size; ++index) {
+    origin_attr[index] = cur_attr[index];
+  }
+}
+
+STATUS ChangeOpAttrForSlice(schema::MetaGraphT *graph, const std::unique_ptr<schema::CNodeT> &node) {
+  auto type = node->primitive->value.type;
+  if (type == schema::PrimitiveType_StridedSlice) {
+    // onnx input size is equal to 5 always.
+    if (node->inputIndex.size() == 5) {
+      for (int index = 1; index < 5; ++index) {
+        if (graph->allTensors[node->inputIndex[index]]->data.data() == nullptr) {
+          MS_LOG(INFO) << "Here don't consider input is from other nodes.";
+          return RET_NOT_SUPPORT;
+        }
+      }
+      int element_num = graph->allTensors[node->inputIndex[1]]->dims[0];
+      auto axes = graph->allTensors[node->inputIndex[3]]->data;
+      for (int index = 1; index < 5; ++index) {
+        TransformAttrByAxes(reinterpret_cast<int *>(graph->allTensors[node->inputIndex[index]]->data.data()),
+                            reinterpret_cast<int *>(axes.data()), element_num);
+      }
+    }
+  }
+  if (type == schema::PrimitiveType_Slice) {
+    auto attr = node->primitive->value.AsSlice();
+    if (attr == nullptr) {
+      MS_LOG(ERROR) << "node->primitive->value.AsSlice() is nullptr.";
+      return RET_NULL_PTR;
+    }
+    // transform attr
+    attr->format = schema::Format_NHWC;
+    if (attr->begin.empty() || attr->size.empty()) {
+      MS_LOG(INFO) << "Here don't consider these attr are from other nodes.";
+      return RET_NOT_SUPPORT;
+    }
+    int element_num = attr->begin.size();
+    if (attr->axes.empty()) {
+      for (int index = 0; index < element_num; ++index) {
+        attr->axes.push_back(index);
+      }
+    }
+    TransformAttrByAxes(attr->begin.data(), attr->axes.data(), element_num);
+    TransformAttrByAxes(attr->size.data(), attr->axes.data(), element_num);
+    TransformAttrByAxes(attr->axes.data(), attr->axes.data(), element_num);
+  }
+  return RET_OK;
+}
+
+STATUS ChangeOpAxis(schema::MetaGraphT *graph, const std::unique_ptr<schema::CNodeT> &node) {
+  MS_ASSERT(node->primitive != nullptr);
+  auto type = node->primitive->value.type;
+  auto input1_ndim = graph->allTensors.at(node->inputIndex[0])->dims.size();
+  if (input1_ndim != 4) {
+    if (node->inputIndex.size() > 1) {
+      auto input2_ndim = graph->allTensors.at(node->inputIndex[1])->dims.size();
+      if (input2_ndim != 4 && input2_ndim != 0) {
+        MS_LOG(ERROR) << "change op axis only support 4 dims";
+        return RET_NOT_SUPPORT;
+      }
+    } else {
+      MS_LOG(ERROR) << "change op axis only support 4 dims";
+      return RET_NOT_SUPPORT;
+    }
+  }
+  if (type == schema::PrimitiveType_Concat) {
+    MS_ASSERT(node->primitive->value.AsConcat() != nullptr);
+    auto origin_axis = node->primitive->value.AsConcat()->axis;
+    auto axis_map = GetNc2NhAxisMap();
+    if (node->primitive->value.AsConcat() == nullptr) {
+      MS_LOG(ERROR) << "node->primitive->value.AsConcat() is nullptr";
+      return RET_NULL_PTR;
+    }
+    node->primitive->value.AsConcat()->axis = axis_map[origin_axis < 0 ? origin_axis + 4 : origin_axis];
+  }
+  if (type == schema::PrimitiveType_Split) {
+    MS_ASSERT(node->primitive->value.AsSplit() != nullptr);
+    auto origin_axis = node->primitive->value.AsSplit()->splitDim;
+    auto axis_map = GetNc2NhAxisMap();
+    if (node->primitive->value.AsSplit() == nullptr) {
+      MS_LOG(ERROR) << "node->primitive->value.AsSplit() is nullptr";
+      return RET_NULL_PTR;
+    }
+    node->primitive->value.AsSplit()->splitDim = axis_map[origin_axis];
+  }
+  if (type == schema::PrimitiveType_Crop) {
+    MS_ASSERT(node->primitive->value.AsCrop() != nullptr);
+    auto origin_axis = node->primitive->value.AsCrop()->axis;
+    auto offsets = node->primitive->value.AsCrop()->offsets;
+    auto axis_map = GetNc2NhAxisMap();
+    if (node->primitive->value.AsCrop() == nullptr) {
+      MS_LOG(ERROR) << "node->primitive->value.AsCrop() is nullptr";
+      return RET_NULL_PTR;
+    }
+    // nchw->nhwc,offsets need pad 0;
+    if (axis_map[origin_axis] == 0) {
+      offsets = {offsets[0], offsets[2], offsets[3], offsets[1]};
+    } else if (axis_map[origin_axis] == 1 || axis_map[origin_axis] == 2) {
+      // orgin_axis = 2 or orgin_axis = 3
+      offsets.push_back(0);
+    } else if (axis_map[origin_axis] == -1) {
+      // origin_axis = 1
+      offsets = {offsets[1], offsets[2], offsets[0]};
+    } else {
+      // axis error
+      MS_LOG(ERROR) << "Crop error";
+      return RET_ERROR;
+    }
+    node->primitive->value.AsCrop()->offsets = offsets;
+  }
+  if (type == schema::PrimitiveType_Slice || type == schema::PrimitiveType_StridedSlice) {
+    return ChangeOpAttrForSlice(graph, node);
+  }
+  return RET_OK;
 }
 
 std::string GetModelName(const std::string &modelFile) {
   std::string modelName = modelFile;
   modelName = modelName.substr(modelName.find_last_of('/') + 1);
   modelName = modelName.substr(0, modelName.find_last_of('.'));
-
-  srand((unsigned)time(NULL));
-  modelName = modelName + std::to_string(rand());
-
   return modelName;
+}
+
+int SetSubgraphTensorIndices(schema::MetaGraphT *meta_graphT) {
+  for (auto &subgraph : meta_graphT->subGraph) {
+    std::vector<uint32_t> subgraph_indices{};
+    for (auto &node_idx : subgraph->nodeIndices) {
+      auto &node = meta_graphT->nodes.at(node_idx);
+      for (auto &input_idx : node->inputIndex) {
+        if (IsContain(subgraph_indices, input_idx)) {
+          continue;
+        } else {
+          subgraph_indices.push_back(input_idx);
+        }
+      }
+      for (auto &output_idx : node->outputIndex) {
+        if (IsContain(subgraph_indices, output_idx)) {
+          continue;
+        } else {
+          subgraph_indices.push_back(output_idx);
+        }
+      }
+    }
+    subgraph->tensorIndices.assign(subgraph_indices.begin(), subgraph_indices.end());
+  }
+  return RET_OK;
 }
 }  // namespace lite
 }  // namespace mindspore

@@ -19,8 +19,10 @@
 #include <cublas_v2.h>
 #include <cuda_runtime_api.h>
 #include <vector>
+#include <algorithm>
 #include "backend/kernel_compiler/gpu/cuda_impl/identity_impl.cuh"
 #include "backend/kernel_compiler/gpu/cuda_impl/matrix_split_impl.cuh"
+#include "backend/kernel_compiler/gpu/cuda_impl/triangle_matrix_copy_impl.cuh"
 #include "backend/kernel_compiler/gpu/gpu_kernel.h"
 #include "backend/kernel_compiler/gpu/gpu_kernel_factory.h"
 #include "backend/kernel_compiler/gpu/kernel_constants.h"
@@ -42,39 +44,35 @@ class CholeskyGpuKernel : public GpuKernel {
     if (is_null_input_) {
       return true;
     }
+    auto input1_addr = GetDeviceAddress<T>(inputs, 0);
+    auto output_addr = GetDeviceAddress<T>(outputs, 0);
+    auto d_array_addr = GetDeviceAddress<T *>(workspace, 0);
+    auto d_identity_addr = GetDeviceAddress<T *>(workspace, 1);
     if (!use_split_matrix) {
-      auto input1_addr = GetDeviceAddress<T>(inputs, 0);
-      auto output_addr = GetDeviceAddress<T>(outputs, 0);
-      auto d_array_addr = GetDeviceAddress<T *>(workspace, 0);
-      auto d_identity_addr = GetDeviceAddress<T *>(workspace, 1);
       auto d_info_array_addr = GetDeviceAddress<int>(workspace, 2);
       for (size_t i = 0; i < batch_; i++) {
         h_array[i] = input1_addr + i * lda_ * m_;
         h_identity[i] = output_addr + i * ldb_ * m_;
         CHECK_CUDA_RET_WITH_ERROR(
+          kernel_node_,
           cudaMemcpyAsync(output_addr + i * ldb_ * m_, h_identity_data.data(), sizeof(T) * ldb_ * m_,
                           cudaMemcpyHostToDevice, reinterpret_cast<cudaStream_t>(stream_ptr)),
           "cuda memcopy Fail");
       }
-      CHECK_CUDA_RET_WITH_ERROR(cudaMemcpyAsync(d_array_addr, h_array.data(), sizeof(T *) * batch_,
+      CHECK_CUDA_RET_WITH_ERROR(kernel_node_,
+                                cudaMemcpyAsync(d_array_addr, h_array.data(), sizeof(T *) * batch_,
                                                 cudaMemcpyHostToDevice, reinterpret_cast<cudaStream_t>(stream_ptr)),
                                 "cuda memcopy Fail");
-      CHECK_CUDA_RET_WITH_ERROR(cudaMemcpyAsync(d_identity_addr, h_identity.data(), sizeof(T *) * batch_,
+      CHECK_CUDA_RET_WITH_ERROR(kernel_node_,
+                                cudaMemcpyAsync(d_identity_addr, h_identity.data(), sizeof(T *) * batch_,
                                                 cudaMemcpyHostToDevice, reinterpret_cast<cudaStream_t>(stream_ptr)),
                                 "cuda memcopy Fail");
       CHECK_CUSOLVER_RET_WITH_EXCEPT(
-        cusolverDnSpotrfBatched(handle_, uplo, m_, d_array_addr, lda_, d_info_array_addr, batch_),
+        kernel_node_, cusolverDnSpotrfBatched(handle_, uplo, m_, d_array_addr, lda_, d_info_array_addr, batch_),
         "cusolver cholesky batched Fail");
-      float alpha = 1;
-      CHECK_CUBLAS_RET_WITH_EXCEPT(
-        cublasStrsmBatched(blas_handle_, CUBLAS_SIDE_LEFT, uplo, CUBLAS_OP_N, CUBLAS_DIAG_NON_UNIT, m_, m_, &alpha,
-                           d_array_addr, lda_, d_identity_addr, ldb_, batch_),
-        "cublas trsm batched Fail");
+      TriangleMatrixCopy(input1_addr, output_addr, uplo, outputs[0]->size / sizeof(T), ldb_, m_,
+                         reinterpret_cast<cudaStream_t>(stream_ptr));
     } else {
-      auto input1_addr = GetDeviceAddress<T>(inputs, 0);
-      auto output_addr = GetDeviceAddress<T>(outputs, 0);
-      auto d_array_addr = GetDeviceAddress<T *>(workspace, 0);
-      auto d_identity_addr = GetDeviceAddress<T *>(workspace, 1);
       auto d_info_array_addr = GetDeviceAddress<int>(workspace, 2);
       auto d_batch_input_addr = GetDeviceAddress<T>(workspace, 3);
       for (size_t i = 0; i < batch_; i++) {
@@ -84,44 +82,84 @@ class CholeskyGpuKernel : public GpuKernel {
       Identity(batch_ * split_dim * split_dim, split_dim, output_addr, reinterpret_cast<cudaStream_t>(stream_ptr));
       MatrixSplit(batch_ * split_dim * split_dim, split_dim, width, input1_addr, d_batch_input_addr,
                   reinterpret_cast<cudaStream_t>(stream_ptr));
-      CHECK_CUDA_RET_WITH_ERROR(cudaMemcpyAsync(d_array_addr, h_array.data(), sizeof(T *) * batch_,
+      CHECK_CUDA_RET_WITH_ERROR(kernel_node_,
+                                cudaMemcpyAsync(d_array_addr, h_array.data(), sizeof(T *) * batch_,
                                                 cudaMemcpyHostToDevice, reinterpret_cast<cudaStream_t>(stream_ptr)),
                                 "cuda memcopy Fail");
-      CHECK_CUDA_RET_WITH_ERROR(cudaMemcpyAsync(d_identity_addr, h_identity.data(), sizeof(T *) * batch_,
+      CHECK_CUDA_RET_WITH_ERROR(kernel_node_,
+                                cudaMemcpyAsync(d_identity_addr, h_identity.data(), sizeof(T *) * batch_,
                                                 cudaMemcpyHostToDevice, reinterpret_cast<cudaStream_t>(stream_ptr)),
                                 "cuda memcopy Fail");
       CHECK_CUSOLVER_RET_WITH_EXCEPT(
-        cusolverDnSpotrfBatched(handle_, uplo, m_, d_array_addr, lda_, d_info_array_addr, batch_),
+        kernel_node_, cusolverDnSpotrfBatched(handle_, uplo, m_, d_array_addr, lda_, d_info_array_addr, batch_),
         "cusolver cholesky batched Fail");
-      float alpha = 1;
-      CHECK_CUBLAS_RET_WITH_EXCEPT(
-        cublasStrsmBatched(blas_handle_, CUBLAS_SIDE_LEFT, uplo, CUBLAS_OP_N, CUBLAS_DIAG_NON_UNIT, m_, m_, &alpha,
-                           d_array_addr, lda_, d_identity_addr, ldb_, batch_),
-        "cublas trsm batched Fail");
+      TriangleMatrixCopy(d_batch_input_addr, output_addr, uplo, outputs[0]->size / sizeof(T), ldb_, m_,
+                         reinterpret_cast<cudaStream_t>(stream_ptr));
     }
     return true;
   }
+
   bool Init(const CNodePtr &kernel_node) override {
+    kernel_node_ = kernel_node;
     handle_ = device::gpu::GPUDeviceManager::GetInstance().GetCusolverDnHandle();
     blas_handle_ = device::gpu::GPUDeviceManager::GetInstance().GetCublasHandle();
     auto in_shape = AnfAlgo::GetPrevNodeOutputInferShape(kernel_node, 0);
-    split_dim = GetAttr<int>(kernel_node, "split_dim");
+    split_dim = static_cast<int>(GetAttr<int64_t>(kernel_node, "split_dim"));
     if (split_dim == 0) {
-      use_split_matrix = false;
-      if (in_shape.size() == 2) {
-        batch_ = 1;
-        if (in_shape[0] != in_shape[1]) {
-          MS_LOG(ERROR) << "Cholesky need square matrix as input.";
-        }
-      } else if (in_shape.size() == 3) {
-        batch_ = SizeToInt(in_shape[0]);
-        if (in_shape[1] != in_shape[2]) {
-          MS_LOG(ERROR) << "Cholesky need square matrix as input.";
-        }
-      } else {
-        MS_LOG(ERROR) << "Input Only support Rank 2 OR 3";
-      }
+      InitNoSpltDim(in_shape);
+    } else {
+      InitSpltDim(in_shape);
+    }
+    return true;
+  }
 
+ protected:
+  void InitNoSpltDim(const std::vector<size_t> &in_shape) {
+    use_split_matrix = false;
+    if (in_shape.size() == 2) {
+      batch_ = 1;
+      if (in_shape[0] != in_shape[1]) {
+        MS_LOG(ERROR) << "Cholesky need square matrix as input.";
+      }
+    } else if (in_shape.size() == 3) {
+      batch_ = SizeToInt(in_shape[0]);
+      if (in_shape[1] != in_shape[2]) {
+        MS_LOG(ERROR) << "Cholesky need square matrix as input.";
+      }
+    } else {
+      MS_LOG(ERROR) << "Input Only support Rank 2 OR 3";
+    }
+
+    m_ = SizeToInt(in_shape[1]);
+    lda_ = m_;
+    ldb_ = m_;
+    h_array.resize(batch_);
+    h_identity.resize(batch_);
+    h_identity_data.resize(m_ * m_);
+    for (size_t i = 0; i < m_; i++) {
+      for (size_t j = 0; j < m_; j++) {
+        if (i == j) {
+          h_identity_data[i * m_ + j] = 1;
+        } else {
+          h_identity_data[i * m_ + j] = 0;
+        }
+      }
+    }
+    InitSizeLists();
+  }
+
+  void InitSpltDim(const std::vector<size_t> &in_shape) {
+    if (in_shape.size() != 2) {
+      MS_LOG(ERROR) << "Cholesky Split Matrix Need Input Rank as 2.";
+    }
+    height = in_shape[0];
+    width = in_shape[1];
+    if (height != width) {
+      MS_LOG(ERROR) << "Cholesky Split Matrix Need Square Matrix as Input.";
+    }
+    if (SizeToInt(height) <= split_dim) {
+      use_split_matrix = false;
+      batch_ = 1;
       m_ = SizeToInt(in_shape[1]);
       lda_ = m_;
       ldb_ = m_;
@@ -139,92 +177,53 @@ class CholeskyGpuKernel : public GpuKernel {
       }
       InitSizeLists();
     } else {
-      if (in_shape.size() != 2) {
-        MS_LOG(ERROR) << "Cholesky Split Matrix Need Input Rank as 2.";
-      }
-      height = in_shape[0];
-      width = in_shape[1];
-      if (height != width) {
-        MS_LOG(ERROR) << "Cholesky Split Matrix Need Square Matrix as Input.";
-      }
-      if (SizeToInt(height) <= split_dim) {
-        use_split_matrix = false;
-        batch_ = 1;
-        m_ = SizeToInt(in_shape[1]);
-        lda_ = m_;
-        ldb_ = m_;
-        h_array.resize(batch_);
-        h_identity.resize(batch_);
-        h_identity_data.resize(m_ * m_);
-        for (size_t i = 0; i < m_; i++) {
-          for (size_t j = 0; j < m_; j++) {
-            if (i == j) {
-              h_identity_data[i * m_ + j] = 1;
-            } else {
-              h_identity_data[i * m_ + j] = 0;
-            }
-          }
-        }
-        InitSizeLists();
+      use_split_matrix = true;
+      int batch = SizeToInt(in_shape[1]) / split_dim;
+      res_dim = in_shape[1] - batch * split_dim;
+      if (res_dim == 0) {
+        batch_ = batch;
       } else {
-        use_split_matrix = true;
-        int batch = SizeToInt(in_shape[1]) / split_dim;
-        res_dim = in_shape[1] - batch * split_dim;
-        if (res_dim == 0) {
-          batch_ = batch;
-        } else {
-          batch_ = batch + 1;
-        }
-        m_ = split_dim;
-        lda_ = m_;
-        ldb_ = m_;
-        h_array.resize(batch_);
-        h_identity.resize(batch_);
-        h_identity_data.resize(m_ * m_);
-        for (size_t i = 0; i < m_; i++) {
-          for (size_t j = 0; j < m_; j++) {
-            if (i == j) {
-              h_identity_data[i * m_ + j] = 1;
-            } else {
-              h_identity_data[i * m_ + j] = 0;
-            }
+        batch_ = batch + 1;
+      }
+      m_ = split_dim;
+      lda_ = m_;
+      ldb_ = m_;
+      h_array.resize(batch_);
+      h_identity.resize(batch_);
+      h_identity_data.resize(m_ * m_);
+      for (size_t i = 0; i < m_; i++) {
+        for (size_t j = 0; j < m_; j++) {
+          if (i == j) {
+            h_identity_data[i * m_ + j] = 1;
+          } else {
+            h_identity_data[i * m_ + j] = 0;
           }
         }
-        InitSizeLists();
       }
+      InitSizeLists();
     }
-    return true;
   }
 
- protected:
   void InitSizeLists() override {
+    size_t unit_size = sizeof(T);
+    size_t input_size;
+    size_t workspace_size;
     if (!use_split_matrix) {
-      size_t unit_size = sizeof(T);
-      size_t input_size = batch_ * m_ * lda_ * unit_size;
-      input_size_list_.push_back(input_size);
-      size_t output_size = batch_ * m_ * lda_ * unit_size;
-      output_size_list_.push_back(output_size);
-      size_t workspace_size = batch_ * sizeof(T *);
-      workspace_size_list_.push_back(workspace_size);
-      workspace_size = batch_ * sizeof(T *);
-      workspace_size_list_.push_back(workspace_size);
-      workspace_size = batch_ * sizeof(int);
-      workspace_size_list_.push_back(workspace_size);
+      input_size = batch_ * m_ * lda_ * unit_size;
     } else {
-      size_t unit_size = sizeof(T);
-      size_t input_size = height * width * unit_size;
-      input_size_list_.push_back(input_size);
-      size_t output_size = batch_ * m_ * lda_ * unit_size;
-      output_size_list_.push_back(output_size);
-      size_t workspace_size = batch_ * sizeof(T *);
-      workspace_size_list_.push_back(workspace_size);
-      workspace_size = batch_ * sizeof(T *);
-      workspace_size_list_.push_back(workspace_size);
-      workspace_size = batch_ * sizeof(int);
-      workspace_size_list_.push_back(workspace_size);
+      input_size = height * width * unit_size;
       workspace_size = batch_ * m_ * lda_ * unit_size;
       workspace_size_list_.push_back(workspace_size);
     }
+    input_size_list_.push_back(input_size);
+    size_t output_size = batch_ * m_ * lda_ * unit_size;
+    output_size_list_.push_back(output_size);
+    workspace_size = batch_ * sizeof(T *);
+    workspace_size_list_.insert(workspace_size_list_.begin(), workspace_size);
+    workspace_size = batch_ * sizeof(T *);
+    workspace_size_list_.insert(workspace_size_list_.begin(), workspace_size);
+    workspace_size = batch_ * sizeof(int);
+    workspace_size_list_.insert(workspace_size_list_.begin(), workspace_size);
   }
 
  private:

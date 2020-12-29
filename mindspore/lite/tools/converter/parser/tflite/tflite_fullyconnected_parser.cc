@@ -17,34 +17,27 @@
 #include "tools/converter/parser/tflite/tflite_fullyconnected_parser.h"
 #include <vector>
 #include <memory>
-#include <map>
 
 namespace mindspore {
 namespace lite {
-STATUS TfliteFullyConnectedParser::Parse(TfliteTensorsInfo *tensors_info,
-                                         const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                         const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  MS_LOG(DEBUG) << "parse TfliteFullyConnectedParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
+PrimitiveC *TfliteFullyConnectedParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                           const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  if (primitive == nullptr) {
+    MS_LOG(ERROR) << "primitive is null";
+    return nullptr;
   }
 
   std::unique_ptr<schema::FullConnectionT> attr = std::make_unique<schema::FullConnectionT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
   const auto &tflite_attr = tflite_op->builtin_options.AsFullyConnectedOptions();
   if (tflite_attr == nullptr) {
-    MS_LOG(ERROR) << "get op: " << op->name << " attr failed";
-    return RET_NULL_PTR;
+    MS_LOG(ERROR) << "get op fully connect attr failed";
+    return nullptr;
   }
 
   bool hasBias = tflite_op->inputs.size() > 2 && tflite_op->inputs[2] != -1;
@@ -54,23 +47,13 @@ STATUS TfliteFullyConnectedParser::Parse(TfliteTensorsInfo *tensors_info,
   attr->useAxis = false;
   attr->activationType = GetActivationFunctionType(tflite_attr->fused_activation_function);
 
-  op->primitive->value.type = schema::PrimitiveType_FullConnection;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpInput(op, tensors_info, tflite_op->inputs[1], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_KHWC);
-  if (hasBias) {
-    AddOpInput(op, tensors_info, tflite_op->inputs[2], tflite_model->subgraphs[0]->tensors.size(),
-               schema::Format::Format_NHWC);
-  }
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  primitive->value.type = schema::PrimitiveType_FullConnection;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteFullyConnectedParser("FullyConnected", new TfliteFullyConnectedParser());
-TfliteNodeRegister g_tfliteFakeQuantParser("FakeQuant", new TfliteFakeQuantParser());
+TfliteNodeRegister g_tfliteFullyConnectedParser(tflite::BuiltinOperator_FULLY_CONNECTED,
+                                                new TfliteFullyConnectedParser());
+TfliteNodeRegister g_tfliteFakeQuantParser(tflite::BuiltinOperator_FAKE_QUANT, new TfliteFullyConnectedParser());
 }  // namespace lite
 }  // namespace mindspore

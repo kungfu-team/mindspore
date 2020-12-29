@@ -21,7 +21,7 @@ from PIL import Image
 
 from mindspore import log as logger
 
-from ..._checkparam import _check_str_by_regular
+from ..._checkparam import Validator
 from ..anf_ir_pb2 import DataType, ModelProto
 from ..summary_pb2 import Event
 
@@ -47,8 +47,8 @@ def get_event_file_name(prefix, suffix):
     Returns:
         String, the name of event log file.
     """
-    _check_str_by_regular(prefix)
-    _check_str_by_regular(suffix)
+    Validator.check_str_by_regular(prefix)
+    Validator.check_str_by_regular(suffix)
     file_name = ""
     time_second = str(int(time.time()))
     hostname = platform.node()
@@ -80,7 +80,7 @@ def package_graph_event(data):
     Args:
         data (Bytes): Graph bytes string.
 
-    Retruns:
+    Returns:
         Event, event log object.
     """
     graph_event = Event()
@@ -209,7 +209,7 @@ def _fill_tensor_summary(tag: str, np_value, summary_tensor):
         np_value (Type): Summary data type.
         summary_tensor (Tensor): The tensor of summary.
 
-    Retruns:
+    Returns:
         Summary, return tensor summary content.
     """
     logger.debug(f"Set({tag}) the tensor summary value")

@@ -17,8 +17,10 @@
 #include "backend/session/cpu_session.h"
 #include <algorithm>
 #include <sstream>
+#include <exception>
 #include "ir/anf.h"
 #include "utils/ms_utils.h"
+#include "utils/trace_base.h"
 #include "backend/session/anf_runtime_algorithm.h"
 #include "runtime/device/kernel_runtime.h"
 #include "backend/kernel_compiler/cpu/cpu_kernel_factory.h"
@@ -65,16 +67,28 @@ GraphId CPUSession::CompileGraphImpl(const AnfNodePtrList &lst, const AnfNodePtr
   auto graph_id = graph_sum_;
   auto graph = ConstructKernelGraph(lst, outputs);
   MS_EXCEPTION_IF_NULL(graph);
+  UpdateGraphDynamicShapeAttr(NOT_NULL(graph));
+  graph->UpdateGraphDynamicAttr();
   MS_LOG(INFO) << "Set kernel info";
   SetKernelInfo(graph.get());
 #if (ENABLE_CPU && (ENABLE_D || ENABLE_GPU))
-  AssignParamKey(graph);
-  if (ps::Util::IsRoleOfWorker()) {
-    Optimize(graph);
+  if (ps::Util::IsParamServerMode()) {
+    AssignParamKey(graph);
+    if (ps::Util::IsRoleOfWorker()) {
+      Optimize(graph);
+    }
   }
 #endif
   MS_LOG(INFO) << "Build kernel";
   BuildKernel(graph.get());
+  // Set graph execution order before memory alloc, ensure that memory alloc is according to the reorder graph
+  auto execution_order = graph->execution_order();
+  Reorder(&execution_order);
+  graph->set_execution_order(execution_order);
+  // runtime init
+  if (!runtime_.Init()) {
+    MS_LOG(EXCEPTION) << "Kernel runtime init error.";
+  }
   MS_LOG(INFO) << "Assign kernel address";
   runtime_.AssignKernelAddress(graph.get());
   return graph_id;
@@ -85,13 +99,23 @@ void CPUSession::CreateOutputTensors(const GraphId &graph_id, const std::vector<
                                      std::map<tensor::TensorPtr, session::KernelWithIndex> *tensor_to_node) {
   auto kernel_graph = GetGraph(graph_id);
   MS_EXCEPTION_IF_NULL(kernel_graph);
-  runtime_.CreateOutputTensors(kernel_graph.get(), input_tensors, outputs);
+  runtime_.CreateOutputTensors(kernel_graph.get(), input_tensors, outputs, tensor_to_node);
+}
+
+void CPUSession::SyncValueNodeDeviceAddr(const std::shared_ptr<KernelGraph> &kernel_graph) {
+  auto context_ptr = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(context_ptr);
+  if (context_ptr->get_param<int>(MS_CTX_EXECUTION_MODE) != kPynativeMode) {
+    return;
+  }
+  runtime_.SyncValueNodeDeviceAddr(kernel_graph.get());
 }
 
 void CPUSession::RunGraphImpl(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &inputs,
                               VectorRef *outputs) {
   auto kernel_graph = GetGraph(graph_id);
   MS_EXCEPTION_IF_NULL(kernel_graph);
+  SyncValueNodeDeviceAddr(kernel_graph);
   MS_LOG(INFO) << "Bind input output address";
   runtime_.BindInputOutput(kernel_graph.get(), inputs, outputs);
 
@@ -100,11 +124,8 @@ void CPUSession::RunGraphImpl(const GraphId &graph_id, const std::vector<tensor:
 #endif
 
   MS_LOG(INFO) << "Run graph start";
-  auto execution_order = kernel_graph->execution_order();
-  Reorder(&execution_order);
 
   bool enable_summary = summary_callback_ != nullptr;
-  kernel_graph->set_execution_order(execution_order);
   NamedSummaryOutputs summary_outputs;
   if (enable_summary) {
     SetSummaryNodes(kernel_graph.get());
@@ -123,6 +144,72 @@ void CPUSession::RunGraphImpl(const GraphId &graph_id, const std::vector<tensor:
   }
 
   MS_LOG(INFO) << "Run graph end";
+}
+
+void CPUSession::BuildOpImpl(const OpRunInfo &op_run_info, const GraphInfo &graph_info,
+                             const std::vector<tensor::TensorPtr> &input_tensors,
+                             const std::vector<int64_t> &tensors_mask) {
+  // Check if the graph cache exists.
+  if (run_op_graphs_.find(graph_info) != run_op_graphs_.end()) {
+    return;
+  }
+  // Prepare the graph
+  auto kernel_graph = ConstructSingleOpGraph(op_run_info, input_tensors, tensors_mask);
+  MS_EXCEPTION_IF_NULL(kernel_graph);
+  SetKernelInfo(kernel_graph.get());
+  BuildKernel(kernel_graph.get());
+  run_op_graphs_[graph_info] = kernel_graph;
+}
+
+void CPUSession::SetOutputFlags(const VectorRef &base_ref, std::vector<tensor::TensorPtr> *outputs_tensors) {
+  for (size_t i = 0; i < base_ref.size(); ++i) {
+    if (utils::isa<VectorRef>(base_ref[i])) {
+      auto ref_iter = utils::cast<VectorRef>(base_ref[i]);
+      SetOutputFlags(ref_iter, outputs_tensors);
+    } else if (utils::isa<tensor::TensorPtr>(base_ref[i])) {
+      auto tensor_ptr = utils::cast<std::shared_ptr<tensor::Tensor>>(base_ref[i]);
+      tensor_ptr->SetNeedWait(false);
+      tensor_ptr->data_sync(false);
+      outputs_tensors->push_back(tensor_ptr);
+    }
+  }
+}
+
+void CPUSession::RunOpImpl(const GraphInfo &graph_info, OpRunInfo *op_run_info,
+                           std::vector<tensor::TensorPtr> *input_tensors, VectorRef *outputs,
+                           const std::vector<int64_t> &tensors_mask) {
+  MS_EXCEPTION_IF_NULL(input_tensors);
+  MS_EXCEPTION_IF_NULL(op_run_info);
+  BuildOpImpl(*op_run_info, graph_info, *input_tensors, tensors_mask);
+  EraseValueNodeTensor(tensors_mask, input_tensors);
+
+  auto kernel_graph = run_op_graphs_[graph_info];
+  MS_EXCEPTION_IF_NULL(kernel_graph);
+
+  // Set graph execution order before memory alloc, ensure that memory alloc is according to the reorder graph
+  auto execution_order = kernel_graph->execution_order();
+  Reorder(&execution_order);
+  kernel_graph->set_execution_order(execution_order);
+
+  // runtime init
+  if (!runtime_.Init()) {
+    MS_LOG(EXCEPTION) << "Kernel runtime init error.";
+  }
+  runtime_.AssignKernelAddress(kernel_graph.get());
+  std::map<tensor::TensorPtr, session::KernelWithIndex> tensor_to_node;
+  runtime_.CreateOutputTensors(kernel_graph.get(), *input_tensors, outputs, &tensor_to_node);
+  runtime_.BindInputOutput(kernel_graph.get(), *input_tensors, outputs);
+
+  MS_LOG(INFO) << "Run Op start";
+
+  bool ret = runtime_.Run(kernel_graph.get(), false);
+  if (!ret) {
+    MS_LOG(EXCEPTION) << "Run Op failed";
+  }
+
+  std::vector<tensor::TensorPtr> output_tensors;
+  SetOutputFlags(*outputs, &output_tensors);
+  MS_LOG(INFO) << "Run Op end";
 }
 
 void CPUSession::SetKernelInfo(const KernelGraph *kernel_graph) {
@@ -172,7 +259,7 @@ void KernelNotSupportException(const AnfNodePtr &kernel_node) {
     operator_info << ") ";
   }
   operator_info << "is not support.";
-  MS_LOG(EXCEPTION) << operator_info.str();
+  MS_LOG(EXCEPTION) << operator_info.str() << " Trace: " << trace::DumpSourceLines(kernel_node);
 }
 }  // namespace
 
@@ -188,7 +275,11 @@ void CPUSession::BuildKernel(const KernelGraph *kernel_graph) {
     if (cpu_kernel == nullptr) {
       KernelNotSupportException(kernel_node);
     }
-    cpu_kernel->Init(kernel_node);
+    try {
+      cpu_kernel->Init(kernel_node);
+    } catch (std::exception &e) {
+      MS_LOG(EXCEPTION) << e.what() << "\nTrace: " << trace::DumpSourceLines(kernel_node);
+    }
     AnfAlgo::SetKernelMod(cpu_kernel, kernel_node.get());
     MS_LOG(INFO) << "Cpu build success operator[" << kernel_name << "].";
   }

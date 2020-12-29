@@ -17,7 +17,7 @@
 
 import os
 import sys
-import mindspore.dataset.engine as de
+import mindspore.dataset as ds
 from mindspore import Model, context
 from mindspore.train.callback import ModelCheckpoint, CheckpointConfig, TimeMonitor
 from mindspore.context import ParallelMode
@@ -40,8 +40,8 @@ def get_WideDeep_net(config):
     WideDeep_net = WideDeepModel(config)
     loss_net = NetWithLossClass(WideDeep_net, config)
     loss_net = VirtualDatasetCellTriple(loss_net)
-    train_net = TrainStepWrap(
-        loss_net, host_device_mix=bool(config.host_device_mix))
+    train_net = TrainStepWrap(loss_net, host_device_mix=bool(config.host_device_mix),
+                              sparse=config.sparse)
     eval_net = PredictWithSigmoid(WideDeep_net)
     eval_net = VirtualDatasetCellTriple(eval_net)
     return train_net, eval_net
@@ -84,10 +84,11 @@ def train_and_eval(config):
     else:
         dataset_type = DataType.H5
     host_device_mix = bool(config.host_device_mix)
+    sparse = config.sparse
     print("epochs is {}".format(epochs))
     if config.full_batch:
         context.set_auto_parallel_context(full_batch=True)
-        de.config.set_seed(1)
+        ds.config.set_seed(1)
         if config.field_slice:
             compute_manual_shape(config, get_group_size())
             ds_train = create_dataset(data_path, train_mode=True, epochs=1,
@@ -120,32 +121,37 @@ def train_and_eval(config):
     model = Model(train_net, eval_network=eval_net,
                   metrics={"auc": auc_metric})
 
+    # Save strategy ckpts according to the rank id, this must be done before initializing the callbacks.
+    config.stra_ckpt = os.path.join(config.stra_ckpt + "-{}".format(get_rank()), "strategy.ckpt")
+
     eval_callback = EvalCallBack(
-        model, ds_eval, auc_metric, config, host_device_mix=host_device_mix)
+        model, ds_eval, auc_metric, config)
 
     callback = LossCallBack(config=config, per_print_times=20)
     ckptconfig = CheckpointConfig(save_checkpoint_steps=ds_train.get_dataset_size()*epochs,
                                   keep_checkpoint_max=5, integrated_save=False)
     ckpoint_cb = ModelCheckpoint(prefix='widedeep_train',
-                                 directory=config.ckpt_path + '/ckpt_' + str(get_rank()) + '/', config=ckptconfig)
+                                 directory=os.path.join(config.ckpt_path, 'ckpt_' + str(get_rank())), config=ckptconfig)
+
     context.set_auto_parallel_context(strategy_ckpt_save_file=config.stra_ckpt)
     callback_list = [TimeMonitor(
         ds_train.get_dataset_size()), eval_callback, callback]
     if not host_device_mix:
         callback_list.append(ckpoint_cb)
     model.train(epochs, ds_train, callbacks=callback_list,
-                dataset_sink_mode=(not host_device_mix))
+                dataset_sink_mode=(not sparse))
 
 
 if __name__ == "__main__":
     wide_deep_config = WideDeepConfig()
     wide_deep_config.argparse_init()
     context.set_context(mode=context.GRAPH_MODE,
-                        device_target=wide_deep_config.device_target, save_graphs=True)
+                        device_target=wide_deep_config.device_target)
     context.set_context(variable_memory_max_size="24GB")
     context.set_context(enable_sparse=True)
     init()
-    if wide_deep_config.host_device_mix == 1:
+    context.set_context(save_graphs_path='./graphs_of_device_id_' + str(get_rank()), save_graphs=True)
+    if wide_deep_config.sparse:
         context.set_auto_parallel_context(
             parallel_mode=ParallelMode.SEMI_AUTO_PARALLEL, gradients_mean=True)
     else:

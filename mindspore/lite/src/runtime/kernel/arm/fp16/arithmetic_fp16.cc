@@ -22,6 +22,7 @@
 #include "src/kernel_registry.h"
 #include "src/runtime/runtime_api.h"
 #include "include/errorcode.h"
+#include "src/ops/arithmetic.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
@@ -68,18 +69,11 @@ ARITHMETIC_FUNC_INFO_FP16 arithmetic_fun_table_fp16[] = {
   {PrimitiveType_SquaredDifference, schema::ActivationType_NO_ACTIVATION, ElementSquaredDifferenceFp16,
    ElementOptSquaredDifferenceFp16},
   {PrimitiveType_Maximum, schema::ActivationType_NO_ACTIVATION, ElementMaximumFp16, ElementOptMaximumFp16},
-  {PrimitiveType_Minimum, schema::ActivationType_NO_ACTIVATION, ElementMinimumFp16, ElementOptMinimumFp16},
-  {PrimitiveType_NotEqual, schema::ActivationType_NO_ACTIVATION, ElementNotEqualFp16, ElementOptNotEqualFp16},
-  {PrimitiveType_Equal, schema::ActivationType_NO_ACTIVATION, ElementEqualFp16, ElementOptEqualFp16},
-  {PrimitiveType_Less, schema::ActivationType_NO_ACTIVATION, ElementLessFp16, ElementOptLessFp16},
-  {PrimitiveType_LessEqual, schema::ActivationType_NO_ACTIVATION, ElementLessEqual, ElementOptLessEqualFp16},
-  {PrimitiveType_Greater, schema::ActivationType_NO_ACTIVATION, ElementGreaterFp16, ElementOptGreaterFp16},
-  {PrimitiveType_GreaterEqual, schema::ActivationType_NO_ACTIVATION, ElementGreaterEqualFp16,
-   ElementOptGreaterEqualFp16},
-};
+  {PrimitiveType_Minimum, schema::ActivationType_NO_ACTIVATION, ElementMinimumFp16, ElementOptMinimumFp16}};
 
 ArithmeticFuncFp16 GetArithmeticFun(int primitive_type, int activation_type) {
-  for (size_t i = 0; i < sizeof(arithmetic_fun_table_fp16); i++) {
+  size_t length = sizeof(arithmetic_fun_table_fp16) / sizeof(ARITHMETIC_FUNC_INFO_FP16);
+  for (size_t i = 0; i < length; i++) {
     if (arithmetic_fun_table_fp16[i].primitive_type_ == primitive_type &&
         arithmetic_fun_table_fp16[i].activation_type_ == activation_type) {
       return arithmetic_fun_table_fp16[i].func_;
@@ -89,7 +83,8 @@ ArithmeticFuncFp16 GetArithmeticFun(int primitive_type, int activation_type) {
 }
 
 ArithmeticOptFuncFp16 GetOptimizedArithmeticFun(int primitive_type, int activation_type) {
-  for (size_t i = 0; i < sizeof(arithmetic_fun_table_fp16); i++) {
+  size_t length = sizeof(arithmetic_fun_table_fp16) / sizeof(ARITHMETIC_FUNC_INFO_FP16);
+  for (size_t i = 0; i < length; i++) {
     if (arithmetic_fun_table_fp16[i].primitive_type_ == primitive_type &&
         arithmetic_fun_table_fp16[i].activation_type_ == activation_type) {
       return arithmetic_fun_table_fp16[i].opt_func_;
@@ -105,10 +100,26 @@ int ArithmeticFP16CPUKernel::Init() {
   return ReSize();
 }
 
-int ArithmeticFP16CPUKernel::ReSize() {
+void ArithmeticFP16CPUKernel::InitParam() {
+  auto arithmetic_lite_primitive = (lite::Arithmetic *)primitive_;
+  param_->broadcasting_ = arithmetic_lite_primitive->Broadcasting();
+  param_->ndim_ = arithmetic_lite_primitive->NDims();
+
   param_->in_elements_num0_ = in_tensors_[0]->ElementsNum();
   param_->in_elements_num1_ = in_tensors_[1]->ElementsNum();
   param_->out_elements_num_ = out_tensors_[0]->ElementsNum();
+  memcpy(param_->in_shape0_, reinterpret_cast<const lite::Arithmetic *>(primitive_)->InShape0().data(),
+         reinterpret_cast<const lite::Arithmetic *>(primitive_)->InShape0().size() * sizeof(int));
+  memcpy(param_->in_shape1_, reinterpret_cast<const lite::Arithmetic *>(primitive_)->InShape1().data(),
+         reinterpret_cast<const lite::Arithmetic *>(primitive_)->InShape1().size() * sizeof(int));
+  memcpy(param_->out_shape_, reinterpret_cast<const lite::Arithmetic *>(primitive_)->OutputShape().data(),
+         reinterpret_cast<const lite::Arithmetic *>(primitive_)->OutputShape().size() * sizeof(int));
+
+  return;
+}
+
+int ArithmeticFP16CPUKernel::ReSize() {
+  InitParam();
 
   if (param_->in_elements_num0_ == 1 || param_->in_elements_num1_ == 1) {
     param_->broadcasting_ = false;
@@ -185,11 +196,6 @@ static int ArithmeticsRunFp16(void *cdata, int task_id) {
 }
 
 int ArithmeticFP16CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << ret;
-    return ret;
-  }
   auto output_tensor = out_tensors_.at(0);
   is_input0_fp32_ = in_tensors_.at(0)->data_type() == kNumberTypeFloat32;
   is_input1_fp32_ = in_tensors_.at(1)->data_type() == kNumberTypeFloat32;
@@ -203,7 +209,7 @@ int ArithmeticFP16CPUKernel::Run() {
     FreeTmpBuffer();
     return RET_ERROR;
   }
-  ret = ParallelLaunch(this->context_->thread_pool_, ArithmeticsRunFp16, this, context_->thread_num_);
+  auto ret = ParallelLaunch(this->context_->thread_pool_, ArithmeticsRunFp16, this, context_->thread_num_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "ArithmeticsRunFp16 run error error_code[" << ret << "]";
   }
@@ -230,44 +236,16 @@ void ArithmeticFP16CPUKernel::FreeTmpBuffer() {
   }
 }
 
-kernel::LiteKernel *CpuArithmeticFp16KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                   const std::vector<lite::Tensor *> &outputs, OpParameter *parameter,
-                                                   const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                   const mindspore::lite::PrimitiveC *primitive) {
-  if (parameter == nullptr) {
-    MS_LOG(ERROR) << "input parameter is null!";
-    return nullptr;
-  }
-  auto kernel = new (std::nothrow) ArithmeticFP16CPUKernel(parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "Create kernel failed, name: " << parameter->name_;
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << parameter->name_
-                  << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(parameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Mul, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Add, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Sub, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Div, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_FloorMod, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_FloorDiv, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_LogicalAnd, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_LogicalOr, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Maximum, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Minimum, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_NotEqual, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Equal, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Less, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_LessEqual, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Greater, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_GreaterEqual, CpuArithmeticFp16KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Eltwise, CpuArithmeticFp16KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Mul, LiteKernelCreator<ArithmeticFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Add, LiteKernelCreator<ArithmeticFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Sub, LiteKernelCreator<ArithmeticFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Div, LiteKernelCreator<ArithmeticFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_FloorMod, LiteKernelCreator<ArithmeticFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_FloorDiv, LiteKernelCreator<ArithmeticFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_LogicalAnd, LiteKernelCreator<ArithmeticFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_LogicalOr, LiteKernelCreator<ArithmeticFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Maximum, LiteKernelCreator<ArithmeticFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Minimum, LiteKernelCreator<ArithmeticFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_Eltwise, LiteKernelCreator<ArithmeticFP16CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat16, PrimitiveType_SquaredDifference, LiteKernelCreator<ArithmeticFP16CPUKernel>)
 }  // namespace mindspore::kernel

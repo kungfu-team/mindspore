@@ -40,8 +40,8 @@ Status ReduceMethod::InferDevMatrixShape() {
   return SUCCESS;
 }
 
-std::vector<int32_t> ReduceMethod::reduce_dim() {
-  std::vector<int32_t> dim_list;
+std::vector<int64_t> ReduceMethod::reduce_dim() {
+  std::vector<int64_t> dim_list;
   if (input_value_.size() < 2) {
     MS_LOG(EXCEPTION) << name_ << ": Input value size is smaller than 2.";
   }
@@ -51,20 +51,20 @@ std::vector<int32_t> ReduceMethod::reduce_dim() {
   MS_ASSERT(inputs_shape_.size() == 1);
   auto input_dim = inputs_shape_.at(0).size();
   if (input_value_.back()->isa<ValueTuple>()) {
-    auto attr_axis = GetValue<std::vector<int>>(input_value_.back());
+    auto attr_axis = GetValue<std::vector<int64_t>>(input_value_.back());
     // axis is (), reduce all dim
     if (attr_axis.empty()) {
       for (size_t i = 0; i < input_dim; ++i) {
-        dim_list.push_back(SizeToInt(i));
+        dim_list.push_back(SizeToLong(i));
       }
     } else {
       for (auto &axis : attr_axis) {
-        axis < 0 ? dim_list.push_back(axis + SizeToInt(input_dim)) : dim_list.push_back(axis);
+        axis < 0 ? dim_list.push_back(axis + SizeToLong(input_dim)) : dim_list.push_back(axis);
       }
     }
-  } else if (input_value_.back()->isa<Int32Imm>()) {
-    int axis = GetValue<int>(input_value_.back());
-    axis < 0 ? dim_list.push_back(axis + SizeToInt(input_dim)) : dim_list.push_back(axis);
+  } else if (input_value_.back()->isa<Int64Imm>()) {
+    int64_t axis = GetValue<int64_t>(input_value_.back());
+    axis < 0 ? dim_list.push_back(axis + SizeToLong(input_dim)) : dim_list.push_back(axis);
   } else {
     MS_LOG(EXCEPTION) << "Axis type is invalid.";
   }
@@ -109,7 +109,7 @@ Status ReduceMethod::GetAttrs() {
 
 Status ReduceMethod::InferTensorMap() {
   Shape tensor_map_index, output_tensor_map;
-  std::vector<int32_t> dim_list;
+  std::vector<int64_t> dim_list;
   size_t size = inputs_shape_.at(0).size();
   // such as 4: tensor_map_index [3,2,1,0]
   for (size_t i = 0; i < size; ++i) {
@@ -117,7 +117,7 @@ Status ReduceMethod::InferTensorMap() {
   }
   dim_list = reduce_dim();
   for (size_t i = 0; i < size; ++i) {
-    if (find(dim_list.begin(), dim_list.end(), SizeToInt(i)) != dim_list.end()) {
+    if (find(dim_list.begin(), dim_list.end(), SizeToLong(i)) != dim_list.end()) {
       if (keepdims_) {
         output_tensor_map.push_back(-1);
       } else {
@@ -140,7 +140,7 @@ bool IsDataParallelStrategy(const Dimensions &strategy, int32_t stage_id) {
     MS_LOG(EXCEPTION) << "IsDataParallelStrategy: strategy is empty";
   }
 
-  return (IntToSize(strategy[0]) == total_dev_num);
+  return (LongToSize(strategy[0]) == total_dev_num);
 }
 
 Status ReduceMethod::InferForwardCommunication() {
@@ -154,20 +154,35 @@ Status ReduceMethod::InferForwardCommunication() {
     return SUCCESS;
   }
   forward_op_.clear();
-  std::vector<int32_t> dim_list = reduce_dim();
+  std::vector<int64_t> dim_list = reduce_dim();
   size_t size = stra.size();
   // judge if the reduce dim is partitioned.
   Shape group_creat_map;
-  if (dev_matrix_shape_.size() > size) {
+
+  // if repeated calculation and the repeated_calc_num_ insert to the first dimension of dev matrix,
+  // it need to handle the first dimention of map.
+  if ((dev_matrix_shape_.size() > size) && !repeated_num_in_dev_matrix_right_) {
     group_creat_map.push_back(SizeToInt(dev_matrix_shape_.size() - size_t(1)));
   }
   for (size_t index = 0; index < size; ++index) {
     auto pos =
-      std::find_if(dim_list.begin(), dim_list.end(), [index](const int32_t &dim) { return SizeToInt(index) == dim; });
+      std::find_if(dim_list.begin(), dim_list.end(), [index](const int64_t &dim) { return SizeToLong(index) == dim; });
     if (pos != dim_list.end() && stra[index] != 1) {
       continue;
     }
-    group_creat_map.push_back(SizeToInt(size) - SizeToInt(index) - 1);
+    group_creat_map.push_back(SizeToLong(size) - SizeToLong(index) - 1);
+  }
+
+  // if repeated calculation and the repeated_calc_num_ insert to the last dimension of dev matrix,
+  // it need to handle the group_creat_map and insert the 0 to the last dimension of the group_creat_map.
+  if (repeated_num_in_dev_matrix_right_ && (repeated_calc_num_ > 1)) {
+    for (auto &ele : group_creat_map) {
+      if (ele == MAP_NONE) {
+        continue;
+      }
+      ele += 1;
+    }
+    group_creat_map.push_back(0);
   }
   std::vector<Group> forward_group;
   if (CreateGroupByTensorMap(group_creat_map, &forward_group) != SUCCESS) {
@@ -184,7 +199,7 @@ Status ReduceMethod::InferForwardCommunication() {
   return SUCCESS;
 }
 
-ForwardOp CreatReduceMeanForwardOp(const std::vector<Group> &forward_group, const TypePtr &dtype) {
+ForwardOp CreateReduceMeanForwardOp(const std::vector<Group> &forward_group, const TypePtr &dtype) {
   // Creat AllReduceSum op
   Operator op0 = CreateAllReduceOp(REDUCE_OP_SUM, forward_group[0].name());
   std::string group_name = forward_group[0].name();
@@ -216,21 +231,38 @@ Status ReduceMeanInfo::InferForwardCommunication() {
     return SUCCESS;
   }
   forward_op_.clear();
-  std::vector<int32_t> dim_list = reduce_dim();
+  std::vector<int64_t> dim_list = reduce_dim();
   size_t size = stra.size();
   // judge if the reduce dim is partitioned.
   Shape group_creat_map;
-  if (dev_matrix_shape_.size() > size) {
+
+  // if repeated calculation and the repeated_calc_num_ insert to the first dimension of dev matrix,
+  // it need to handle the first dimention of map.
+  if ((dev_matrix_shape_.size() > size) && !repeated_num_in_dev_matrix_right_) {
     group_creat_map.push_back(SizeToInt(dev_matrix_shape_.size() - size_t(1)));
   }
+
   for (size_t index = 0; index < size; ++index) {
     auto pos =
-      std::find_if(dim_list.begin(), dim_list.end(), [index](const int32_t &dim) { return SizeToInt(index) == dim; });
+      std::find_if(dim_list.begin(), dim_list.end(), [index](const int64_t &dim) { return SizeToLong(index) == dim; });
     if (pos != dim_list.end() && stra[index] != 1) {
       continue;
     }
-    group_creat_map.push_back(SizeToInt(size) - SizeToInt(index) - 1);
+    group_creat_map.push_back(SizeToLong(size) - SizeToLong(index) - 1);
   }
+
+  // if repeated calculation and the repeated_calc_num_ insert to the last dimension of dev matrix,
+  // it need to handle the group_creat_map and insert the 0 to the last dimension of the group_creat_map.
+  if (repeated_num_in_dev_matrix_right_ && (repeated_calc_num_ > 1)) {
+    for (auto &ele : group_creat_map) {
+      if (ele == MAP_NONE) {
+        continue;
+      }
+      ele += 1;
+    }
+    group_creat_map.push_back(0);
+  }
+
   std::vector<Group> forward_group;
   if (CreateGroupByTensorMap(group_creat_map, &forward_group) != SUCCESS) {
     MS_LOG(ERROR) << name_ << ": InferForwardCommunication group failed.";
@@ -243,7 +275,7 @@ Status ReduceMeanInfo::InferForwardCommunication() {
     }
 
     auto element_type = outputs_dtype_->cast<mindspore::TensorTypePtr>()->element();
-    forward_op_ = CreatReduceMeanForwardOp(forward_group, element_type);
+    forward_op_ = CreateReduceMeanForwardOp(forward_group, element_type);
   }
 
   return SUCCESS;
@@ -297,12 +329,12 @@ Status ArgMaxWithValueInfo::InferMirrorOps() {
 }
 
 Dimensions ReduceMethod::InferOutputStrategy() {
-  std::vector<int32_t> dim_list = reduce_dim();
+  std::vector<int64_t> dim_list = reduce_dim();
   Dimensions output_strategy;
   Dimensions stra = strategy_->GetInputDim().at(0);
   // if keepdims_ is true,then output strategy is same with input.
   for (size_t i = 0; i < stra.size(); ++i) {
-    if (find(dim_list.begin(), dim_list.end(), SizeToInt(i)) != dim_list.end()) {
+    if (find(dim_list.begin(), dim_list.end(), SizeToLong(i)) != dim_list.end()) {
       if (keepdims_) {
         output_strategy.push_back(1);
       }
@@ -336,7 +368,7 @@ Status ReduceMethod::InferTensorInfo() {
     return FAILED;
   }
 
-  std::vector<int32_t> dim_list = reduce_dim();
+  std::vector<int64_t> dim_list = reduce_dim();
   TensorInfo input_tensor_info(input_tensor_layout, input_shape, input_slice_shape);
   TensorInfo output_tensor_info(output_tensor_layout, output_shape, output_slice_shape);
   input_tensor_info.set_reduce_dim(dim_list);
@@ -349,7 +381,7 @@ Status ReduceMethod::InferTensorInfo() {
 
 Status ReduceMethod::SetCostUnderStrategy(const StrategyPtr &strategy) { return SetCostUnderStrategyBase(strategy); }
 
-Status ReduceMethod::GenerateStrategies(int32_t stage_id) {
+Status ReduceMethod::GenerateStrategies(int64_t stage_id) {
   if ((inputs_shape_.size() != 1) || (outputs_shape_.size() != 1)) {
     MS_LOG(ERROR) << name_ << ": Inputs shape size or outputs shape size is wrong, " << inputs_shape_.size() << ", "
                   << outputs_shape_.size();
@@ -393,8 +425,8 @@ Status ReduceMethod::InitForCostModel(const StrategyPtr &strategy) {
   return SUCCESS;
 }
 
-std::vector<int32_t> ArgMaxWithValueInfo::reduce_dim() {
-  std::vector<int32_t> dim_list;
+std::vector<int64_t> ArgMaxWithValueInfo::reduce_dim() {
+  std::vector<int64_t> dim_list;
   auto iter = attrs_.find(AXIS);
   if (iter == attrs_.end()) {
     MS_LOG(EXCEPTION) << name_ << ": Don't have attr axis.";
@@ -404,19 +436,19 @@ std::vector<int32_t> ArgMaxWithValueInfo::reduce_dim() {
   auto input_dim = inputs_shape_.at(0).size();
   MS_EXCEPTION_IF_NULL(iter->second);
   if (iter->second->isa<ValueTuple>()) {
-    auto attr_axis = GetValue<std::vector<int>>(iter->second);
+    auto attr_axis = GetValue<std::vector<int64_t>>(iter->second);
     if (attr_axis.empty()) {
       for (size_t i = 0; i < input_dim; ++i) {
-        dim_list.push_back(SizeToInt(i));
+        dim_list.push_back(SizeToLong(i));
       }
     } else {
       for (auto &axis : attr_axis) {
-        axis < 0 ? dim_list.push_back(axis + SizeToInt(input_dim)) : dim_list.push_back(axis);
+        axis < 0 ? dim_list.push_back(axis + SizeToLong(input_dim)) : dim_list.push_back(axis);
       }
     }
-  } else if (iter->second->isa<Int32Imm>()) {
-    int axis = GetValue<int>(iter->second);
-    axis < 0 ? dim_list.push_back(axis + SizeToInt(input_dim)) : dim_list.push_back(axis);
+  } else if (iter->second->isa<Int64Imm>()) {
+    int64_t axis = GetValue<int64_t>(iter->second);
+    axis < 0 ? dim_list.push_back(axis + SizeToLong(input_dim)) : dim_list.push_back(axis);
   } else {
     MS_LOG(EXCEPTION) << "Axis type is invalid.";
   }
@@ -429,19 +461,19 @@ Status ArgMaxWithValueInfo::CheckStrategy(const StrategyPtr &strategy) {
     MS_LOG(ERROR) << name_ << ": CheckStrategy for parent class ReduceMethod failed";
     return FAILED;
   }
-  std::vector<int32_t> dim_list = reduce_dim();
+  std::vector<int64_t> dim_list = reduce_dim();
   MS_ASSERT(dim_list.size() == 1);
 
   Strategys stra = strategy->GetInputDim();
   MS_ASSERT(stra.size() == 1);
   Shape input_strategy = stra.at(0);
   MS_ASSERT(dim_list.at(0) < input_strategy.size());
-  if (input_strategy.at(IntToSize(dim_list.at(0))) != 1) {
+  if (input_strategy.at(LongToSize(dim_list.at(0))) != 1) {
     MS_LOG(WARNING)
       << name_
       << " CheckStrategy for ArgMaxWithValueInfo, the strategy corresponding to axis is not one, real strategy "
          "is  "
-      << input_strategy.at(IntToSize(dim_list.at(0)))
+      << input_strategy.at(LongToSize(dim_list.at(0)))
       << ", the output index may be not compatible with the stand alone Primitive";
   }
   return SUCCESS;
@@ -480,7 +512,7 @@ Status ArgMaxWithValueInfo::InferTensorInfo() {
     return FAILED;
   }
 
-  std::vector<int32_t> dim_list = reduce_dim();
+  std::vector<int64_t> dim_list = reduce_dim();
   TensorInfo input_tensor_info(input_tensor_layout, input_shape, input_slice_shape);
   TensorInfo output_tensor_info(output_tensor_layout, output_shape, output_slice_shape);
   input_tensor_info.set_reduce_dim(dim_list);
@@ -499,7 +531,7 @@ Status ArgMaxWithValueInfo::InferAsLossDivisor() {
 
   MS_LOG(INFO) << name_ << " has two outputs, use output[0] to infer";
   if (outputs_tensor_map_[0].empty()) {
-    as_loss_divisor_ = SizeToInt(global_device_list_.size());
+    as_loss_divisor_ = stage_device_size_;
     MS_LOG(INFO) << name_ << ": The output is a scalar, use the dev size" << as_loss_divisor_ << " as loss divisor.";
     return SUCCESS;
   }
@@ -513,7 +545,7 @@ Status ArgMaxWithValueInfo::InferAsLossDivisor() {
   return SUCCESS;
 }
 
-Status ArgMaxWithValueInfo::GenerateStrategies(int32_t stage_id) {
+Status ArgMaxWithValueInfo::GenerateStrategies(int64_t stage_id) {
   if ((inputs_shape_.size() != 1) || (outputs_shape_.size() != 2)) {
     MS_LOG(ERROR) << name_ << ": Inputs shape size or outputs shape size is wrong, " << inputs_shape_.size() << ", "
                   << outputs_shape_.size();

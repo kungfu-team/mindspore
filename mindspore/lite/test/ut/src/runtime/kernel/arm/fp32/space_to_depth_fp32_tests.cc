@@ -18,7 +18,7 @@
 #include <memory>
 #include "src/common/log_adapter.h"
 #include "common/common_test.h"
-#include "mindspore/lite/nnacl/fp32/space_to_depth.h"
+#include "mindspore/lite/nnacl/fp32/space_to_depth_fp32.h"
 #include "mindspore/lite/src/kernel_registry.h"
 #include "mindspore/lite/src/lite_kernel.h"
 
@@ -44,16 +44,16 @@ TEST_F(SpaceToDepthTestFp32, SpaceToDepthTest1) {
     std::cout << output[i] << " ";
   }
   std::cout << "\n";
-  CompareOutputData(output, expect_out, out_size, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, expect_out, out_size, 0.000001));
 }
 
 TEST_F(SpaceToDepthTestFp32, SpaceToDepthTest2) {
   std::vector<float> input = {1, 2, 5, 6, 10, 20, 3, 8, 18, 10, 3, 4, 11, 55, 15, 25};
   std::vector<int> in_shape = {1, 4, 4, 1};
   lite::Tensor input_tensor;
-  input_tensor.SetData(input.data());
+  input_tensor.set_data(input.data());
   input_tensor.set_shape(in_shape);
-  input_tensor.SetFormat(schema::Format_NHWC);
+  input_tensor.set_format(schema::Format_NHWC);
   input_tensor.set_data_type(kNumberTypeFloat32);
   std::vector<lite::Tensor *> inputs_tensor;
   inputs_tensor.push_back(&input_tensor);
@@ -63,9 +63,9 @@ TEST_F(SpaceToDepthTestFp32, SpaceToDepthTest2) {
   std::vector<float> output(16);
   std::vector<int> out_shape = {1, 2, 2, 4};
   lite::Tensor output_tensor;
-  output_tensor.SetData(output.data());
+  output_tensor.set_data(output.data());
   output_tensor.set_shape(out_shape);
-  output_tensor.SetFormat(schema::Format_NHWC);
+  output_tensor.set_format(schema::Format_NHWC);
   output_tensor.set_data_type(kNumberTypeFloat32);
   std::vector<lite::Tensor *> outputs_tensor;
   outputs_tensor.push_back(&output_tensor);
@@ -89,7 +89,7 @@ TEST_F(SpaceToDepthTestFp32, SpaceToDepthTest2) {
     std::cout << output[i] << " ";
   }
   std::cout << "\n";
-  CompareOutputData(output.data(), expect_out, out_size, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output.data(), expect_out, out_size, 0.000001));
 }
 
 }  // namespace mindspore

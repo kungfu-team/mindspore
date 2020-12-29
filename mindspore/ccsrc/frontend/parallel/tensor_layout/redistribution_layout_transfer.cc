@@ -21,7 +21,23 @@
 
 namespace mindspore {
 namespace parallel {
-Status RedistributionLayoutTransfer::CheckValidTransfer() { return Status::SUCCESS; }
+Status RedistributionLayoutTransfer::CheckValidTransfer() {
+  Shape from_shape = from_in_.tensor_shape().array();
+  if (std::find(from_shape.begin(), from_shape.end(), -1) != from_shape.end()) {
+    is_dynamic_shape_ = true;
+    Shape from_map = from_in_.tensor_map().array();
+    Shape to_map = to_in_.tensor_map().array();
+    bool not_all_repeat = std::any_of(from_map.begin(), from_map.end(), [](int64_t i) { return i != -1; }) ||
+                          std::any_of(to_map.begin(), to_map.end(), [](int64_t i) { return i != -1; });
+    if (from_in_ != to_in_ && not_all_repeat) {
+      MS_LOG(ERROR) << "In dynamic shape scene, the from_tensor_shape should be equal to to_tensor_shape";
+      MS_LOG(ERROR) << "from_in layout" << from_in_.ToString();
+      MS_LOG(ERROR) << "to_in layout" << to_in_.ToString();
+      return Status::FAILED;
+    }
+  }
+  return Status::SUCCESS;
+}
 
 /*
  * unify device arrangement between in_layout and out_layout
@@ -62,6 +78,14 @@ std::shared_ptr<ReshapeLayoutTransfer> RedistributionLayoutTransfer::UnifyDevice
   std::shared_ptr<ReshapeLayoutTransfer> unified_device_arrangement_ptr = UnifyDeviceArrangement();
   if (unified_device_arrangement_ptr == nullptr) {
     return nullptr;
+  }
+  Shape in_expand_shape;
+  Status status = ExpandShape(unified_device_arrangement_ptr->from_in().tensor_shape().array(),
+                              unified_device_arrangement_ptr->to_in().tensor_shape().array(), &in_expand_shape);
+  if (status != Status::SUCCESS) {
+    MS_LOG(INFO) << "The shape of from and to cannot transfer by unify";
+    unified_device_arrangement_ptr->SetExpandAble(false);
+    return unified_device_arrangement_ptr;
   }
   return unified_device_arrangement_ptr->UnifyDeviceArrangementAndTensorShape();
 }

@@ -24,151 +24,176 @@
 
 using mindspore::kernel::KERNEL_ARCH::kGPU;
 using mindspore::lite::KernelRegistrar;
+using mindspore::lite::RET_ERROR;
+using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_Gather;
 
 namespace mindspore::kernel {
 
-int GatherOpenCLKernel::Init() {
-  std::string kernel_name = "gather";
-  auto in_format = op_format_;
-  if (in_format != schema::Format_NHWC4 && in_format != schema::Format_NC4HW4) {
-    MS_LOG(ERROR) << "input format(" << in_format << ") "
-                  << "format not support!";
+int GatherOpenCLKernel::CheckSpecs() {
+  if (in_tensors_.size() != 2) {
+    MS_LOG(ERROR) << "GatherOpenCLKernel only supports 2 input Tensor but get " << in_tensors_.size();
     return RET_ERROR;
   }
-  in_ori_format_ = in_tensors_[0]->GetFormat();
-  out_ori_format_ = out_tensors_[0]->GetFormat();
-  in_tensors_[0]->SetFormat(op_format_);
-  out_tensors_[0]->SetFormat(op_format_);
+  if (out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "GatherOpenCLKernel only supports 1 output Tensor but get " << out_tensors_.size();
+    return RET_ERROR;
+  }
+  enable_fp16_ = ocl_runtime_->GetFp16Enable();
+  if (!in_tensors_.at(1)->IsConst() && enable_fp16_) {
+    MS_LOG(ERROR) << "GatherOpenCLKernel Unsupportted intensor1 = tensor and datatype = fp16  ";
+    return RET_ERROR;
+  }
+  int input_ndim = in_tensors_.front()->shape().size();
+  if (input_ndim < 0 || input_ndim > 4) {
+    MS_LOG(ERROR) << "GatherOpenCLKernel only supports 1-4D input Tensor but get " << input_ndim << "D.";
+    return RET_ERROR;
+  }
+  int indices_ndim = in_tensors_.at(1)->shape().size();
+  if (indices_ndim != 1) {
+    MS_LOG(ERROR) << "GatherOpenCLKernel only supports 1D indices Tensor but get " << indices_ndim << "D.";
+    return RET_ERROR;
+  }
+
+  TypeId data_type = in_tensors_.at(1)->data_type();
+  if (data_type != kNumberTypeInt32 && data_type != kNumberTypeInt64 && data_type != kNumberTypeFloat32 &&
+      data_type != kNumberTypeFloat16) {
+    MS_LOG(ERROR) << "GatherOpenCLKernel only supports Int32/Int64/Float32/Float16 indices Tensor.";
+    return RET_ERROR;
+  }
+
+  auto *param = reinterpret_cast<GatherParameter *>(this->op_parameter_);
+  axis_ = param->axis_;
+  if (axis_ < 0) {
+    axis_ += input_ndim;
+  }
+  if (axis_ < 0 || axis_ >= input_ndim) {
+    MS_LOG(ERROR) << "axis is invalid: axis=" << axis_ << ".";
+    return RET_ERROR;
+  } else {
+    return RET_OK;
+  }
+}
+
+void GatherOpenCLKernel::SetConstArgs() {
+  auto input = GpuTensorInfo(in_tensors_.front());
+  auto output = GpuTensorInfo(out_tensors_.front());
+  int indices_num = in_tensors_.at(1)->ElementsNum();
+  cl_int4 src_size = {static_cast<cl_int>(input.W), static_cast<cl_int>(input.H), static_cast<cl_int>(input.Slice),
+                      static_cast<cl_int>(input.N)};
+  cl_int4 dst_size = {static_cast<cl_int>(output.W), static_cast<cl_int>(output.H), static_cast<cl_int>(output.Slice),
+                      static_cast<cl_int>(output.N)};
+  int arg_cnt = 3;
+  ocl_runtime_->SetKernelArg(kernel_, arg_cnt++, src_size);
+  ocl_runtime_->SetKernelArg(kernel_, arg_cnt++, dst_size);
+  ocl_runtime_->SetKernelArg(kernel_, arg_cnt++, indices_num);
+  ocl_runtime_->SetKernelArg(kernel_, arg_cnt, axis_);
+}
+
+void GatherOpenCLKernel::SetGlobalLocal() {
+  auto output = GpuTensorInfo(out_tensors_.front());
+  local_size_ = {1, 1, 1};
+  global_size_ = {output.W, output.N * output.H, output.Slice};
+  OpenCLKernel::AlignGlobalLocal(global_size_, local_size_);
+}
+
+int GatherOpenCLKernel::Prepare() {
+  std::string kernel_name = "gather";
 #ifdef PROGRAM_WITH_IL
   kernel_ = ocl_runtime_->GetKernelFromBinary(kernel_name);
 #else
-  if (in_format == schema::Format_NC4HW4) {
-    kernel_name += "_NC4HW4";
-  } else {
-    kernel_name += "_NHWC4";
-  }
-  std::set<std::string> build_options;
-  std::string source = gather_source;
   std::string program_name = "gather";
-  ocl_runtime_->LoadSource(program_name, source);
-  ocl_runtime_->BuildKernel(kernel_, program_name, kernel_name, build_options);
+  ocl_runtime_->LoadSource(program_name, gather_source);
+  ocl_runtime_->BuildKernel(kernel_, program_name, kernel_name);
 #endif
-  // init indices_data_
-  auto indices_tensor = in_tensors_.at(1);
-  int indices_num = indices_tensor->ElementsNum();
-  bool isIndicesInt32 = indices_tensor->data_type() == kNumberTypeInt32;
+  if (!in_tensors_.at(1)->IsConst()) {
+    intensor1_is_tensor = true;
+  }
+
+  if (!intensor1_is_tensor) {
+    int ret = InitWeights();
+    if (ret != RET_OK) {
+      return ret;
+    }
+  }
+
+  SetGlobalLocal();
+  SetConstArgs();
+  MS_LOG(DEBUG) << kernel_name << " Init Done!";
+  return RET_OK;
+}
+
+int GatherOpenCLKernel::ConvertTensorToweight() {
   auto allocator = ocl_runtime_->GetAllocator();
-  if (!isIndicesInt32) {
-    indices_data_ = reinterpret_cast<int32_t *>(allocator->Malloc(sizeof(int32_t) * indices_num));
-    if (indices_data_ == nullptr) {
-      MS_LOG(ERROR) << "Memory allocation failed";
-      return RET_ERROR;
-    }
-  }
-  return RET_OK;
-}
-
-int GatherOpenCLKernel::InitBuffer() {
+  GpuTensorInfo img_info(in_tensors_[1]);
   auto indices_tensor = in_tensors_.at(1);
-  int indices_num = indices_tensor->ElementsNum();
-  bool isIndicesInt32 = indices_tensor->data_type() == kNumberTypeInt32;
-  if (!isIndicesInt32) {
-    if (indices_tensor->data_type() == kNumberTypeInt64) {
-      for (int i = 0; i < indices_num; i++) {
-        indices_data_[i] = reinterpret_cast<int64_t *>(indices_tensor->data_c())[i];
-      }
-    } else if (indices_tensor->data_type() == kNumberTypeFloat32) {
-      for (int i = 0; i < indices_num; i++) {
-        indices_data_[i] = reinterpret_cast<float *>(indices_tensor->data_c())[i];
-      }
-    } else if (indices_tensor->data_type() == kNumberTypeFloat16) {
-      for (int i = 0; i < indices_num; i++) {
-        indices_data_[i] = reinterpret_cast<float16_t *>(indices_tensor->data_c())[i];
-      }
-    } else {
-      MS_LOG(ERROR) << "Unsupported data type: " << indices_tensor->data_type();
-      return RET_ERROR;
+  auto indices_num = indices_tensor->ElementsNum();
+  indices_data_ = reinterpret_cast<int32_t *>(allocator->Malloc(sizeof(int32_t) * indices_num));
+  allocator->MapBuffer(indices_data_, CL_MAP_WRITE, nullptr, true);
+  if (indices_data_ == nullptr) {
+    MS_LOG(ERROR) << "Memory allocation failed";
+    return RET_ERROR;
+  }
+  auto data_type = indices_tensor->data_type();
+  auto data = indices_tensor->data_c();
+  if (data_type == kNumberTypeInt32) {
+    for (int i = 0; i < indices_num; i++) {
+      indices_data_[i] = reinterpret_cast<int32_t *>(data)[i];
     }
   } else {
-    indices_data_ = reinterpret_cast<int32_t *>(indices_tensor->data_c());
+    MS_LOG(ERROR) << "Gather Only supported The DataType Of Intensor1 is Int32  "
+                  << " But Your Type is :" << data_type;
+    return RET_ERROR;
   }
+  allocator->UnmapBuffer(indices_data_);
   return RET_OK;
 }
 
-int GatherOpenCLKernel::ReSize() { return RET_OK; }
+int GatherOpenCLKernel::InitWeights() {
+  auto indices_tensor = in_tensors_.at(1);
+  auto indices_num = indices_tensor->ElementsNum();
+  auto allocator = ocl_runtime_->GetAllocator();
+  indices_data_ = reinterpret_cast<int32_t *>(allocator->Malloc(sizeof(int32_t) * indices_num));
+  if (indices_data_ == nullptr) {
+    MS_LOG(ERROR) << "Memory allocation failed";
+    return RET_ERROR;
+  }
 
-int GatherOpenCLKernel::GetImageSize(size_t idx, std::vector<size_t> *img_size) {
-  size_t CO4 = UP_DIV(out_tensors_[0]->Channel(), C4NUM);
-  size_t im_dst_x, im_dst_y;
-  if (in_tensors_[0]->GetFormat() == schema::Format::Format_NHWC4) {
-    im_dst_x = out_tensors_[0]->Width() * CO4;
-    im_dst_y = out_tensors_[0]->Height() * out_tensors_[0]->Batch();
-  } else {
-    im_dst_y = out_tensors_[0]->Batch() * out_tensors_[0]->Height() * CO4;
-    im_dst_x = out_tensors_[0]->Width();
+  auto data_type = indices_tensor->data_type();
+  auto data = indices_tensor->data_c();
+  if (data_type == kNumberTypeInt32) {
+    for (int i = 0; i < indices_num; i++) {
+      indices_data_[i] = reinterpret_cast<int32_t *>(data)[i];
+    }
+  } else if (data_type == kNumberTypeInt64) {
+    for (int i = 0; i < indices_num; i++) {
+      indices_data_[i] = reinterpret_cast<int64_t *>(data)[i];
+    }
+  } else if (data_type == kNumberTypeFloat32) {
+    for (int i = 0; i < indices_num; i++) {
+      indices_data_[i] = reinterpret_cast<float *>(data)[i];
+    }
+  } else if (data_type == kNumberTypeFloat16) {
+    for (int i = 0; i < indices_num; i++) {
+      indices_data_[i] = reinterpret_cast<float16_t *>(data)[i];
+    }
   }
-  size_t img_dtype = CL_FLOAT;
-  auto enable_fp16_ = ocl_runtime_->GetFp16Enable();
-  if (enable_fp16_) {
-    img_dtype = CL_HALF_FLOAT;
-  }
-  img_size->clear();
-  std::vector<size_t> vec{im_dst_x, im_dst_y, img_dtype};
-  *img_size = std::move(vec);
   return RET_OK;
 }
 
 int GatherOpenCLKernel::Run() {
   MS_LOG(DEBUG) << this->name() << " Running! ";
-  auto param = reinterpret_cast<GatherParameter *>(this->op_parameter_);
-
-  if (InitBuffer() != RET_OK) {
-    return RET_ERROR;
+  if (intensor1_is_tensor) {
+    ConvertTensorToweight();
   }
-  auto input_shape = in_tensors_[0]->shape();
-  auto output_shape = out_tensors_[0]->shape();
-  int indices_num = in_tensors_[1]->ElementsNum();
-  size_t CO4 = UP_DIV(out_tensors_[0]->Channel(), C4NUM);
-  size_t CI4 = UP_DIV(in_tensors_[0]->Channel(), C4NUM);
-  cl_int4 src_size = {in_tensors_[0]->Width(), in_tensors_[0]->Height(), (cl_int)CI4, in_tensors_[0]->Batch()};
-  cl_int4 dst_size = {(cl_int)out_tensors_[0]->Width(), (cl_int)out_tensors_[0]->Height(), (cl_int)CO4,
-                      (cl_int)out_tensors_[0]->Batch()};
-  std::vector<size_t> local = {1, 1, 1};
-  std::vector<size_t> global = {(size_t)out_tensors_[0]->Width(),
-                                (size_t)out_tensors_[0]->Batch() * (size_t)out_tensors_[0]->Height(), CO4};
-  int arg_cn = 0;
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, in_tensors_[0]->data_c(), lite::opencl::MemType::IMG);
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, indices_data_, lite::opencl::MemType::BUF);
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, out_tensors_[0]->data_c(), lite::opencl::MemType::IMG);
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, src_size);
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, dst_size);
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, indices_num);
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, param->axis_);
-  ocl_runtime_->RunKernel(kernel_, global, local, nullptr);
-
+  ocl_runtime_->SetKernelArg(kernel_, 0, out_tensors_.front()->data_c());
+  ocl_runtime_->SetKernelArg(kernel_, 1, in_tensors_.front()->data_c());
+  ocl_runtime_->SetKernelArg(kernel_, 2, indices_data_, lite::opencl::MemType::BUF);
+  ocl_runtime_->RunKernel(kernel_, global_range_, local_range_, nullptr, &event_);
   return RET_OK;
 }
 
-kernel::LiteKernel *OpenCLGatherKernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                              const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                              const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                              const mindspore::lite::PrimitiveC *primitive) {
-  auto *kernel = new (std::nothrow) GatherOpenCLKernel(opParameter, inputs, outputs);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "Kernel " << opParameter->name_ << " new failed.";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Kernel " << opParameter->name_ << " init failed.";
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Gather, OpenCLGatherKernelCreator);
-REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Gather, OpenCLGatherKernelCreator);
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_Gather, OpenCLKernelCreator<GatherOpenCLKernel>);
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_Gather, OpenCLKernelCreator<GatherOpenCLKernel>);
 
 }  // namespace mindspore::kernel

@@ -25,9 +25,9 @@
 
 namespace mindspore {
 namespace mindrecord {
-class ShardSequentialSample : public ShardSample {
+class __attribute__((visibility("default"))) ShardSequentialSample : public ShardSample {
  public:
-  ShardSequentialSample(int n, int offset);
+  ShardSequentialSample(int64_t n, int64_t offset);
 
   ShardSequentialSample(float per, float per_offset);
 
@@ -38,7 +38,7 @@ class ShardSequentialSample : public ShardSample {
   int64_t GetNumSamples(int64_t dataset_size, int64_t num_classes) override;
 
  private:
-  int offset_;
+  int64_t offset_;
   float per_;
   float per_offset_;
 };

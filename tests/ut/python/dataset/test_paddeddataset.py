@@ -182,11 +182,11 @@ def test_three_datasets_connected():
 
 
 def test_raise_error():
-    data1 = [{'image': np.zeros(1, np.uint8)}, {'image': np.zeros(2, np.uint8)},
-             {'image': np.zeros(3, np.uint8)}, {'image': np.zeros(4, np.uint8)},
-             {'image': np.zeros(5, np.uint8)}]
-    data2 = [{'image': np.zeros(6, np.uint8)}, {'image': np.zeros(7, np.uint8)},
-             {'image': np.zeros(8, np.uint8)}]
+    data1 = [{'image': np.zeros(0, np.uint8)}, {'image': np.zeros(0, np.uint8)},
+             {'image': np.zeros(0, np.uint8)}, {'image': np.zeros(0, np.uint8)},
+             {'image': np.zeros(0, np.uint8)}]
+    data2 = [{'image': np.zeros(0, np.uint8)}, {'image': np.zeros(0, np.uint8)},
+             {'image': np.zeros(0, np.uint8)}]
 
     ds1 = ds.PaddedDataset(data1)
     ds4 = ds1.batch(2)
@@ -483,7 +483,7 @@ def test_clue_padded_and_skip_with_0_samples():
         count += 1
     assert count == 0
 
-    with pytest.raises(ValueError, match="There is no samples in the "):
+    with pytest.raises(ValueError, match="There are no samples in the "):
         dataset = dataset.concat(data_copy1)
         count = 0
         for data in dataset.create_dict_iterator(num_epochs=1, output_numpy=True):

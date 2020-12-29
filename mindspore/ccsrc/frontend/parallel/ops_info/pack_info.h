@@ -33,12 +33,12 @@ class PackInfo : public OperatorInfo {
  public:
   PackInfo(const std::string &operator_name, const Shapes &inputs_shape, const Shapes &outputs_shape,
            const PrimitiveAttrs &attrs)
-      : OperatorInfo(operator_name, inputs_shape, outputs_shape, attrs, std::make_shared<PackCost>(false)) {}
+      : OperatorInfo(operator_name, inputs_shape, outputs_shape, attrs, std::make_shared<PackCost>()) {}
   ~PackInfo() override = default;
 
   Status Init(const StrategyPtr &strategy) override;
   Status InitForCostModel(const StrategyPtr &strategy) override;
-  Status GenerateStrategies(int32_t) override;
+  Status GenerateStrategies(int64_t) override;
   Status SetCostUnderStrategy(const StrategyPtr &) override;
   void ReComputeBatchSplitFlagList() override;
 

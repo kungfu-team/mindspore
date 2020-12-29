@@ -28,33 +28,35 @@ static const std::vector<schema::PrimitiveType> nhwcOpList = {
 #ifdef SUPPORT_TRAIN
   schema::PrimitiveType_Conv2DGradFilter,
   schema::PrimitiveType_Conv2DGradInput,
+  schema::PrimitiveType_GroupConv2DGradInput,
   schema::PrimitiveType_PoolingGrad,
   schema::PrimitiveType_BiasGrad,
   schema::PrimitiveType_BNGrad,
   schema::PrimitiveType_ActivationGrad,
   schema::PrimitiveType_ApplyMomentum,
   schema::PrimitiveType_Sgd,
+  schema::PrimitiveType_Adam,
 #endif
   schema::PrimitiveType_Conv2D,
   schema::PrimitiveType_DeConv2D,
   schema::PrimitiveType_DepthwiseConv2D,
   schema::PrimitiveType_DeDepthwiseConv2D,
   schema::PrimitiveType_Pooling,
+  schema::PrimitiveType_LocalResponseNormalization,
   schema::PrimitiveType_Resize,
   schema::PrimitiveType_BatchNorm,
   schema::PrimitiveType_FusedBatchNorm,
   schema::PrimitiveType_PReLU,
-  schema::PrimitiveType_BiasAdd};
-
-static const std::vector<schema::PrimitiveType> nhwcOpDualInputList = {
-#ifdef SUPPORT_TRAIN
-  schema::PrimitiveType_Conv2DGradFilter, schema::PrimitiveType_BNGrad
-#endif
-};
+  schema::PrimitiveType_BiasAdd,
+  schema::PrimitiveType_InstanceNorm,
+  schema::PrimitiveType_SpaceToDepth,
+  schema::PrimitiveType_DepthToSpace,
+  schema::PrimitiveType_TopK};
 
 static const std::vector<schema::PrimitiveType> nhwcOpAllInputList = {
 #ifdef SUPPORT_TRAIN
-  schema::PrimitiveType_PoolingGrad, schema::PrimitiveType_ActivationGrad
+  schema::PrimitiveType_PoolingGrad, schema::PrimitiveType_ActivationGrad, schema::PrimitiveType_Conv2DGradFilter,
+  schema::PrimitiveType_BNGrad
 #endif
 };
 
@@ -64,28 +66,87 @@ static const std::vector<schema::PrimitiveType> fp32FullOpList = {
 
 static const std::vector<schema::PrimitiveType> int8NeedNhwcOpList = {};
 
-static const std::vector<schema::PrimitiveType> int8OpList = {
-  schema::PrimitiveType_Nchw2Nhwc,    schema::PrimitiveType_Nhwc2Nchw,
-  schema::PrimitiveType_Conv2D,       schema::PrimitiveType_DepthwiseConv2D,
-  schema::PrimitiveType_Add,          schema::PrimitiveType_Pooling,
-  schema::PrimitiveType_Concat,       schema::PrimitiveType_SoftMax,
-  schema::PrimitiveType_Reshape,      schema::PrimitiveType_Activation,
-  schema::PrimitiveType_Resize,       schema::PrimitiveType_FullConnection,
-  schema::PrimitiveType_ArgMax,       schema::PrimitiveType_ArgMin,
-  schema::PrimitiveType_BatchNorm,    schema::PrimitiveType_FusedBatchNorm,
-  schema::PrimitiveType_BiasAdd,      schema::PrimitiveType_Div,
-  schema::PrimitiveType_Mul,          schema::PrimitiveType_Slice,
-  schema::PrimitiveType_SoftMax,      schema::PrimitiveType_Split,
-  schema::PrimitiveType_Squeeze,      schema::PrimitiveType_Sub,
-  schema::PrimitiveType_StridedSlice, schema::PrimitiveType_TopK,
-  schema::PrimitiveType_Unsqueeze,    schema::PrimitiveType_MatMul,
-  schema::PrimitiveType_Pad,          schema::PrimitiveType_DeConv2D,
-  schema::PrimitiveType_Scale};
+static const std::vector<schema::PrimitiveType> int8OpList = {schema::PrimitiveType_Conv2D,
+                                                              schema::PrimitiveType_DepthwiseConv2D,
+                                                              schema::PrimitiveType_Add,
+                                                              schema::PrimitiveType_Transpose,
+                                                              schema::PrimitiveType_Pooling,
+                                                              schema::PrimitiveType_Concat,
+                                                              schema::PrimitiveType_SoftMax,
+                                                              schema::PrimitiveType_Reshape,
+                                                              schema::PrimitiveType_Activation,
+                                                              schema::PrimitiveType_Resize,
+                                                              schema::PrimitiveType_FullConnection,
+                                                              schema::PrimitiveType_ArgMax,
+                                                              schema::PrimitiveType_ArgMin,
+                                                              schema::PrimitiveType_BatchNorm,
+                                                              schema::PrimitiveType_FusedBatchNorm,
+                                                              schema::PrimitiveType_BiasAdd,
+                                                              schema::PrimitiveType_Div,
+                                                              schema::PrimitiveType_Mul,
+                                                              schema::PrimitiveType_Slice,
+                                                              schema::PrimitiveType_SoftMax,
+                                                              schema::PrimitiveType_Split,
+                                                              schema::PrimitiveType_Squeeze,
+                                                              schema::PrimitiveType_Sub,
+                                                              schema::PrimitiveType_StridedSlice,
+                                                              schema::PrimitiveType_TopK,
+                                                              schema::PrimitiveType_Unsqueeze,
+                                                              schema::PrimitiveType_MatMul,
+                                                              schema::PrimitiveType_Pad,
+                                                              schema::PrimitiveType_DeConv2D,
+                                                              schema::PrimitiveType_Scale,
+                                                              schema::PrimitiveType_Cast,
+                                                              schema::PrimitiveType_Shape,
+                                                              schema::PrimitiveType_ExpandDims,
+                                                              schema::PrimitiveType_BatchToSpace,
+                                                              schema::PrimitiveType_BatchToSpaceND,
+                                                              schema::PrimitiveType_Reduce,
+                                                              schema::PrimitiveType_Round,
+                                                              schema::PrimitiveType_Floor,
+                                                              schema::PrimitiveType_Ceil,
+                                                              schema::PrimitiveType_Abs,
+                                                              schema::PrimitiveType_Sin,
+                                                              schema::PrimitiveType_Cos,
+                                                              schema::PrimitiveType_Log,
+                                                              schema::PrimitiveType_Sqrt,
+                                                              schema::PrimitiveType_Rsqrt,
+                                                              schema::PrimitiveType_Square,
+                                                              schema::PrimitiveType_LogicalNot,
+                                                              schema::PrimitiveType_SpaceToBatch,
+                                                              schema::PrimitiveType_SpaceToBatchND,
+                                                              schema::PrimitiveType_DepthToSpace,
+                                                              schema::PrimitiveType_Power,
+                                                              schema::PrimitiveType_GatherNd,
+                                                              schema::PrimitiveType_LeakyReLU,
+                                                              schema::PrimitiveType_Gather,
+                                                              schema::PrimitiveType_Equal,
+                                                              schema::PrimitiveType_NotEqual,
+                                                              schema::PrimitiveType_LessEqual,
+                                                              schema::PrimitiveType_Greater,
+                                                              schema::PrimitiveType_GreaterEqual,
+                                                              schema::PrimitiveType_Eltwise,
+                                                              schema::PrimitiveType_DeDepthwiseConv2D,
+                                                              schema::PrimitiveType_DetectionPostProcess,
+                                                              schema::PrimitiveType_Crop,
+                                                              schema::PrimitiveType_PriorBox,
+                                                              schema::PrimitiveType_QuantDTypeCast,
+                                                              schema::PrimitiveType_LayerNorm,
+                                                              schema::PrimitiveType_L2Norm};
 
 static const std::vector<schema::PrimitiveType> needInsertOpList = {
+#ifdef SUPPORT_TRAIN
+  schema::PrimitiveType_Eltwise, schema::PrimitiveType_Activation,   schema::PrimitiveType_Concat,
+  schema::PrimitiveType_Power,   schema::PrimitiveType_StridedSlice, schema::PrimitiveType_Split,
+  schema::PrimitiveType_Slice,   schema::PrimitiveType_Crop,         schema::PrimitiveType_Mul,
+  schema::PrimitiveType_Add
+#else
   schema::PrimitiveType_Eltwise, schema::PrimitiveType_Activation,   schema::PrimitiveType_Concat,
   schema::PrimitiveType_Power,   schema::PrimitiveType_StridedSlice, schema::PrimitiveType_Add,
-  schema::PrimitiveType_Split,   schema::PrimitiveType_Slice,        schema::PrimitiveType_Crop};
+  schema::PrimitiveType_Split,   schema::PrimitiveType_Slice,        schema::PrimitiveType_Crop,
+  schema::PrimitiveType_Mul,     schema::PrimitiveType_Maximum
+#endif
+};
 
 static const std::unordered_map<int, int> nc2NhAxisMap = {{0, 0}, {1, -1}, {2, 1}, {3, 2}};
 
@@ -97,8 +158,6 @@ std::vector<schema::PrimitiveType> Getfp32FullOpList() { return fp32FullOpList; 
 
 std::vector<schema::PrimitiveType> GetNhwcOpList() { return nhwcOpList; }
 
-std::vector<schema::PrimitiveType> GetNhwcDualInputOpList() { return nhwcOpDualInputList; }
-
 std::vector<schema::PrimitiveType> GetNhwcAllInputOpList() { return nhwcOpAllInputList; }
 
 std::vector<schema::PrimitiveType> GetUint8NhwcOpList() { return int8NeedNhwcOpList; }
@@ -107,6 +166,7 @@ std::vector<schema::PrimitiveType> GetInt8OpList() { return int8OpList; }
 
 STATUS NodeUtils::ConvertDims(mindspore::schema::Format src_format, const std::vector<int32_t> &src_dims,
                               mindspore::schema::Format dst_format, std::vector<int32_t> *dst_dims) {
+  MS_ASSERT(nullptr != dst_dims);
   if ((src_dims.size() != DIM_DEFAULT_SIZE && src_dims.size() != 3) || src_format == dst_format) {
     MS_LOG(ERROR) << "Convert format , src size " << src_dims.size()
                   << " <3 or src format is equal to dst format,not need convert";
@@ -136,7 +196,7 @@ STATUS NodeUtils::ConvertDims(mindspore::schema::Format src_format, const std::v
       return RET_ERROR;
   }
 
-  if (nchw_dim.size() == 0) {
+  if (nchw_dim.empty()) {
     MS_LOG(ERROR) << "Param nchw_dim is empty!";
     return RET_ERROR;
   }
@@ -162,6 +222,10 @@ STATUS NodeUtils::ConvertDims(mindspore::schema::Format src_format, const std::v
 
 STATUS GetFilterDim(const std::vector<int32_t> &oriDims, kTransFilterType type, int32_t *filterK, int32_t *filterC,
                     int32_t *filterH, int32_t *filterW) {
+  if (filterK == nullptr || filterC == nullptr || filterH == nullptr || filterW == nullptr) {
+    MS_LOG(ERROR) << "null input";
+    return RET_NULL_PTR;
+  }
   MS_ASSERT(oriDims.size() == 4);
   if (type == kKCHW2HWCK || type == kKCHW2HWKC || type == kKCHW2KHWC || type == kKCHW2CKHW) {
     *filterK = oriDims.at(KCHW_K);
@@ -229,6 +293,7 @@ STATUS SetFilterDim(schema::TensorT *tensor, kTransFilterType type, int32_t filt
 
 STATUS TransFilterFormat(schema::TensorT *tensor, schema::Format dstFormat) {
   if (tensor == nullptr) {
+    MS_LOG(ERROR) << "tensor is null";
     return RET_NULL_PTR;
   }
   std::vector<int32_t> oriDims = tensor->dims;

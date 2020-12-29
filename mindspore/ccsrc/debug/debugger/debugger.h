@@ -33,6 +33,7 @@ using debugger::GraphProto;
 using debugger::ModelProto;
 using debugger::TensorProto;
 using debugger::WatchCondition;
+using debugger::WatchCondition_Parameter;
 using debugger::WatchNode;
 using debugger::WatchpointHit;
 
@@ -42,7 +43,14 @@ using ProtoVector = google::protobuf::RepeatedPtrField<T>;
 namespace mindspore {
 // different types of command recieved by debugger
 // need to keep sync with client-side proto and server-side proto
-enum class DebuggerCommand { kExitCMD = 2, kRunCMD = 3, kSetCMD = 4, kViewCMD = 5, kUnknownCMD = -1 };
+enum class DebuggerCommand {
+  kExitCMD = 2,
+  kRunCMD = 3,
+  kSetCMD = 4,
+  kViewCMD = 5,
+  kVersionMatchedCMD = 6,
+  kUnknownCMD = -1
+};
 
 class Debugger : public std::enable_shared_from_this<Debugger> {
  public:
@@ -67,20 +75,34 @@ class Debugger : public std::enable_shared_from_this<Debugger> {
   // enable debugger
   // send graph and wait for command
   // do nothing if graph is set already
-  void PreExecute(const KernelGraphPtr &graph_ptr);
+  void PreExecute(const KernelGraphPtr &graph_ptr, uint32_t graph_sum = 1);
 
   // analyze tensors and wait for command
   // don't need a graph_ptr because it is saved during pre_execute
   void PostExecute();
 
-  bool ReadNodeDataRequired();
+  bool ReadNodeDataRequired(const CNodePtr &kernel);
 
-  void PostExecuteNode();
+  void PostExecuteNode(const CNodePtr &kernel);
 
   // suspend the execution after a debug_op
   void PostDebugOp();
 
-  DebugServices *debug_services() const;
+  bool DumpTensorToFile(const std::string &tensor_name, bool trans_flag, const std::string &filepath,
+                        const std::string &host_fmt, const std::vector<int64_t> &host_shape, TypeId host_type,
+                        TypeId addr_type_id, const std::string &addr_format, size_t slot) const;
+
+  bool DebugServicesIsWatchPoint(const std::string &kernel_name, const CNodePtr &kernel = nullptr) const;
+
+  void EmptyTensor();
+
+  void SetTensorLoaderIterNum(uint32_t iter_num);
+
+  void EmptyPrevTensor();
+
+  uint32_t GetTensorLoaderIterNum() const;
+
+  bool LoadNewTensor(const std::shared_ptr<TensorData> &tensor, bool keep_prev);
 
   bool debugger_enabled() const;
 
@@ -101,9 +123,29 @@ class Debugger : public std::enable_shared_from_this<Debugger> {
 
   void SetTrainingDone(bool training_done);
 
-  void SendMetadata();
+  // returns true if reply received and mindspore version matched with mindinsight version
+  // version_check should be true if you want the function to do backend compability check with Mindinsight
+  bool SendMetadata(bool version_check);
 
-  void LoadParameters();
+  void LoadParametersAndConst();
+
+  void UpdateStepNum(const session::KernelGraph *graph);
+
+  void ClearCurrentData();
+
+  void LoadGraphOutputs();
+
+  void CheckDatasetSinkMode();
+
+  void LoadGraphs(const KernelGraphPtr &graph_ptr);
+
+  uint32_t GetFirstRunGraphId();
+
+  void SetGraphPtr(const KernelGraphPtr &graph_ptr) { graph_ptr_ = graph_ptr; }
+
+  std::list<KernelGraphPtr> GetGraphPtrList() { return graph_ptr_list_; }
+
+  bool TensorExistsInCurrent(std::string tensor_name);
 
  private:
   // private constructor for singleton
@@ -114,11 +156,15 @@ class Debugger : public std::enable_shared_from_this<Debugger> {
   // read env variable for grpc client
   void EnableDebugger();
 
+  void SetOpOverflowBinPath(uint32_t graph_id);
+
   // check if dump using debugger backend is enabled
   bool CheckDebuggerDumpEnabled();
 
   // check if debugger enabled
   bool CheckDebuggerEnabled();
+
+  void CheckDebuggerEnabledParam();
 
   bool CheckDebuggerPartialMemoryEnabled();
 
@@ -129,10 +175,12 @@ class Debugger : public std::enable_shared_from_this<Debugger> {
   void CheckDatasetGraph();
 
   // serialize graph and get proto
-  GraphProto GetGraphProto() const;
+  GraphProto GetGraphProto(const KernelGraphPtr &graph_ptr) const;
 
   // send graph and enter command wait loop
   void SendGraphAndSuspend(const GraphProto &graph_proto);
+
+  void SendMultiGraphsAndSuspend(const std::list<GraphProto> &graph_proto_list, uint32_t graph_sum);
 
   // wait for command and process command
   // send command request and process reply in a loop
@@ -140,7 +188,8 @@ class Debugger : public std::enable_shared_from_this<Debugger> {
   void CommandLoop();
 
   // set what nodes and conditions to watch
-  void SetWatchpoint(const ProtoVector<WatchNode> &nodes, const WatchCondition &condition, const int32_t id);
+  void SetWatchpoint(const ProtoVector<WatchNode> &nodes, const WatchCondition &condition, const int32_t id,
+                     const ProtoVector<WatchCondition_Parameter> &parameters);
 
   // remove watchpoint with id
   void RemoveWatchpoint(const int32_t id);
@@ -153,16 +202,22 @@ class Debugger : public std::enable_shared_from_this<Debugger> {
 
   // analyze tensors and check watchpoint conditions
   // return names of tensors and what condition they hit
-  std::list<WatchpointHit> CheckWatchpoints(const std::string &watchnode = std::string());
+  std::list<WatchpointHit> CheckWatchpoints(const std::string &watchnode = std::string(),
+                                            const CNodePtr &kernel = nullptr, bool recheck = false);
 
-  // send watchpoints that hit and enter command wait loop
-  void SendWatchpointsAndSuspend(const std::list<WatchpointHit> &points);
+  // send watchpoints that hit
+  void SendWatchpoints(const std::list<WatchpointHit> &points);
 
   // Find if any operation overflow happened and return their names
   std::vector<std::string> CheckOpOverflow();
 
   // Check if the port is valid
   bool CheckPort(const char *port);
+
+  // Check if the IP is valid
+  bool CheckIp(const char *host);
+
+  void LoadSingleAnfnode(const AnfNodePtr &anf_node, const size_t output_index);
 
   // class members
   std::unique_ptr<GrpcClient> grpc_client_;
@@ -180,11 +235,20 @@ class Debugger : public std::enable_shared_from_this<Debugger> {
   bool partial_memory_;
   std::mutex access_lock_;
   std::map<std::pair<uint32_t, uint32_t>, std::string> stream_task_to_opname_;
+  std::map<uint32_t, std::vector<std::string>> overflow_ops_;
   double last_overflow_bin_;
-  std::string overflow_bin_path_;
+  std::map<uint32_t, std::string> overflow_bin_path_;
+  // flag to keep track of the very first suspension of debugger
+  bool initial_suspend_;
+  std::list<GraphProto> graph_proto_list_;
+  std::list<KernelGraphPtr> graph_ptr_list_;
+
   // singleton
   static std::mutex instance_lock_;
   static std::shared_ptr<Debugger> debugger_;
+  uint32_t not_dataset_graph_sum_;
+  std::list<uint32_t> rungraph_id_list_;
+  std::string version_;
 };
 
 using DebuggerPtr = std::shared_ptr<Debugger>;
@@ -200,6 +264,7 @@ DataType GetDebuggerNumberDataType(const TypePtr &type);
 DebuggerCommand GetCommand(const EventReply &reply);
 
 // parse other data out of EventReply
+ProtoVector<WatchCondition_Parameter> GetParameters(const EventReply &reply);
 ProtoVector<WatchNode> GetWatchnodes(const EventReply &reply);
 std::string GetNodeName(const EventReply &reply);
 std::string GetRunLevel(const EventReply &reply);
@@ -207,6 +272,7 @@ WatchCondition GetWatchcondition(const EventReply &reply);
 int32_t GetWatchpointID(const EventReply &reply);
 bool GetWatchpointDelete(const EventReply &reply);
 ProtoVector<TensorProto> GetTensors(const EventReply &reply);
+bool GetMiVersionMatched(const EventReply &reply);
 
 // get the full name of a tensor, which is the name used in TensorLoader
 std::string GetTensorFullName(const TensorProto &tensor);

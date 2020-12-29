@@ -21,6 +21,10 @@
 #include "tools/converter/quantizer/quantize_util.h"
 #endif
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -57,13 +61,8 @@ int MatMul::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inp
       return RET_ERROR;
     }
   }
-  if (GetQuantType() == schema::QuantType_AwareTraining) {
-    std::vector<std::vector<schema::QuantParamT>> vecInputQuantParam;
-    std::vector<std::vector<schema::QuantParamT>> vecOutputQuantParam;
-    PopulaterQuantParam(prim, &vecInputQuantParam, &vecOutputQuantParam, inputs);
-    SetInputQuantParam(vecInputQuantParam);
-    SetOutputQuantParam(vecOutputQuantParam);
-  }
+
+  PopulaterQuantParam(prim, inputs);
   return RET_OK;
 }
 
@@ -86,6 +85,8 @@ int MatMul::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers:
   return RET_OK;
 }
 
+PrimitiveC *MatMulCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<MatMul>(primitive); }
+Registry MatMulRegistry(schema::PrimitiveType_MatMul, MatMulCreator);
 #endif
 
 int MatMul::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
@@ -98,9 +99,9 @@ int MatMul::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
   MS_ASSERT(output != nullptr);
 
   output->set_data_type(input0->data_type());
-  output->SetFormat(input0->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output->set_format(input0->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
 
   std::vector<int> a_shape = input0->shape();
@@ -111,12 +112,20 @@ int MatMul::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
     input0->set_shape(a_shape);
   }
 
-  if (a_shape.size() < 2 || b_shape.size() < 2) {
-    MS_LOG(ERROR) << "inputs shape is invalid";
-    return RET_INPUT_TENSOR_ERROR;
+  bool del_start = false;
+  bool del_end = false;
+  if (a_shape.size() == 1) {
+    a_shape.insert(a_shape.begin(), 1);
+    input0->set_shape(a_shape);
+    del_start = true;
   }
-  for (size_t i = 0; i < a_shape.size() - 2; ++i) {
-    if (a_shape[i] != b_shape[i]) {
+  if (b_shape.size() == 1) {
+    b_shape.push_back(1);
+    input1->set_shape(b_shape);
+    del_end = true;
+  }
+  for (size_t i = 0; i < (a_shape.size() - 2) && i < (b_shape.size() - 2); ++i) {
+    if (a_shape.at(a_shape.size() - 3 - i) != b_shape.at(b_shape.size() - 3 - i)) {
       MS_LOG(ERROR) << "Op MatMul's dimensions must be equal";
       return RET_INPUT_TENSOR_ERROR;
     }
@@ -130,6 +139,12 @@ int MatMul::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outp
   }
   std::vector<int> c_shape(a_shape);
   c_shape[c_shape.size() - 1] = b_shape[b_shape.size() - 1];
+  if (del_start) {
+    c_shape.erase(c_shape.begin());
+  }
+  if (del_end) {
+    c_shape.pop_back();
+  }
   output->set_shape(c_shape);
   return RET_OK;
 }

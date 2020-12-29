@@ -19,14 +19,15 @@
 #include "include/errorcode.h"
 #include "src/common/log_adapter.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
 std::vector<int> Transpose::GetPerm() const { return this->primitive_->value.AsTranspose()->perm; }
-bool Transpose::GetConjugate() const { return this->primitive_->value.AsTranspose()->conjugate; }
-
 void Transpose::SetPerm(const std::vector<int> &perm) { this->primitive_->value.AsTranspose()->perm = perm; }
-void Transpose::SetConjugate(bool conjugate) { this->primitive_->value.AsTranspose()->conjugate = conjugate; }
 
 int Transpose::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
   if (this->primitive_ == nullptr) {
@@ -47,8 +48,8 @@ int Transpose::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &
       MS_LOG(ERROR) << "new TransposeT failed";
       return RET_ERROR;
     }
-    MS_ASSERT(inputs.size() == kAnfPopulaterTwo);
-    auto inputNode = inputs[kAnfPopulaterOne];
+    MS_ASSERT(inputs.size() == kAnfPopulaterInputNumTwo);
+    auto inputNode = inputs[kAnfPopulaterInputNumOne];
     if (inputNode->isa<ValueNode>()) {
       auto valNode = inputNode->cast<ValueNodePtr>();
       MS_ASSERT(valNode != nullptr);
@@ -58,9 +59,9 @@ int Transpose::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &
         auto tuple = val->cast<ValueTuplePtr>();
         MS_ASSERT(tuple != nullptr);
         for (size_t i = 0; i < tuple->size(); i++) {
-          auto elem = tuple->value()[i]->cast<Int32ImmPtr>();
+          auto elem = tuple->value().at(i);
           MS_ASSERT(elem != nullptr);
-          attr->perm.emplace_back(static_cast<int>(elem->value()));
+          attr->perm.emplace_back(CastToInt(elem).front());
         }
       }
     }
@@ -79,7 +80,6 @@ std::vector<int> Transpose::GetPerm() const {
   auto fb_vector = this->primitive_->value_as_Transpose()->perm();
   return std::vector<int>(fb_vector->begin(), fb_vector->end());
 }
-bool Transpose::GetConjugate() const { return this->primitive_->value_as_Transpose()->conjugate(); }
 
 int Transpose::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) {
   MS_ASSERT(nullptr != primitive);
@@ -101,36 +101,45 @@ int Transpose::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffe
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *TransposeCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<Transpose>(primitive);
+}
+Registry TransposeRegistry(schema::PrimitiveType_Transpose, TransposeCreator);
+
 #endif
 
 int Transpose::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
-  MS_ASSERT(this->primitive_ != nullptr);
   auto input = inputs_.front();
-  MS_ASSERT(input != nullptr);
   auto output = outputs_.front();
+  MS_ASSERT(input != nullptr);
   MS_ASSERT(output != nullptr);
+
+  std::vector<int> perm = GetPerm();
+  std::vector<int> nchw2nhwc_perm = {0, 2, 3, 1};
+  std::vector<int> nhwc2nchw_perm = {0, 3, 1, 2};
+  std::vector<int> in_shape = input->shape();
+
   output->set_data_type(input->data_type());
-  output->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
+  if (input->format() == schema::Format::Format_NCHW && perm == nchw2nhwc_perm) {
+    output->set_format(schema::Format::Format_NHWC);
+  } else if (input->format() == schema::Format::Format_NHWC && perm == nhwc2nchw_perm) {
+    output->set_format(schema::Format::Format_NCHW);
+  } else {
+    output->set_format(input->format());
+  }
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
+  }
+
+  if (in_shape.size() != 4 && perm.size() == 4) {
+    output->set_shape(in_shape);
     return RET_OK;
   }
-  MS_ASSERT(inputs_.size() == kSingleNum);
-  MS_ASSERT(outputs_.size() == kSingleNum);
-
-  int conjugate = GetConjugate();
-  if (conjugate) {
-    MS_LOG(ERROR) << "Transpose conjugate is not support currently";
-    return RET_ERROR;
-  }
-  std::vector<int> perm;
-  for (size_t i = 0; i < GetPerm().size(); i++) {
-    perm.push_back(GetPerm()[i]);
-  }
-  std::vector<int> in_shape = input->shape();
   std::vector<int> out_shape;
   out_shape.resize(perm.size());
   for (size_t i = 0; i < perm.size(); ++i) {
-    out_shape[i] = in_shape[perm[i]];
+    out_shape.at(i) = in_shape.at(perm.at(i));
   }
   output->set_shape(out_shape);
   return RET_OK;

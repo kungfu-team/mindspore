@@ -19,8 +19,10 @@
 
 #include "minddata/dataset/api/python/pybind_register.h"
 #include "minddata/dataset/core/global_context.h"
+#include "minddata/dataset/core/client.h"  // DE client
+#include "minddata/dataset/util/status.h"
+#include "pybind11/numpy.h"
 #include "minddata/dataset/core/constants.h"
-#include "minddata/dataset/api/python/de_pipeline.h"
 
 namespace mindspore {
 namespace dataset {
@@ -33,20 +35,24 @@ PYBIND_REGISTER(GlobalContext, 0, ([](const py::module *m) {
 PYBIND_REGISTER(ConfigManager, 0, ([](const py::module *m) {
                   (void)py::class_<ConfigManager, std::shared_ptr<ConfigManager>>(*m, "ConfigManager")
                     .def("__str__", &ConfigManager::ToString)
-                    .def("set_rows_per_buffer", &ConfigManager::set_rows_per_buffer)
-                    .def("set_num_parallel_workers", &ConfigManager::set_num_parallel_workers)
-                    .def("set_worker_connector_size", &ConfigManager::set_worker_connector_size)
-                    .def("set_op_connector_size", &ConfigManager::set_op_connector_size)
-                    .def("set_seed", &ConfigManager::set_seed)
-                    .def("set_monitor_sampling_interval", &ConfigManager::set_monitor_sampling_interval)
-                    .def("get_rows_per_buffer", &ConfigManager::rows_per_buffer)
-                    .def("get_num_parallel_workers", &ConfigManager::num_parallel_workers)
-                    .def("get_worker_connector_size", &ConfigManager::worker_connector_size)
-                    .def("get_op_connector_size", &ConfigManager::op_connector_size)
-                    .def("get_seed", &ConfigManager::seed)
-                    .def("get_monitor_sampling_interval", &ConfigManager::monitor_sampling_interval)
+                    .def("get_auto_num_workers", &ConfigManager::auto_num_workers)
                     .def("get_callback_timeout", &ConfigManager::callback_timeout)
+                    .def("get_monitor_sampling_interval", &ConfigManager::monitor_sampling_interval)
+                    .def("get_num_parallel_workers", &ConfigManager::num_parallel_workers)
+                    .def("get_op_connector_size", &ConfigManager::op_connector_size)
+                    .def("get_rows_per_buffer", &ConfigManager::rows_per_buffer)
+                    .def("get_seed", &ConfigManager::seed)
+                    .def("set_rank_id", &ConfigManager::set_rank_id)
+                    .def("get_worker_connector_size", &ConfigManager::worker_connector_size)
+                    .def("set_auto_num_workers", &ConfigManager::set_auto_num_workers)
+                    .def("set_auto_worker_config", &ConfigManager::set_auto_worker_config_)
                     .def("set_callback_timeout", &ConfigManager::set_callback_timeout)
+                    .def("set_monitor_sampling_interval", &ConfigManager::set_monitor_sampling_interval)
+                    .def("set_num_parallel_workers", &ConfigManager::set_num_parallel_workers)
+                    .def("set_op_connector_size", &ConfigManager::set_op_connector_size)
+                    .def("set_rows_per_buffer", &ConfigManager::set_rows_per_buffer)
+                    .def("set_seed", &ConfigManager::set_seed)
+                    .def("set_worker_connector_size", &ConfigManager::set_worker_connector_size)
                     .def("load", [](ConfigManager &c, std::string s) { THROW_IF_ERROR(c.LoadFile(s)); });
                 }));
 

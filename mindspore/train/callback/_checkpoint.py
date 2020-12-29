@@ -21,6 +21,7 @@ import time
 import threading
 import mindspore.context as context
 from mindspore import log as logger
+from mindspore import nn
 from mindspore._checkparam import Validator
 from mindspore.train._utils import _make_directory
 from mindspore.train.serialization import save_checkpoint, _save_graph
@@ -88,14 +89,43 @@ class CheckpointConfig:
         integrated_save (bool): Whether to perform integrated save function in automatic model parallel scene.
             Default: True. Integrated save function is only supported in automatic parallel scene, not supported
             in manual parallel.
-        async_save (bool): Whether asynchronous execution saves the checkpoint to a file. Default: False
+        async_save (bool): Whether asynchronous execution saves the checkpoint to a file. Default: False.
+        saved_network (Cell): Network to be saved in checkpoint file. If the saved_network has no relation
+            with the network in training, the initial value of saved_network will be saved. Default: None.
 
     Raises:
         ValueError: If the input_param is None or 0.
 
     Examples:
-        >>> config = CheckpointConfig()
-        >>> ckpoint_cb = ModelCheckpoint(prefix="ck_prefix", directory='./', config=config)
+        >>> class LeNet5(nn.Cell):
+        >>>     def __init__(self, num_class=10, num_channel=1):
+        >>>         super(LeNet5, self).__init__()
+        >>>         self.conv1 = nn.Conv2d(num_channel, 6, 5, pad_mode='valid')
+        >>>         self.conv2 = nn.Conv2d(6, 16, 5, pad_mode='valid')
+        >>>         self.fc1 = nn.Dense(16 * 5 * 5, 120, weight_init=Normal(0.02))
+        >>>         self.fc2 = nn.Dense(120, 84, weight_init=Normal(0.02))
+        >>>         self.fc3 = nn.Dense(84, num_class, weight_init=Normal(0.02))
+        >>>         self.relu = nn.ReLU()
+        >>>         self.max_pool2d = nn.MaxPool2d(kernel_size=2, stride=2)
+        >>>         self.flatten = nn.Flatten()
+        >>>
+        >>>     def construct(self, x):
+        >>>         x = self.max_pool2d(self.relu(self.conv1(x)))
+        >>>         x = self.max_pool2d(self.relu(self.conv2(x)))
+        >>>         x = self.flatten(x)
+        >>>         x = self.relu(self.fc1(x))
+        >>>         x = self.relu(self.fc2(x))
+        >>>         x = self.fc3(x)
+        >>>         return x
+        >>>
+        >>> net = LeNet5()
+        >>> loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True, reduction='mean')
+        >>> optim = nn.Momentum(net.trainable_params(), 0.01, 0.9)
+        >>> model = Model(net, loss_fn=loss, optimizer=optim)
+        >>> data_path = './MNIST_Data'
+        >>> dataset = create_dataset(data_path)
+        >>> config = CheckpointConfig(saved_network=net)
+        >>> ckpoint_cb = ModelCheckpoint(prefix='LeNet5', directory='./checkpoint', config=config)
         >>> model.train(10, dataset, callbacks=ckpoint_cb)
     """
     def __init__(self,
@@ -104,7 +134,8 @@ class CheckpointConfig:
                  keep_checkpoint_max=5,
                  keep_checkpoint_per_n_minutes=0,
                  integrated_save=True,
-                 async_save=False):
+                 async_save=False,
+                 saved_network=None):
 
         if save_checkpoint_steps is not None:
             save_checkpoint_steps = Validator.check_non_negative_int(save_checkpoint_steps)
@@ -114,6 +145,9 @@ class CheckpointConfig:
             keep_checkpoint_max = Validator.check_non_negative_int(keep_checkpoint_max)
         if keep_checkpoint_per_n_minutes is not None:
             keep_checkpoint_per_n_minutes = Validator.check_non_negative_int(keep_checkpoint_per_n_minutes)
+
+        if saved_network is not None and not isinstance(saved_network, nn.Cell):
+            raise TypeError(f"The type of saved_network must be None or Cell, but got {str(type(saved_network))}.")
 
         if not save_checkpoint_steps and not save_checkpoint_seconds and \
                 not keep_checkpoint_max and not keep_checkpoint_per_n_minutes:
@@ -134,6 +168,7 @@ class CheckpointConfig:
 
         self._integrated_save = Validator.check_bool(integrated_save)
         self._async_save = Validator.check_bool(async_save)
+        self._saved_network = saved_network
 
     @property
     def save_checkpoint_steps(self):
@@ -165,12 +200,18 @@ class CheckpointConfig:
         """Get the value of _async_save."""
         return self._async_save
 
+    @property
+    def saved_network(self):
+        """Get the value of _saved_network"""
+        return self._saved_network
+
     def get_checkpoint_policy(self):
         """Get the policy of checkpoint."""
-        checkpoint_policy = {'save_checkpoint_steps': self._save_checkpoint_steps,
-                             'save_checkpoint_seconds': self._save_checkpoint_seconds,
-                             'keep_checkpoint_max': self._keep_checkpoint_max,
-                             'keep_checkpoint_per_n_minutes': self._keep_checkpoint_per_n_minutes}
+        checkpoint_policy = {'save_checkpoint_steps': self.save_checkpoint_steps,
+                             'save_checkpoint_seconds': self.save_checkpoint_seconds,
+                             'keep_checkpoint_max': self.keep_checkpoint_max,
+                             'keep_checkpoint_per_n_minutes': self.keep_checkpoint_per_n_minutes,
+                             'saved_network': self.saved_network}
 
         return checkpoint_policy
 
@@ -231,11 +272,15 @@ class ModelCheckpoint(Callback):
         if _is_role_pserver():
             self._prefix = "PServer_" + str(_get_ps_mode_rank()) + "_" + self._prefix
         cb_params = run_context.original_args()
+        _make_directory(self._directory)
         # save graph (only once)
         if not self._graph_saved:
             graph_file_name = os.path.join(self._directory, self._prefix + '-graph.meta')
+            if os.path.isfile(graph_file_name) and context.get_context("mode") == context.GRAPH_MODE:
+                os.remove(graph_file_name)
             _save_graph(cb_params.train_network, graph_file_name)
             self._graph_saved = True
+
         self._save_ckpt(cb_params)
 
     def end(self, run_context):
@@ -306,7 +351,8 @@ class ModelCheckpoint(Callback):
                 set_cur_net(cb_params.train_network)
                 cb_params.train_network.exec_checkpoint_graph()
 
-            save_checkpoint(cb_params.train_network, cur_file, self._config.integrated_save,
+            network = self._config.saved_network if self._config.saved_network is not None else cb_params.train_network
+            save_checkpoint(network, cur_file, self._config.integrated_save,
                             self._config.async_save)
 
             self._latest_ckpt_file_name = cur_file

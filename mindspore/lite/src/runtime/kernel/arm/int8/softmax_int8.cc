@@ -20,9 +20,14 @@
 #include "schema/model_generated.h"
 #include "src/runtime/runtime_api.h"
 #include "include/errorcode.h"
+#include "src/kernel_registry.h"
 
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
+
+using mindspore::lite::KernelRegistrar;
+using mindspore::lite::RET_NULL_PTR;
+using mindspore::schema::PrimitiveType_SoftMax;
 
 namespace mindspore::kernel {
 
@@ -35,14 +40,14 @@ int SoftmaxInt8CPUKernel::Init() {
   auto *input_tensor = in_tensors_.at(kInputIndex);
   MS_ASSERT(input_tensor);
 
-  auto in_quant_args = input_tensor->GetQuantParams();
+  auto in_quant_args = input_tensor->quant_params();
   quant_params_.in_quant_args_.scale_ = in_quant_args.front().scale;
   quant_params_.in_quant_args_.zp_ = -in_quant_args.front().zeroPoint;
 
   auto *out_tensor = out_tensors_.at(kOutputIndex);
   MS_ASSERT(out_tensor);
 
-  auto out_quant_args = out_tensor->GetQuantParams();
+  auto out_quant_args = out_tensor->quant_params();
   quant_params_.out_quant_arg_.scale_ = out_quant_args.front().scale;
   quant_params_.out_quant_arg_.zp_ = -out_quant_args.front().zeroPoint;
   quant_params_.output_activation_min_ = std::numeric_limits<int8_t>::min();
@@ -69,7 +74,9 @@ int SoftmaxInt8CPUKernel::DoSoftmax(int task_id) {
   MS_ASSERT(out_tensors_.size() == 1);
 
   auto input_ptr = reinterpret_cast<int8_t *>(in_tensors_.at(0)->MutableData());
+  MS_ASSERT(input_ptr);
   auto output_ptr = reinterpret_cast<int8_t *>(out_tensors_.at(0)->MutableData());
+  MS_ASSERT(output_ptr);
 
   int outter_size = 1, inner_size = 1;
   for (int i = 0; i < softmax_param_->axis_; i++) {
@@ -103,11 +110,6 @@ int SoftmaxRun(void *cdata, int task_id) {
 }
 
 int SoftmaxInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << ret;
-    return RET_ERROR;
-  }
   exp_data_ = reinterpret_cast<int *>(context_->allocator->Malloc(softmax_param_->element_size_ * sizeof(int)));
   int inner_size = 1;
   for (int i = softmax_param_->axis_ + 1; i < softmax_param_->n_dim_; i++) {
@@ -120,7 +122,7 @@ int SoftmaxInt8CPUKernel::Run() {
     context_->allocator->Free(sum_data_);
     return RET_ERROR;
   }
-  ret = ParallelLaunch(this->context_->thread_pool_, SoftmaxRun, this, thread_count_);
+  auto ret = ParallelLaunch(this->context_->thread_pool_, SoftmaxRun, this, thread_count_);
   context_->allocator->Free(exp_data_);
   context_->allocator->Free(sum_data_);
   if (ret != RET_OK) {
@@ -128,4 +130,6 @@ int SoftmaxInt8CPUKernel::Run() {
   }
   return ret;
 }
+
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_SoftMax, LiteKernelCreator<SoftmaxInt8CPUKernel>)
 }  // namespace mindspore::kernel

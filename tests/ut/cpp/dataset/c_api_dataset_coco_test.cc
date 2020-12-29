@@ -16,10 +16,10 @@
 #include "common/common.h"
 #include "minddata/dataset/include/datasets.h"
 
-using namespace mindspore::dataset::api;
+using namespace mindspore::dataset;
+using mindspore::dataset::dsize_t;
 using mindspore::dataset::Tensor;
 using mindspore::dataset::TensorShape;
-using mindspore::dataset::dsize_t;
 
 class MindDataTestPipeline : public UT::DatasetOpTesting {
  protected:
@@ -61,6 +61,77 @@ TEST_F(MindDataTestPipeline, TestCocoDefault) {
   iter->Stop();
 }
 
+TEST_F(MindDataTestPipeline, TestCocoDefaultWithPipeline) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCocoDefaultWithPipeline.";
+  // Create two Coco Dataset
+  std::string folder_path = datasets_root_path_ + "/testCOCO/train";
+  std::string annotation_file = datasets_root_path_ + "/testCOCO/annotations/train.json";
+
+  std::shared_ptr<Dataset> ds1 = Coco(folder_path, annotation_file);
+  std::shared_ptr<Dataset> ds2 = Coco(folder_path, annotation_file);
+  EXPECT_NE(ds1, nullptr);
+  EXPECT_NE(ds2, nullptr);
+
+  // Create two Repeat operation on ds
+  int32_t repeat_num = 2;
+  ds1 = ds1->Repeat(repeat_num);
+  EXPECT_NE(ds1, nullptr);
+  repeat_num = 3;
+  ds2 = ds2->Repeat(repeat_num);
+  EXPECT_NE(ds2, nullptr);
+
+  // Create two Project operation on ds
+  std::vector<std::string> column_project = {"image", "bbox", "category_id"};
+  ds1 = ds1->Project(column_project);
+  EXPECT_NE(ds1, nullptr);
+  ds2 = ds2->Project(column_project);
+  EXPECT_NE(ds2, nullptr);
+
+  // Create a Concat operation on the ds
+  ds1 = ds1->Concat({ds2});
+  EXPECT_NE(ds1, nullptr);
+
+  // Create an iterator over the result of the above dataset
+  // This will trigger the creation of the Execution Tree and launch it.
+  std::shared_ptr<Iterator> iter = ds1->CreateIterator();
+  EXPECT_NE(iter, nullptr);
+
+  // Iterate the dataset and get each row
+  std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
+  iter->GetNextRow(&row);
+
+  uint64_t i = 0;
+  while (row.size() != 0) {
+    auto image = row["image"];
+    auto bbox = row["bbox"];
+    auto category_id = row["category_id"];
+    MS_LOG(INFO) << "Tensor image shape: " << image->shape();
+    MS_LOG(INFO) << "Tensor bbox shape: " << bbox->shape();
+    MS_LOG(INFO) << "Tensor category_id shape: " << category_id->shape();
+    iter->GetNextRow(&row);
+    i++;
+  }
+
+  EXPECT_EQ(i, 30);
+
+  // Manually terminate the pipeline
+  iter->Stop();
+}
+
+TEST_F(MindDataTestPipeline, TestCocoGetters) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCocoGetters.";
+  // Create a Coco Dataset
+  std::string folder_path = datasets_root_path_ + "/testCOCO/train";
+  std::string annotation_file = datasets_root_path_ + "/testCOCO/annotations/train.json";
+
+  std::shared_ptr<Dataset> ds = Coco(folder_path, annotation_file);
+  EXPECT_NE(ds, nullptr);
+
+  std::vector<std::string> column_names = {"image", "bbox", "category_id", "iscrowd"};
+  EXPECT_EQ(ds->GetDatasetSize(), 6);
+  EXPECT_EQ(ds->GetColumnNames(), column_names);
+}
+
 TEST_F(MindDataTestPipeline, TestCocoDetection) {
   MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCocoDetection.";
   // Create a Coco Dataset
@@ -79,12 +150,14 @@ TEST_F(MindDataTestPipeline, TestCocoDetection) {
   std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
   iter->GetNextRow(&row);
 
-  std::string expect_file[] = {"000000391895", "000000318219", "000000554625", "000000574769", "000000060623",
-                               "000000309022"};
+  std::string expect_file[] = {"000000391895", "000000318219", "000000554625",
+                               "000000574769", "000000060623", "000000309022"};
   std::vector<std::vector<float>> expect_bbox_vector = {{10.0, 10.0, 10.0, 10.0, 70.0, 70.0, 70.0, 70.0},
                                                         {20.0, 20.0, 20.0, 20.0, 80.0, 80.0, 80.0, 80.0},
-                                                        {30.0, 30.0, 30.0, 30.0}, {40.0, 40.0, 40.0, 40.0},
-                                                        {50.0, 50.0, 50.0, 50.0}, {60.0, 60.0, 60.0, 60.0}};
+                                                        {30.0, 30.0, 30.0, 30.0},
+                                                        {40.0, 40.0, 40.0, 40.0},
+                                                        {50.0, 50.0, 50.0, 50.0},
+                                                        {60.0, 60.0, 60.0, 60.0}};
   std::vector<std::vector<uint32_t>> expect_catagoryid_list = {{1, 7}, {2, 8}, {3}, {4}, {5}, {6}};
   uint64_t i = 0;
   while (row.size() != 0) {
@@ -111,22 +184,34 @@ TEST_F(MindDataTestPipeline, TestCocoDetection) {
   iter->Stop();
 }
 
-TEST_F(MindDataTestPipeline, TestCocoException) {
-  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCocoException.";
+TEST_F(MindDataTestPipeline, TestCocoFail) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCocoFail.";
   // Create a Coco Dataset
   std::string folder_path = datasets_root_path_ + "/testCOCO/train";
   std::string annotation_file = datasets_root_path_ + "/testCOCO/annotations/train.json";
   std::string invalid_folder_path = "./NotExist";
   std::string invalid_annotation_file = "./NotExistFile";
 
-  std::shared_ptr<Dataset> ds = Coco(invalid_folder_path, annotation_file);
-  EXPECT_EQ(ds, nullptr);
+  std::shared_ptr<Dataset> ds0 = Coco(invalid_folder_path, annotation_file);
+  EXPECT_NE(ds0, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter0 = ds0->CreateIterator();
+  // Expect failure: invalid COCO input
+  EXPECT_EQ(iter0, nullptr);
 
   std::shared_ptr<Dataset> ds1 = Coco(folder_path, invalid_annotation_file);
-  EXPECT_EQ(ds1, nullptr);
+  EXPECT_NE(ds1, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter1 = ds1->CreateIterator();
+  // Expect failure: invalid COCO input
+  EXPECT_EQ(iter1, nullptr);
 
   std::shared_ptr<Dataset> ds2 = Coco(folder_path, annotation_file, "valid_mode");
-  EXPECT_EQ(ds2, nullptr);
+  EXPECT_NE(ds2, nullptr);
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter2 = ds2->CreateIterator();
+  // Expect failure: invalid COCO input
+  EXPECT_EQ(iter2, nullptr);
 }
 
 TEST_F(MindDataTestPipeline, TestCocoKeypoint) {
@@ -148,13 +233,13 @@ TEST_F(MindDataTestPipeline, TestCocoKeypoint) {
   iter->GetNextRow(&row);
 
   std::string expect_file[] = {"000000391895", "000000318219"};
-  std::vector<std::vector<float>> expect_keypoint_vector =
-    {{368.0, 61.0, 1.0, 369.0, 52.0, 2.0, 0.0, 0.0, 0.0, 382.0, 48.0, 2.0, 0.0, 0.0, 0.0, 368.0, 84.0, 2.0, 435.0,
-       81.0, 2.0, 362.0, 125.0, 2.0, 446.0, 125.0, 2.0, 360.0, 153.0, 2.0, 0.0, 0.0, 0.0, 397.0, 167.0, 1.0, 439.0,
-       166.0, 1.0, 369.0, 193.0, 2.0, 461.0, 234.0, 2.0, 361.0, 246.0, 2.0, 474.0, 287.0, 2.0},
-     {244.0, 139.0, 2.0, 0.0, 0.0, 0.0, 226.0, 118.0, 2.0, 0.0, 0.0, 0.0, 154.0, 159.0, 2.0, 143.0, 261.0, 2.0, 135.0,
-       312.0, 2.0, 271.0, 423.0, 2.0, 184.0, 530.0, 2.0, 261.0, 280.0, 2.0, 347.0, 592.0, 2.0, 0.0, 0.0, 0.0, 123.0,
-       596.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}};
+  std::vector<std::vector<float>> expect_keypoint_vector = {
+    {368.0, 61.0,  1.0, 369.0, 52.0,  2.0, 0.0,   0.0,   0.0, 382.0, 48.0,  2.0, 0.0,   0.0,   0.0, 368.0, 84.0,  2.0,
+     435.0, 81.0,  2.0, 362.0, 125.0, 2.0, 446.0, 125.0, 2.0, 360.0, 153.0, 2.0, 0.0,   0.0,   0.0, 397.0, 167.0, 1.0,
+     439.0, 166.0, 1.0, 369.0, 193.0, 2.0, 461.0, 234.0, 2.0, 361.0, 246.0, 2.0, 474.0, 287.0, 2.0},
+    {244.0, 139.0, 2.0, 0.0,   0.0,   0.0, 226.0, 118.0, 2.0, 0.0,   0.0,   0.0, 154.0, 159.0, 2.0, 143.0, 261.0, 2.0,
+     135.0, 312.0, 2.0, 271.0, 423.0, 2.0, 184.0, 530.0, 2.0, 261.0, 280.0, 2.0, 347.0, 592.0, 2.0, 0.0,   0.0,   0.0,
+     123.0, 596.0, 2.0, 0.0,   0.0,   0.0, 0.0,   0.0,   0.0, 0.0,   0.0,   0.0, 0.0,   0.0,   0.0}};
   std::vector<std::vector<dsize_t>> expect_size = {{1, 51}, {1, 51}};
   std::vector<std::vector<uint32_t>> expect_num_keypoints_list = {{14}, {10}};
   uint64_t i = 0;
@@ -240,6 +325,28 @@ TEST_F(MindDataTestPipeline, TestCocoPanoptic) {
   iter->Stop();
 }
 
+TEST_F(MindDataTestPipeline, TestCocoPanopticGetClassIndex) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCocoPanopticGetClassIndex.";
+  // Create a Coco Dataset
+  std::string folder_path = datasets_root_path_ + "/testCOCO/train";
+  std::string annotation_file = datasets_root_path_ + "/testCOCO/annotations/panoptic.json";
+
+  std::shared_ptr<Dataset> ds = Coco(folder_path, annotation_file, "Panoptic", false, SequentialSampler(0, 2));
+  EXPECT_NE(ds, nullptr);
+  
+  std::vector<std::pair<std::string, std::vector<int32_t>>> class_index1 = ds->GetClassIndexing();
+  EXPECT_EQ(class_index1.size(), 3);
+  EXPECT_EQ(class_index1[0].first, "person");
+  EXPECT_EQ(class_index1[0].second[0], 1);
+  EXPECT_EQ(class_index1[0].second[1], 1);
+  EXPECT_EQ(class_index1[1].first, "bicycle");
+  EXPECT_EQ(class_index1[1].second[0], 2);
+  EXPECT_EQ(class_index1[1].second[1], 1);
+  EXPECT_EQ(class_index1[2].first, "car");
+  EXPECT_EQ(class_index1[2].second[0], 3);
+  EXPECT_EQ(class_index1[2].second[1], 1);
+}
+
 TEST_F(MindDataTestPipeline, TestCocoStuff) {
   MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCocoStuff.";
   // Create a Coco Dataset
@@ -258,17 +365,17 @@ TEST_F(MindDataTestPipeline, TestCocoStuff) {
   std::unordered_map<std::string, std::shared_ptr<Tensor>> row;
   iter->GetNextRow(&row);
 
-  std::string expect_file[] = {"000000391895", "000000318219", "000000554625", "000000574769", "000000060623",
-                               "000000309022"};
-  std::vector<std::vector<float>> expect_segmentation_vector =
-    {{10.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0,
-      70.0, 72.0, 73.0, 74.0, 75.0, -1.0, -1.0, -1.0, -1.0, -1.0},
-     {20.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0,
-      10.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, -1.0},
-     {40.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0, 49.0, 40.0, 41.0, 42.0},
-     {50.0, 52.0, 53.0, 54.0, 55.0, 56.0, 57.0, 58.0, 59.0, 60.0, 61.0, 62.0, 63.0},
-     {60.0, 62.0, 63.0, 64.0, 65.0, 66.0, 67.0, 68.0, 69.0, 70.0, 71.0, 72.0, 73.0, 74.0},
-     {60.0, 62.0, 63.0, 64.0, 65.0, 66.0, 67.0, 68.0, 69.0, 70.0, 71.0, 72.0, 73.0, 74.0}};
+  std::string expect_file[] = {"000000391895", "000000318219", "000000554625",
+                               "000000574769", "000000060623", "000000309022"};
+  std::vector<std::vector<float>> expect_segmentation_vector = {
+    {10.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0,
+     70.0, 72.0, 73.0, 74.0, 75.0, -1.0, -1.0, -1.0, -1.0, -1.0},
+    {20.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0,
+     10.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, -1.0},
+    {40.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0, 49.0, 40.0, 41.0, 42.0},
+    {50.0, 52.0, 53.0, 54.0, 55.0, 56.0, 57.0, 58.0, 59.0, 60.0, 61.0, 62.0, 63.0},
+    {60.0, 62.0, 63.0, 64.0, 65.0, 66.0, 67.0, 68.0, 69.0, 70.0, 71.0, 72.0, 73.0, 74.0},
+    {60.0, 62.0, 63.0, 64.0, 65.0, 66.0, 67.0, 68.0, 69.0, 70.0, 71.0, 72.0, 73.0, 74.0}};
   std::vector<std::vector<dsize_t>> expect_size = {{2, 10}, {2, 11}, {1, 12}, {1, 13}, {1, 14}, {2, 7}};
   uint64_t i = 0;
   while (row.size() != 0) {
@@ -291,13 +398,17 @@ TEST_F(MindDataTestPipeline, TestCocoStuff) {
   iter->Stop();
 }
 
-TEST_F(MindDataTestPipeline, TestCocoWithNullSampler) {
-  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCocoWithNullSampler.";
+TEST_F(MindDataTestPipeline, TestCocoWithNullSamplerFail) {
+  MS_LOG(INFO) << "Doing MindDataTestPipeline-TestCocoWithNullSamplerFail.";
   // Create a Coco Dataset
   std::string folder_path = datasets_root_path_ + "/testCOCO/train";
   std::string annotation_file = datasets_root_path_ + "/testCOCO/annotations/train.json";
 
   std::shared_ptr<Dataset> ds = Coco(folder_path, annotation_file, "Detection", false, nullptr);
-  // Expect failure: sampler can not be nullptr
-  EXPECT_EQ(ds, nullptr);
+  EXPECT_NE(ds, nullptr);
+
+  // Create an iterator over the result of the above dataset
+  std::shared_ptr<Iterator> iter = ds->CreateIterator();
+  // Expect failure: invalid COCO input, sampler cannot be nullptr
+  EXPECT_EQ(iter, nullptr);
 }

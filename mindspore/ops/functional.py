@@ -22,6 +22,7 @@ from .primitive import Primitive
 from . import operations as P
 from .operations import _grad_ops
 
+
 typeof = Primitive('typeof')
 hastype = Primitive('hastype')
 cast = P.Cast()
@@ -173,6 +174,10 @@ tensor_operator_registry.register('__pow__', tensor_pow)
 tensor_operator_registry.register('__floordiv__', tensor_floordiv)
 tensor_operator_registry.register('all', P.ReduceAll)
 tensor_operator_registry.register('any', P.ReduceAny)
+tensor_operator_registry.register('abs', P.Abs)
+tensor_operator_registry.register('mean', P.ReduceMean)
+tensor_operator_registry.register('reshape', P.Reshape)
+tensor_operator_registry.register('broadcast_to', P.BroadcastTo)
 # ms cannot support Tensor(True) compare
 tensor_operator_registry.register('__eq__', equal)
 tensor_operator_registry.register('__ne__', not_equal)

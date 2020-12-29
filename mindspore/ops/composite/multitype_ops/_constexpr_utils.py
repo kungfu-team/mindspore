@@ -28,6 +28,11 @@ ALL_TENSOR = 0
 NO_TENSOR = 1
 CONTAIN_TENSOR = 2
 ALL_SCALAR = 3
+ALL_INT = 4
+NO_INT = 5
+CONTAIN_INT = 6
+ALL_BASIC = 7
+MIXED = 8
 
 INT_ = 0
 BOOL_ = 1
@@ -39,13 +44,16 @@ TENSOR_GETITEM = "tensor getitem"
 SET_ITEM_BY_ONE_TENSOR = 0
 SET_ITEM_BY_TUPLE_OF_TENSOR = 1
 
+
 @constexpr
 def raise_value_error(msg):
     raise ValueError(msg)
 
+
 @constexpr
 def raise_index_error(msg):
     raise IndexError(msg)
+
 
 @constexpr
 def raise_type_error(msg):
@@ -58,6 +66,19 @@ def check_equal(param1, param2, msg="{},{}"):
     if param1 != param2:
         raise ValueError(msg.format(param1, param2))
     return param1
+
+
+@constexpr
+def split_tuple_index_for_none(tuple_index):
+    """return the none_positions and the tuple_index_without_none whose None index is replaced by slice."""
+    none_positions, tuple_index_without_none = (), ()
+    for idx, item in enumerate(tuple_index):
+        if item is None:
+            none_positions += (idx,)
+            tuple_index_without_none += (slice(None, None, None),)
+        else:
+            tuple_index_without_none += (item,)
+    return none_positions, tuple_index_without_none
 
 
 @constexpr
@@ -108,6 +129,13 @@ def is_same_type(inst, type_):
         bool, the check result.
     """
     return inst == type_
+
+
+@constexpr
+def check_valid_dim(dim, name):
+    if dim not in (1, 2):
+        raise ValueError(
+            f"For {name}, inputs dim must be 1d or 2d")
 
 
 @constexpr
@@ -268,17 +296,29 @@ def tuple_element_is_int(indexs):
 
 
 @constexpr
-def tuple_index_elements_type(types, op_name):
-    """Judges the type of all elements of the tuple."""
-    tensors_number = 0
-    for ele in types:
-        if isinstance(ele, mstype.tensor_type):
-            tensors_number += 1
-    if tensors_number == len(types):
+def tuple_index_tensor_cnt(types, op_name):
+    """count the tensor type of types which contains the tuple elements' type."""
+    tensor_cnt = sum(isinstance(ele, mstype.tensor_type) for ele in types)
+    return ALL_TENSOR if tensor_cnt == len(types) else NO_TENSOR if tensor_cnt == 0 else CONTAIN_TENSOR
+
+
+@constexpr
+def tuple_index_int_cnt(types, op_name):
+    """count the int type of types which contains the tuple elements' type."""
+    int_cnt = sum(isinstance(ele, mstype.Int) for ele in types)
+    return ALL_INT if int_cnt == len(types) else NO_INT if int_cnt == 0 else CONTAIN_INT
+
+
+@constexpr
+def tuple_index_type_cnt(types, op_name):
+    """count the tensor type of types which contains the tuple elements' type."""
+    tensor_cnt = sum(isinstance(ele, mstype.tensor_type) for ele in types)
+    basic_cnt = sum(isinstance(ele, (mstype.Int, mstype.ellipsis_type, mstype.slice_type)) for ele in types)
+    if tensor_cnt == len(types):
         return ALL_TENSOR
-    if tensors_number == 0:
-        return NO_TENSOR
-    return CONTAIN_TENSOR
+    if basic_cnt == len(types):
+        return ALL_BASIC
+    return MIXED
 
 
 @constexpr
@@ -319,22 +359,22 @@ def get_index_tensor_dtype(dtype):
 
 
 @constexpr
-def check_index_tensors_dtype(dtypes, op_name):
+def check_index_tensors_dtype(indexes_types, op_name):
     """Check a tuple of tensor data type."""
-    for ele in dtypes:
-        if not ele == mstype.int32:
-            raise IndexError(f"For '{op_name}', the all index tensor "
-                             f"data types should be mstype.int32, but got {dtypes}.")
+    for index_type in indexes_types:
+        if not index_type in (mstype.int32, mstype.int64):
+            raise IndexError(f"For '{op_name}', the all index tensor data types should be "
+                             f"mstype.int32, but got {index_type}.")
     return True
 
 
 @constexpr
-def check_index_tensor_dtype(dtype, op_name):
+def check_index_tensor_dtype(index_type, op_name):
     """Check a tensor data type."""
-    if dtype == mstype.int32:
+    if index_type in (mstype.int32, mstype.int64):
         return True
-    raise IndexError(
-        f"For '{op_name}', the index tensor data type should be mstype.int32, but got {dtype}.")
+    raise IndexError(f"For '{op_name}', the index tensor data type should be mstype.int32, "
+                     f"but got {index_type}.")
 
 
 @constexpr
@@ -399,6 +439,48 @@ def compute_new_shape(origin_shape, indexes_shapes_info):
 
 
 @constexpr
+def check_list_index_type(list_index):
+    """check if the item's type of list_index is bool or int"""
+    if not all([isinstance(index, (int, bool)) for index in list_index]):
+        raise IndexError(
+            f"Tensor only support 'integer' or 'boolean' array(list/tuple), but got {type(index)} in array")
+
+
+@constexpr
+def transform_list(list_index, shape):
+    """transfor list_index from int or bool to int"""
+    bool_count = len(list(filter(lambda index: isinstance(index, bool), list_index)))
+    int_count = len(list(filter(lambda index: isinstance(index, int), list_index)))-bool_count
+    if int_count == 0:
+        if bool_count == shape:
+            list_index = list(filter(lambda i: list_index[i], range(bool_count)))
+        else:
+            raise IndexError("The boolean array should have the same length with the corresponding dimensiton")
+    else:
+        list_index = [int(index) for index in list_index]
+    for i, index in enumerate(list_index):
+        if index < -shape or index >= shape:
+            raise IndexError(f"The index should in the range [-{shape}, {shape-1}] to fit the corresponding dim "
+                             f"length, but get {index}.")
+        if index < 0:
+            index += shape
+        list_index[i] = index
+    return list_index
+
+
+@constexpr
+def convert_list_to_tensor(list_index):
+    """convert the list_index to tensor_index with mstype.int64 dtype"""
+    return Tensor(list_index, mstype.int64)
+
+
+@constexpr
+def convert_int_to_slice(tuple_indexes):
+    tuple_indexes_new = tuple(slice(i, i+1, 1) for i in tuple_indexes)
+    return tuple_indexes_new
+
+
+@constexpr
 def convert_ellipsis_to_tensors(slice_number,
                                 ellipsis_occupied_dims,
                                 final_shape,
@@ -431,6 +513,34 @@ def convert_ellipsis_to_tensors(slice_number,
         slice_number += 1
         dims_dealt_count += 1
     return tensor_list
+
+
+@constexpr
+def check_and_transform_int_index(index, shape, op_name):
+    if index < -shape or index >= shape:
+        raise IndexError(f"In the \"{op_name}\", the index should in the range [-{shape}, {shape-1}] to fit "
+                         f"the corresponding dim length, but get {index}.")
+    if index < 0:
+        index += shape
+    return index
+
+
+@constexpr
+def transform_sequence_index(sequence_index, shape, op_name):
+    """transform list or tuple with integer and boolean to tuple with integer index"""
+    bool_count = len(list(filter(lambda index: isinstance(index, bool), sequence_index)))
+    int_count = len(list(filter(lambda index: isinstance(index, int), sequence_index)))-bool_count
+    if int_count == 0:
+        if bool_count == shape:
+            list_index = list(filter(lambda i: sequence_index[i], range(bool_count)))
+        else:
+            raise IndexError("The boolean array should have the same length with the corresponding dimensiton")
+    else:
+        list_index = [int(index) for index in sequence_index]
+    for i, index in enumerate(list_index):
+        list_index[i] = check_and_transform_int_index(index, shape, op_name)
+    sub_tuple_index = tuple(list_index)
+    return sub_tuple_index
 
 
 @constexpr
@@ -625,13 +735,31 @@ def _derive_result_shape_info_from_tuple_of_mixed_tensors(indexes_info, index_te
 
 
 @constexpr
+def make_empty_slice():
+    empty_slice = slice(None, None, None)
+    return empty_slice
+
+
+@constexpr
 def get_pos_of_int_index(indexes_types):
     """Get int index positions from the mixed tensors index which contains int, tensor, slice, and ellipsis."""
     int_positions = []
     for i, ele_type in enumerate(indexes_types):
-        if ele_type == mstype.int32:
+        if ele_type in (mstype.int32, mstype.int64):
             int_positions.append(i)
     return int_positions
+
+
+@constexpr
+def get_pos_of_int_sequence(indexes_types):
+    """Get int and sequence index positions from the mixed tensors index."""
+    int_positions, sequence_positions = [], []
+    for i, index_type in enumerate(indexes_types):
+        if isinstance(index_type, mstype.Int):
+            int_positions.append(i)
+        elif isinstance(index_type, (tuple, list)):
+            sequence_positions.append(i)
+    return int_positions, sequence_positions
 
 
 @constexpr
@@ -649,9 +777,37 @@ def separate_mixed_tensors_index(indexes_types, op_name):
             ellipsis_position = i
         else:
             raise IndexError(f"For '{op_name}', the index elements only support "
-                             f"'Tensor', 'int32', 'Slice', 'Ellipsis', but got {ele_type}.")
+                             f"'Tensor', 'int32', 'int64', 'Slice', 'Ellipsis', but got {ele_type}.")
 
     return tensor_positions, slice_positions, ellipsis_position
+
+
+@constexpr
+def get_pos_of_indexes_types(indexes_types, op_name):
+    """Separate the position information of tensor and slice and ellipsis from the mixed tensors index."""
+    slice_positions, ellipsis_positions, none_positions, int_positions, bool_positions, tensor_positions, \
+        sequence_positions = [], [], [], [], [], [], []
+    for i, index_type in enumerate(indexes_types):
+        if isinstance(index_type, mstype.slice_type):
+            slice_positions.append(i)
+        elif isinstance(index_type, mstype.ellipsis_type):
+            ellipsis_positions.append(i)
+        elif isinstance(index_type, mstype.none_type):
+            none_positions.append(i)
+        elif isinstance(index_type, mstype.Int):
+            int_positions.append(i)
+        elif isinstance(index_type, mstype.bool_type):
+            bool_positions.append(i)
+        elif isinstance(index_type, mstype.tensor_type):
+            tensor_positions.append(i)
+        elif isinstance(index_type, (list, tuple)):
+            sequence_positions.append(i)
+        else:
+            raise IndexError(f"For '{op_name}', the index elements only support "
+                             f"'Tensor', 'int32', 'int64', 'Slice', 'Ellipsis', but got {index_type}.")
+
+    return slice_positions, ellipsis_positions, none_positions, int_positions, bool_positions, \
+        tensor_positions, sequence_positions
 
 
 @constexpr
@@ -704,7 +860,7 @@ def get_stride_info_from_slice(data_shape, slice_index):
 def get_stride_info_from_integer(data_shape, number):
     """Get stride info from a integer"""
     begin_strides = [number]
-    end_strides = [number+1]
+    end_strides = [number + 1]
     step_strides = [1]
     for end in data_shape[1:]:
         begin_strides.append(0)
@@ -720,24 +876,20 @@ def get_slice_stride(dim_size, index_slice):
     stop_default = dim_size
     if step < 0:
         start_default = -1
-        stop_default = -(dim_size+1)
+        stop_default = -(dim_size + 1)
     start = start_default if index_slice.start is None else index_slice.start
     stop = stop_default if index_slice.stop is None else index_slice.stop
     return start, stop, step
 
 
 @constexpr
-def get_stride_info_from_tuple(data_shape, index_tuple):
+def get_stride_info_from_tuple(data_shape, tuple_index):
     """Get stride info from a tuple"""
-    begin_strides = []
-    end_strides = []
-    step_strides = []
-    index_size = len(index_tuple)
-    data_shape_size = len(data_shape)
-    shrink_axis = 0
-    index_count = 0
-    ellipsis_count = 0
-    for idx, item in enumerate(index_tuple):
+    begin_strides, end_strides, step_strides = [], [], []
+    tuple_index_len = len(tuple_index)
+    data_rank = len(data_shape)
+    shrink_axis, index_count, ellipsis_count = 0, 0, 0
+    for idx, item in enumerate(tuple_index):
         if isinstance(item, slice):
             start, stop, step = get_slice_stride(data_shape[idx], item)
             begin_strides.append(start)
@@ -754,7 +906,7 @@ def get_stride_info_from_tuple(data_shape, index_tuple):
             ellipsis_count = ellipsis_count + 1
             if ellipsis_count > 1:
                 raise IndexError("An index can have only one ellipsis (...)")
-            ellipsis_range_size = data_shape_size - (index_size - 1)
+            ellipsis_range_size = data_rank - (tuple_index_len - 1)
             begin_strides.extend([0] * (ellipsis_range_size))
             end_strides.extend(
                 [i for i in data_shape[index_count: index_count + (ellipsis_range_size)]])
@@ -763,7 +915,7 @@ def get_stride_info_from_tuple(data_shape, index_tuple):
         else:
             raise IndexError("Not supported index data type, got ",
                              item, " type is ", type(item))
-    for item in range(index_count, data_shape_size):
+    for item in range(index_count, data_rank):
         begin_strides.append(0)
         end_strides.append(data_shape[item])
         step_strides.append(1)
@@ -775,3 +927,9 @@ def mstype_eq(x, y):
     if x == y:
         return True
     return False
+
+
+@constexpr
+def scalar_to_tensor(x):
+    """Convert a scalar to a tensor"""
+    return Tensor(x)

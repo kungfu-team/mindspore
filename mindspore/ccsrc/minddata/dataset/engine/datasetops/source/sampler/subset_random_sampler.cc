@@ -20,19 +20,18 @@
 #include <random>
 #include <string>
 
-#include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/core/global_context.h"
 #include "minddata/dataset/util/random.h"
 
 namespace mindspore {
 namespace dataset {
 // Constructor.
-SubsetRandomSampler::SubsetRandomSampler(int64_t num_samples, const std::vector<int64_t> &indices,
-                                         int64_t samples_per_buffer)
-    : Sampler(num_samples, samples_per_buffer), indices_(indices), sample_id_(0), buffer_id_(0) {}
+SubsetRandomSamplerRT::SubsetRandomSamplerRT(int64_t num_samples, const std::vector<int64_t> &indices,
+                                             int64_t samples_per_buffer)
+    : SamplerRT(num_samples, samples_per_buffer), indices_(indices), sample_id_(0), buffer_id_(0) {}
 
 // Initialized this Sampler.
-Status SubsetRandomSampler::InitSampler() {
+Status SubsetRandomSamplerRT::InitSampler() {
   CHECK_FAIL_RETURN_UNEXPECTED(
     num_rows_ > 0, "Invalid parameter, num_rows must be greater than 0, but got " + std::to_string(num_rows_) + ".\n");
 
@@ -56,7 +55,7 @@ Status SubsetRandomSampler::InitSampler() {
 }
 
 // Reset the internal variable to the initial state.
-Status SubsetRandomSampler::ResetSampler() {
+Status SubsetRandomSamplerRT::ResetSampler() {
   // Reset the internal counters.
   sample_id_ = 0;
   buffer_id_ = 0;
@@ -73,7 +72,7 @@ Status SubsetRandomSampler::ResetSampler() {
 }
 
 // Get the sample ids.
-Status SubsetRandomSampler::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) {
+Status SubsetRandomSamplerRT::GetNextSample(std::unique_ptr<DataBuffer> *out_buffer) {
   // All samples have been drawn
   if (sample_id_ == num_samples_) {
     (*out_buffer) = std::make_unique<DataBuffer>(buffer_id_++, DataBuffer::kDeBFlagEOE);
@@ -103,7 +102,7 @@ Status SubsetRandomSampler::GetNextSample(std::unique_ptr<DataBuffer> *out_buffe
         RETURN_STATUS_UNEXPECTED(err_msg);
       }
 
-      int64_t sampled_id = indices_[sample_id_];
+      int64_t sampled_id = ((indices_[sample_id_] % num_rows_) + num_rows_) % num_rows_;
       if (HasChildSampler()) {
         RETURN_IF_NOT_OK(GetAssociatedChildId(&sampled_id, sampled_id));
       }
@@ -120,11 +119,11 @@ Status SubsetRandomSampler::GetNextSample(std::unique_ptr<DataBuffer> *out_buffe
   return Status::OK();
 }
 
-void SubsetRandomSampler::Print(std::ostream &out, bool show_all) const {
+void SubsetRandomSamplerRT::SamplerPrint(std::ostream &out, bool show_all) const {
   out << "\nSampler: SubsetRandomSampler";
   if (show_all) {
     // Call the super class for displaying any common detailed info
-    Sampler::Print(out, show_all);
+    SamplerRT::SamplerPrint(out, show_all);
     // Then add our own info if any
   }
 }

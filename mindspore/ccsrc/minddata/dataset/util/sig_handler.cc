@@ -16,7 +16,7 @@
 #include "minddata/dataset/util/sig_handler.h"
 #include <signal.h>
 #include <sys/types.h>
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID) && !defined(__APPLE__)
 #include <ucontext.h>
 #endif
 #include <unistd.h>
@@ -25,7 +25,7 @@
 namespace mindspore {
 namespace dataset {
 // Register the custom signal handlers
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID) && !defined(__APPLE__)
 void RegisterHandlers() {
   struct sigaction new_int_action;
 
@@ -35,6 +35,7 @@ void RegisterHandlers() {
   (void)sigemptyset(&new_int_action.sa_mask);
   new_int_action.sa_flags = SA_RESTART | SA_SIGINFO;
   (void)sigaction(SIGINT, &new_int_action, nullptr);
+  (void)sigaction(SIGTERM, &new_int_action, nullptr);
 }
 
 extern void IntHandler(int sig_num,          // The signal that was raised

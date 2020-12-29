@@ -43,6 +43,8 @@ const AnfNodePtr ConvertConstInputToAttr::Process(const FuncGraphPtr &, const An
     todos.push_back(node);
   }
 
+  std::set<string> DynamicShapeConstInputToAttr = {
+    kCastOpName, kExpandDimsOpName, kReshapeOpName, kEmbeddingLookupOpName, kTransposeOpName, kReduceSumOpName};
   for (auto &t : todos) {
     CNodePtr cnode = t->cast<CNodePtr>();
     ConstInputToAttrInfoRegister reg;
@@ -55,7 +57,14 @@ const AnfNodePtr ConvertConstInputToAttr::Process(const FuncGraphPtr &, const An
         continue;
       }
     }
-    if (AnfAlgo::IsDynamicShape(cnode)) {
+    if (AnfAlgo::GetCNodeName(cnode) == prim::kPrimGatherD->name()) {
+      auto ms_context = MsContext::GetInstance();
+      if (ms_context->get_param<std::string>(MS_CTX_DEVICE_TARGET) != kGPUDevice) {
+        continue;
+      }
+    }
+    if (AnfAlgo::IsDynamicShape(cnode) &&
+        DynamicShapeConstInputToAttr.find(AnfAlgo::GetCNodeName(cnode)) == DynamicShapeConstInputToAttr.end()) {
       MS_LOG(INFO) << "current node is dynamic shape " << cnode->fullname_with_scope();
       continue;
     }

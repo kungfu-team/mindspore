@@ -14,10 +14,9 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_LITE_COMMON_UTILS_H_
-#define MINDSPORE_LITE_COMMON_UTILS_H_
+#ifndef MINDSPORE_LITE_SRC_COMMON_UTILS_H_
+#define MINDSPORE_LITE_SRC_COMMON_UTILS_H_
 
-#include <stdint.h>
 #include <ctime>
 #include <cstdint>
 #include <vector>
@@ -34,16 +33,11 @@ const int USEC = 1000000;
 const int MSEC = 1000;
 std::vector<std::string> StringSplit(std::string str, const std::string &pattern);
 
-uint64_t GetTimeUs(void);
+uint64_t GetTimeUs();
 
-int16_t Float32ToShort(float srcValue);
+bool IsSupportSDot();
 
-float ShortToFloat32(int16_t srcValue);
-
-void ShortToFloat32(const int16_t *srcdata, float *dstdata, size_t elementSize);
-
-void Float32ToShort(const float *srcdata, int16_t *dstdata, size_t elementSize);
-
+bool IsSupportFloat16();
 #if defined(__arm__) || defined(__aarch64__)
 uint32_t getHwCap(int hwcap_type);
 #endif
@@ -112,6 +106,11 @@ inline Option<std::string> ToString(bool value) {
 // get the file name from a given path
 // for example: "/usr/bin", we will get "bin"
 inline std::string GetFileName(const std::string &path) {
+  if (path.empty()) {
+    MS_LOG(ERROR) << "string is empty";
+    return "";
+  }
+
   char delim = '/';
 
   size_t i = path.rfind(delim, path.length());
@@ -153,10 +152,10 @@ std::vector<std::string> StrSplit(const std::string &str, const std::string &pat
 std::vector<std::string> Tokenize(const std::string &src, const std::string &delimiters,
                                   const Option<size_t> &maxTokenNum = Option<size_t>(None()));
 
-enum Mode { PREFIX, SUFFIX, ANY };
+enum RemoveSubStrMode { PREFIX, SUFFIX, ANY };
 
 // remove redundant charactor
-std::string Remove(const std::string &from, const std::string &subStr, Mode mode = ANY);
+std::string RemoveSubStr(const std::string &from, const std::string &sub_str, RemoveSubStrMode mode = ANY);
 
 template <typename T>
 inline Option<T> GenericParseValue(const std::string &value) {
@@ -186,7 +185,8 @@ inline Option<bool> GenericParseValue(const std::string &value) {
 
   return Option<bool>(None());
 }
+
 }  // namespace lite
 }  // namespace mindspore
 
-#endif  // MINDSPORE_LITE_COMMON_UTILS_H_
+#endif  // MINDSPORE_LITE_SRC_COMMON_UTILS_H_

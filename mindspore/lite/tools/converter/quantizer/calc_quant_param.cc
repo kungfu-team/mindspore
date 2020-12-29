@@ -26,6 +26,9 @@
 #include "tools/converter/quantizer/quantize_util.h"
 
 namespace mindspore::lite {
+static constexpr size_t BIAS_SIZE = 3;
+static constexpr size_t BIAS_ADD_SIZE = 2;
+
 STATUS QuantParamCalcer::ComputeConstQuantParam(const schema::TensorT &tensor, QuantParamT *quantParam) {
   MS_ASSERT(quantParam != nullptr);
   // int32 weight no need to quant
@@ -33,7 +36,7 @@ STATUS QuantParamCalcer::ComputeConstQuantParam(const schema::TensorT &tensor, Q
     return RET_OK;
   }
   if (tensor.dataType != TypeId::kNumberTypeFloat) {
-    MS_LOG(WARNING) << "Const Tensor without quantParam should has float dataType, in fact: " << tensor.dataType;
+    MS_LOG(DEBUG) << "Const Tensor without quantParam should has float dataType, in fact: " << tensor.dataType;
     return RET_ERROR;
   }
   const auto *constData = reinterpret_cast<const float *>(tensor.data.data());
@@ -77,13 +80,10 @@ int QuantParamCalcer::Calc(MetaGraphT *graph, const CNodeT &node) {
       inputParamDone++;
       continue;
     }
-    MS_ASSERT(graph->allTensors.size() > node.inputIndex.at(i));
-
-    MS_ASSERT(tensor != nullptr);
     if (!tensor->data.empty() && !IsContain(graph->inputIndex, node.inputIndex.at(i))) {
       auto status = ComputeConstQuantParam((*tensor), quantParam.get());
       if (status != RET_OK) {
-        MS_LOG(WARNING) << "ComputeConstQuantParam failed: " << status;
+        MS_LOG(DEBUG) << "ComputeConstQuantParam failed: " << status;
         return status;
       }
       tensor->quantParams.front() = std::move(quantParam);
@@ -101,10 +101,7 @@ int QuantParamCalcer::Calc(MetaGraphT *graph, const CNodeT &node) {
       outputParamDone++;
       continue;
     }
-
-    if (!tensor->data.empty()) {
-      MS_ASSERT(false);
-    }
+    MS_ASSERT(tensor->data.empty());
   }
   return RET_OK;
 }
@@ -112,16 +109,46 @@ int QuantParamCalcer::Calc(MetaGraphT *graph, const CNodeT &node) {
 int CommonCalcer::Calc(MetaGraphT *subGraph, const CNodeT &node) {
   auto status = QuantParamCalcer::Calc(subGraph, node);
   if (status != RET_OK) {
-    MS_LOG(WARNING) << "Call QuantParamCalcer::Calc failed: " << status;
+    MS_LOG(DEBUG) << "Call QuantParamCalcer::Calc failed: " << status;
     return status;
   }
   if (inputParamDone != node.inputIndex.size()) {
-    MS_LOG(WARNING) << "Can not determine inputTensor quantParam, node " << node.name;
+    MS_LOG(DEBUG) << "Can not determine inputTensor quantParam, node " << node.name;
     return RET_ERROR;
   }
   if (outputParamDone != node.outputIndex.size()) {
-    MS_LOG(WARNING) << "Can not determine outputTensor quantParam, node " << node.name;
+    MS_LOG(DEBUG) << "Can not determine outputTensor quantParam, node " << node.name;
     return RET_ERROR;
+  }
+  return RET_OK;
+}
+
+int ConvCalcer::Calc(MetaGraphT *subGraph, const CNodeT &node) {
+  auto status = CommonCalcer::Calc(subGraph, node);
+  if (status != RET_OK) {
+    MS_LOG(DEBUG) << "Call CommonCalcer::Calc failed: " << status;
+    return status;
+  }
+  if (node.inputIndex.size() == BIAS_SIZE) {
+    auto &biasTensor = subGraph->allTensors.at(node.inputIndex.at(BIAS_SIZE - 1));
+    for (auto &quantParam : biasTensor->quantParams) {
+      quantParam->dstDtype = TypeId::kNumberTypeInt32;
+    }
+  }
+  return RET_OK;
+}
+
+int BiasAddCalcer::Calc(MetaGraphT *subGraph, const CNodeT &node) {
+  auto status = CommonCalcer::Calc(subGraph, node);
+  if (status != RET_OK) {
+    MS_LOG(DEBUG) << "Call CommonCalcer::Calc failed: " << status;
+    return status;
+  }
+  if (node.inputIndex.size() == BIAS_ADD_SIZE) {
+    auto &biasTensor = subGraph->allTensors.at(node.inputIndex.at(BIAS_ADD_SIZE - 1));
+    for (auto &quantParam : biasTensor->quantParams) {
+      quantParam->dstDtype = TypeId::kNumberTypeInt32;
+    }
   }
   return RET_OK;
 }
@@ -129,7 +156,7 @@ int CommonCalcer::Calc(MetaGraphT *subGraph, const CNodeT &node) {
 int LinearCalcer::Calc(MetaGraphT *graph, const CNodeT &node) {
   auto status = QuantParamCalcer::Calc(graph, node);
   if (status != RET_OK) {
-    MS_LOG(WARNING) << "Call QuantParamCalcer::Calc failed: " << status;
+    MS_LOG(DEBUG) << "Call QuantParamCalcer::Calc failed: " << status;
     return status;
   }
   if (inputParamDone != node.inputIndex.size()) {
@@ -139,7 +166,7 @@ int LinearCalcer::Calc(MetaGraphT *graph, const CNodeT &node) {
     auto outputQuantParam = GetTensorQuantParam(outTensor);
     MS_ASSERT(outputQuantParam != nullptr);
     if (outputQuantParam == nullptr || !outputQuantParam->inited) {
-      MS_LOG(WARNING) << "Can not determine inputTensor quantParam from outputTensor for node " << node.name;
+      MS_LOG(DEBUG) << "Can not determine inputTensor quantParam from outputTensor for node " << node.name;
       return RET_ERROR;
     }
     for (unsigned int i : node.inputIndex) {
@@ -159,7 +186,7 @@ int LinearCalcer::Calc(MetaGraphT *graph, const CNodeT &node) {
     MS_ASSERT(inTensor != nullptr);
     auto inQuantParam = GetTensorQuantParam(inTensor);
     if (inQuantParam == nullptr || !inQuantParam->inited) {
-      MS_LOG(WARNING) << "Can not determine outputTensor quantParam from inputTensor for node %s" << node.name;
+      MS_LOG(DEBUG) << "Can not determine outputTensor quantParam from inputTensor for node %s" << node.name;
       return RET_ERROR;
     }
     for (size_t i = 0; i < node.outputIndex.size(); i++) {
@@ -183,17 +210,18 @@ int LinearCalcer::Calc(MetaGraphT *graph, const CNodeT &node) {
 class CalcConcat : public QuantParamCalcer {
  public:
   CalcConcat() = default;
+  ~CalcConcat() override = default;
 
   int Calc(MetaGraphT *graph, const CNodeT &node) override {
     MS_ASSERT(node.outputIndex.size() == 1);
     auto status = QuantParamCalcer::Calc(graph, node);
     if (status != RET_OK) {
-      MS_LOG(WARNING) << "Call QuantParamCalcer::Calc failed: " << status;
+      MS_LOG(DEBUG) << "Call QuantParamCalcer::Calc failed: " << status;
       return status;
     }
 
     if (inputParamDone != node.inputIndex.size()) {
-      MS_LOG(WARNING) << "Can not determine concat inputTensor quantParam, node " << node.name;
+      MS_LOG(DEBUG) << "Can not determine concat inputTensor quantParam, node " << node.name;
       return RET_ERROR;
     }
 
@@ -233,7 +261,7 @@ class CalcConcat : public QuantParamCalcer {
 
       status = quant::CalQuantizationParams(outQuantParam.get(), minMin, maxMax, narrowRange, numBits);
       if (status != RET_OK) {
-        MS_LOG(WARNING) << "in aware quantization run CalQuantizationParams failed!";
+        MS_LOG(DEBUG) << "in aware quantization run CalQuantizationParams failed!";
         return RET_ERROR;
       }
       outTensor->quantParams.emplace_back(std::move(outQuantParam));
@@ -247,18 +275,19 @@ class CalcConcat : public QuantParamCalcer {
 class CalcAdd : public QuantParamCalcer {
  public:
   CalcAdd() = default;
+  ~CalcAdd() override = default;
 
   int Calc(MetaGraphT *graph, const CNodeT &node) override {
     MS_ASSERT(node.inputIndex.size() == 2);
     MS_ASSERT(node.outputIndex.size() == 1);
     auto status = QuantParamCalcer::Calc(graph, node);
     if (status != RET_OK) {
-      MS_LOG(WARNING) << "Call QuantParamCalcer::Calc failed: " << status;
+      MS_LOG(DEBUG) << "Call QuantParamCalcer::Calc failed: " << status;
       return status;
     }
 
     if (inputParamDone != 2) {
-      MS_LOG(WARNING) << "Can not determine add inputTensor quantParam, node " << node.name;
+      MS_LOG(DEBUG) << "Can not determine add inputTensor quantParam, node " << node.name;
       return RET_ERROR;
     }
     if (outputParamDone != 1) {
@@ -283,7 +312,7 @@ class CalcAdd : public QuantParamCalcer {
         biasTensor = &tensor1;
         paramTensor = &tensor0;
       } else {
-        MS_LOG(WARNING) << "Can not determine add outputTensor quantParam, node " << node.name;
+        MS_LOG(DEBUG) << "Can not determine add outputTensor quantParam, node " << node.name;
         return RET_ERROR;
       }
       auto quantParam = GetTensorQuantParam(*paramTensor);
@@ -298,7 +327,7 @@ class CalcAdd : public QuantParamCalcer {
           auto *bias = static_cast<float *>(oriTensorData);
           status = quant::CalQuantizationParams(outQuantParam.get(), min + (*bias), max + (*bias));
           if (status != RET_OK) {
-            MS_LOG(WARNING) << "in aware quantization run CalQuantizationParams failed!";
+            MS_LOG(DEBUG) << "in aware quantization run CalQuantizationParams failed!";
             return RET_ERROR;
           }
         } else if ((*biasTensor)->dataType == TypeId::kNumberTypeUInt8) {
@@ -307,11 +336,11 @@ class CalcAdd : public QuantParamCalcer {
           auto *bias = static_cast<uint8_t *>(oriTensorData);
           status = quant::CalQuantizationParams(outQuantParam.get(), min + (*bias), max + (*bias));
           if (status != RET_OK) {
-            MS_LOG(WARNING) << "in aware quantization run CalQuantizationParams failed!";
+            MS_LOG(DEBUG) << "in aware quantization run CalQuantizationParams failed!";
             return RET_ERROR;
           }
         } else {
-          MS_LOG(WARNING) << "Unsupported tensor dataType: " << (*biasTensor)->dataType;
+          MS_LOG(DEBUG) << "Unsupported tensor dataType: " << (*biasTensor)->dataType;
           return RET_ERROR;
         }
       }
@@ -324,18 +353,19 @@ class CalcAdd : public QuantParamCalcer {
 class CalcRealDiv : public QuantParamCalcer {
  public:
   CalcRealDiv() = default;
+  ~CalcRealDiv() override = default;
 
   int Calc(MetaGraphT *graph, const CNodeT &node) override {
     MS_ASSERT(node.inputIndex.size() == 2);
     MS_ASSERT(node.outputIndex.size() == 1);
     auto status = QuantParamCalcer::Calc(graph, node);
     if (status != RET_OK) {
-      MS_LOG(WARNING) << "Call QuantParamCalcer::Calc failed: " << status;
+      MS_LOG(DEBUG) << "Call QuantParamCalcer::Calc failed: " << status;
       return status;
     }
 
     if (inputParamDone != 2) {
-      MS_LOG(WARNING) << "Can not determine realdiv inputTensor quantParam, node " << node.name;
+      MS_LOG(DEBUG) << "Can not determine realdiv inputTensor quantParam, node " << node.name;
       return RET_ERROR;
     }
     if (outputParamDone != 1) {
@@ -361,7 +391,7 @@ class CalcRealDiv : public QuantParamCalcer {
             MS_ASSERT(*div != 0);
             status = quant::CalQuantizationParams(outQuantParam.get(), min / (*div), max / (*div));
             if (status != RET_OK) {
-              MS_LOG(WARNING) << "in aware quantization run CalQuantizationParams failed!";
+              MS_LOG(DEBUG) << "in aware quantization run CalQuantizationParams failed!";
               return RET_ERROR;
             }
           } else if (tensor1->dataType == TypeId::kNumberTypeUInt8) {
@@ -370,17 +400,17 @@ class CalcRealDiv : public QuantParamCalcer {
             auto *div = static_cast<uint8_t *>(oriTensorData);
             status = quant::CalQuantizationParams(outQuantParam.get(), min / (*div), max + (*div));
             if (status != RET_OK) {
-              MS_LOG(WARNING) << "in aware quantization run CalQuantizationParams failed!";
+              MS_LOG(DEBUG) << "in aware quantization run CalQuantizationParams failed!";
               return RET_ERROR;
             }
           } else {
-            MS_LOG(WARNING) << "Unsupported tensor dataType: " << tensor1->dataType;
+            MS_LOG(DEBUG) << "Unsupported tensor dataType: " << tensor1->dataType;
             return RET_ERROR;
           }
           outTensor->quantParams.front() = std::move(outQuantParam);
         }
       } else {
-        MS_LOG(WARNING) << "Can not determine realDiv outputTensor quantParam, node " << node.name;
+        MS_LOG(DEBUG) << "Can not determine realDiv outputTensor quantParam, node " << node.name;
         return RET_ERROR;
       }
     }
@@ -391,25 +421,26 @@ class CalcRealDiv : public QuantParamCalcer {
 class CalcToSet : public QuantParamCalcer {
  public:
   CalcToSet(float min, float max) : min(min), max(max) {}
+  ~CalcToSet() override = default;
 
   int Calc(MetaGraphT *graph, const CNodeT &node) override {
     MS_ASSERT(node.inputIndex.size() == 1);
     MS_ASSERT(node.outputIndex.size() == 1);
     auto status = QuantParamCalcer::Calc(graph, node);
     if (status != RET_OK) {
-      MS_LOG(WARNING) << "Call QuantParamCalcer::Calc failed: %d" << status;
+      MS_LOG(DEBUG) << "Call QuantParamCalcer::Calc failed: %d" << status;
       return status;
     }
     // input
     if (inputParamDone != node.inputIndex.size()) {
-      MS_LOG(WARNING) << "Can not determine inputTensor quantParam, node " << node.name;
+      MS_LOG(DEBUG) << "Can not determine inputTensor quantParam, node " << node.name;
       return RET_ERROR;
     }
     // output
     if (outputParamDone != node.outputIndex.size()) {
       std::unique_ptr<QuantParamT> quantParam = std::make_unique<QuantParamT>();
       if (quantParam == nullptr) {
-        MS_LOG(WARNING) << "new QuantParamT failed";
+        MS_LOG(DEBUG) << "new QuantParamT failed";
         return RET_ERROR;
       }
       quantParam->scale = (max - min) / 256;
@@ -435,6 +466,7 @@ class CalcToSet : public QuantParamCalcer {
 class CalcActivation : public QuantParamCalcer {
  public:
   CalcActivation() = default;
+  ~CalcActivation() override = default;
 
   int Calc(MetaGraphT *subGraph, const CNodeT &node) override {
     MS_ASSERT(node.inputIndex.size() == 1);
@@ -449,24 +481,24 @@ class CalcActivation : public QuantParamCalcer {
     }
   }
 };
-QuantParamCalcRegister::~QuantParamCalcRegister() {}
+QuantParamCalcRegister::~QuantParamCalcRegister() = default;
 
 QuantParamCalcRegister::QuantParamCalcRegister() {
   bool hasError = false;
   std::shared_ptr<QuantParamCalcer> baseCalcer = std::make_shared<QuantParamCalcer>();
   if (baseCalcer == nullptr) {
-    MS_LOG(ERROR) << "new QuantParamCalcer failed";
+    MS_LOG(DEBUG) << "new QuantParamCalcer failed";
     hasError = true;
   }
   std::shared_ptr<QuantParamCalcer> commonCalcer = std::make_shared<CommonCalcer>();
   if (commonCalcer == nullptr) {
-    MS_LOG(ERROR) << "new commonCalcer failed";
+    MS_LOG(DEBUG) << "new commonCalcer failed";
     hasError = true;
   }
 
   std::shared_ptr<QuantParamCalcer> linearCalcer = std::make_shared<LinearCalcer>();
   if (linearCalcer == nullptr) {
-    MS_LOG(ERROR) << "new linearCalcer failed";
+    MS_LOG(DEBUG) << "new linearCalcer failed";
     hasError = true;
   }
   if (!hasError) {
@@ -474,10 +506,10 @@ QuantParamCalcRegister::QuantParamCalcRegister() {
     _registerMap[schema::PrimitiveType_Activation] = std::make_shared<CalcActivation>();
     _registerMap[schema::PrimitiveType_Add] = std::make_shared<CalcAdd>();
     _registerMap[schema::PrimitiveType_Mul] = commonCalcer;
-    _registerMap[schema::PrimitiveType_Scale] = commonCalcer;
-    _registerMap[schema::PrimitiveType_Conv2D] = commonCalcer;
-    _registerMap[schema::PrimitiveType_DeConv2D] = commonCalcer;
-    _registerMap[schema::PrimitiveType_DepthwiseConv2D] = commonCalcer;
+    _registerMap[schema::PrimitiveType_Scale] = std::make_shared<ConvCalcer>();
+    _registerMap[schema::PrimitiveType_Conv2D] = std::make_shared<ConvCalcer>();
+    _registerMap[schema::PrimitiveType_DeConv2D] = std::make_shared<ConvCalcer>();
+    _registerMap[schema::PrimitiveType_DepthwiseConv2D] = std::make_shared<ConvCalcer>();
     _registerMap[schema::PrimitiveType_Pooling] = linearCalcer;
     _registerMap[schema::PrimitiveType_Resize] = linearCalcer;
     _registerMap[schema::PrimitiveType_Reshape] = linearCalcer;
@@ -487,13 +519,10 @@ QuantParamCalcRegister::QuantParamCalcRegister() {
     _registerMap[schema::PrimitiveType_Squeeze] = linearCalcer;
     _registerMap[schema::PrimitiveType_RealDiv] = std::make_shared<CalcRealDiv>();
     _registerMap[schema::PrimitiveType_Reduce] = commonCalcer;
-    _registerMap[schema::PrimitiveType_BiasAdd] = commonCalcer;
-    _registerMap[schema::PrimitiveType_Mean] = linearCalcer;
+    _registerMap[schema::PrimitiveType_BiasAdd] = std::make_shared<BiasAddCalcer>();
     _registerMap[schema::PrimitiveType_Transpose] = linearCalcer;
-    _registerMap[schema::PrimitiveType_MatMul] = commonCalcer;
-    _registerMap[schema::PrimitiveType_FullConnection] = commonCalcer;
-    _registerMap[schema::PrimitiveType_Nchw2Nhwc] = linearCalcer;
-    _registerMap[schema::PrimitiveType_Nhwc2Nchw] = linearCalcer;
+    _registerMap[schema::PrimitiveType_MatMul] = std::make_shared<ConvCalcer>();
+    _registerMap[schema::PrimitiveType_FullConnection] = std::make_shared<ConvCalcer>();
     // detection_postprocess op's quant param will not infer only fetch from preNode or postNode
     // because we will not insert quantTransNode after this node in tflite_graph_8bit model if input data is float.
     // if quantTransNode is inserted after detection_postprocess node, there will be some errors

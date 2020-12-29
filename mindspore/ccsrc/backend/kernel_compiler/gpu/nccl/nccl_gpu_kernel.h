@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 Huawei Technologies Co., Ltd
+ * Copyright 2019-2020 Huawei Technologies Co., Ltd
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,12 +18,9 @@
 #define MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_GPU_NCCL_GPU_KERNEL_H_
 
 #include <nccl.h>
-#include <dlfcn.h>
-#include <stdint.h>
-#include <vector>
-#include <string>
-#include <thread>
 #include <map>
+#include <string>
+#include <vector>
 #include "backend/kernel_compiler/gpu/gpu_kernel.h"
 #include "backend/kernel_compiler/gpu/gpu_kernel_factory.h"
 #include "backend/kernel_compiler/gpu/kernel_constants.h"
@@ -32,20 +29,6 @@
 
 namespace mindspore {
 namespace kernel {
-enum NcclKernelType {
-  NCCL_ALL_REDUCE = 0,
-  NCCL_ALL_GATHER,
-  NCCL_REDUCE_SCATTER,
-  NCCL_BROADCAST,
-  NCCL_INVALID_TYPE = 255
-};
-const std::map<std::string, NcclKernelType> kNcclTypeMap = {
-  {"AllReduce", NCCL_ALL_REDUCE},
-  {"AllGather", NCCL_ALL_GATHER},
-  {"ReduceScatter", NCCL_REDUCE_SCATTER},
-  {"Broadcast", NCCL_BROADCAST},
-};
-
 static std::map<std::string, ncclDataType_t> kNcclDtypeMap = {
   {"kNumberTypeFloat32", ncclFloat}, {"kNumberTypeFloat16", ncclHalf}, {"kNumberTypeInt32", ncclInt}};
 
@@ -55,21 +38,18 @@ typedef ncclResult_t (*AllGather)(const void *, void *, size_t, ncclDataType_t, 
 typedef ncclResult_t (*ReduceScatter)(const void *, void *, size_t, ncclDataType_t, ncclRedOp_t, cudaStream_t,
                                       const std::string &);
 typedef ncclResult_t (*Broadcast)(const void *, void *, size_t, ncclDataType_t, int, cudaStream_t, const std::string &);
+typedef ncclResult_t (*Send)(const void *, size_t, ncclDataType_t, int, cudaStream_t, const std::string &);
+typedef ncclResult_t (*Recv)(void *, size_t, ncclDataType_t, int, cudaStream_t, const std::string &);
+typedef ncclResult_t (*GroupStart)();
+typedef ncclResult_t (*GroupEnd)();
+typedef std::vector<int> (*GetGroupRanks)(const std::string &);
 
-template <typename T>
 class NcclGpuKernel : public GpuKernel {
  public:
-  NcclGpuKernel()
-      : nccl_kernel_type_(NCCL_INVALID_TYPE),
-        nccl_reduce_type_(ncclSum),
-        group_name_(""),
-        input_size_(0),
-        output_size_(0),
-        root_(0),
-        collective_handle_(nullptr),
-        comm_stream_(nullptr) {}
+  NcclGpuKernel() : group_name_(""), nccl_data_type_(ncclHalf) {}
   ~NcclGpuKernel() override = default;
 
+<<<<<<< HEAD
   const std::vector<size_t> &GetInputSizeList() const override { return input_size_list_; }
   const std::vector<size_t> &GetOutputSizeList() const override { return output_size_list_; }
   const std::vector<size_t> &GetWorkspaceSizeList() const override { return workspace_size_list_; }
@@ -169,63 +149,14 @@ class NcclGpuKernel : public GpuKernel {
     return true;
   }
 
+=======
+>>>>>>> master
+
  protected:
-  void InitSizeLists() override { return; }
+  ncclDataType_t nccl_dtype(const TypeId &type_id) { return kNcclDtypeMap[TypeIdLabel(type_id)]; }
 
- private:
-  void InferCommType(const CNodePtr &kernel_node) {
-    std::string kernel_name = AnfAlgo::GetCNodeName(kernel_node);
-    auto iter = kNcclTypeMap.find(kernel_name);
-    if (iter == kNcclTypeMap.end()) {
-      MS_LOG(EXCEPTION) << "Kernel " << kernel_name << " is not supported.";
-    } else {
-      nccl_kernel_type_ = iter->second;
-    }
-
-    auto reduce_op = AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr(kAttrOp);
-    if (reduce_op) {
-      std::string type = GetValue<std::string>(reduce_op);
-      if (type == "sum") {
-        nccl_reduce_type_ = ncclSum;
-      } else if (type == "max") {
-        nccl_reduce_type_ = ncclMax;
-      } else if (type == "min") {
-        nccl_reduce_type_ = ncclMin;
-      } else if (type == "prod") {
-        nccl_reduce_type_ = ncclProd;
-      } else {
-        MS_LOG(EXCEPTION) << "Nccl reduce type " << type << " is not supported.";
-      }
-    }
-
-    auto root_rank = AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr(kAttrRootRank);
-    if (root_rank) {
-      root_ = GetValue<int>(root_rank);
-    }
-    return;
-  }
-
-  size_t AlignMemorySize(size_t size) const {
-    if (size == 0) {
-      return COMMUNICATION_MEM_ALIGN_SIZE;
-    }
-    return ((size + COMMUNICATION_MEM_ALIGN_SIZE - 1) / COMMUNICATION_MEM_ALIGN_SIZE) * COMMUNICATION_MEM_ALIGN_SIZE;
-  }
-
-  NcclKernelType nccl_kernel_type_;
-  ncclRedOp_t nccl_reduce_type_;
-  ncclDataType_t nccl_data_type_;
   std::string group_name_;
-  size_t input_size_;
-  size_t output_size_;
-  int root_;
-  std::vector<size_t> input_size_list_;
-  std::vector<size_t> output_size_list_;
-  std::vector<size_t> workspace_size_list_;
-  const void *collective_handle_;
-  cudaStream_t comm_stream_;
-
-  static const size_t COMMUNICATION_MEM_ALIGN_SIZE = 16;
+  ncclDataType_t nccl_data_type_;
 };
 }  // namespace kernel
 }  // namespace mindspore

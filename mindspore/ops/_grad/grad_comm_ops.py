@@ -16,13 +16,15 @@
 """Generate bprop for comm ops"""
 import mindspore.common.dtype as mstype
 from mindspore.ops import functional as F
+from mindspore.communication import get_rank, get_group_size
 from .. import operations as P
 from ...common.tensor import RowTensor
 from ..composite.multitype_ops.zeros_like_impl import zeros_like
 from ..operations.comm_ops import (AllGather, _HostAllGather, AllReduce, _AlltoAll, Broadcast,
                                    _GetTensorSlice, _MirrorOperator, ReduceOp,
-                                   ReduceScatter, _HostReduceScatter, _VirtualDiv)
+                                   ReduceScatter, _HostReduceScatter, _VirtualDiv, AllSwap)
 from .grad_base import bprop_getters
+from ..operations._inner_ops import Send, Receive
 
 
 @bprop_getters.register(AllReduce)
@@ -37,11 +39,18 @@ def get_bprop_all_reduce(self):
     equal = P.Equal()
     cast = P.Cast()
     mul = P.Mul()
+    div = P.RealDiv()
     dtype = P.DType()
 
     if self.op == ReduceOp.PROD:
-        raise RuntimeError("The bprop of ReduceOp.PROD is not supported yet.")
-    if self.op == ReduceOp.SUM:
+
+        def bprop(x, out, dout):
+            dy1 = mul(dout, out)
+            dy2 = all_reduce_grad(dy1)
+            dx = div(dy2, x)
+            return (dx,)
+
+    elif self.op == ReduceOp.SUM:
 
         def bprop(x, out, dout):
             if F.issubclass_(F.typeof(dout), mstype.tensor):
@@ -70,6 +79,35 @@ def get_bprop_all_reduce(self):
     return bprop
 
 
+@bprop_getters.register(Send)
+def get_bprop_send(self):
+    """Generate bprop for Send."""
+    shape = self.get_attr_dict()["shape"]
+    dtype = self.get_attr_dict()["dtype"]
+    send_grad = Receive(self.sr_tag, self.rank, shape, dtype, self.group)
+    send_grad.add_prim_attr("backward", True)
+
+    def bprop(x, out, dout):
+        dx = send_grad()
+        return (dx,)
+    return bprop
+
+
+@bprop_getters.register(Receive)
+def get_bprop_receive(self):
+    """Generate bprop for Receive."""
+    receive_grad = Send(self.tag, self.rank, self.group)
+    receive_grad.add_prim_attr("backward", True)
+    depend = P.Depend()
+    cast = P.Cast()
+
+    def bprop(x, out, dout):
+        send_out = receive_grad(dout)
+        dx = depend(cast(zeros_like(x), F.dtype(x)), send_out)
+        return (dx,)
+    return bprop
+
+
 @bprop_getters.register(Broadcast)
 def get_bprop_broad_cast(self):
     """Generate bprop for Broadcast."""
@@ -82,15 +120,27 @@ def get_bprop_broad_cast(self):
 @bprop_getters.register(AllGather)
 def get_bprop_all_gather(self):
     """Generate bprop for AllGather"""
-    all_gather_grad = ReduceScatter(ReduceOp.SUM, self.group)
     fusion = self.get_attr_dict()["fusion"]
-    all_gather_grad.add_prim_attr("fusion", fusion)
-    if self.instance_name:
-        instance_name = "grad_" + self.instance_name
-        all_gather_grad.set_prim_instance_name(instance_name)
+    if fusion == 0:
+        reduce_scatter = ReduceScatter(ReduceOp.SUM, self.group)
+        if self.instance_name:
+            instance_name = "grad_" + self.instance_name
+            reduce_scatter.set_prim_instance_name(instance_name)
+    else:
+        all_reduce = AllReduce(ReduceOp.SUM, self.group).add_prim_attr("fusion", fusion)
+        if self.instance_name:
+            instance_name = "grad_" + self.instance_name
+            all_reduce.set_prim_instance_name(instance_name)
+        rank = get_rank(self.group)
+        dev_num = get_group_size(self.group)
+        split = P.Split(output_num=dev_num)
 
     def bprop(x, out, dout):
-        dx = all_gather_grad(dout)
+        if fusion == 0:
+            dx = reduce_scatter(dout)
+        else:
+            grad = all_reduce(dout)
+            dx = split(grad)[rank]
         return (dx,)
 
     return bprop
@@ -125,6 +175,21 @@ def get_bprop_reduce_scatter(self):
     def bprop(x, out, dout):
         dx = reduce_scatter_grad(dout)
         return (dx,)
+
+    return bprop
+
+
+@bprop_getters.register(AllSwap)
+def get_bprop_allswap(self):
+    """Generate bprop for AllSwap."""
+    all_swap_grad = AllSwap(self.group)
+    if self.instance_name:
+        instance_name = "grad" + self.instance_name
+        all_swap_grad.set_prim_instance_name(instance_name)
+
+    def bprop(x, send_size, recv_size, out, dout):
+        dx = all_swap_grad(dout, recv_size, send_size)
+        return (dx, zeros_like(send_size), zeros_like(recv_size))
 
     return bprop
 
@@ -177,9 +242,7 @@ def get_bprop_mirror_operator(self):
     mul = P.Mul()
     cast = P.Cast()
 
-    fusion = 1
-    if hasattr(self, 'fusion'):
-        fusion = self.fusion
+    fusion = self.get_attr_dict()["fusion"]
     all_reduce.add_prim_attr("fusion", fusion)
     if hasattr(self, 'parameter'):
         parameter = self.parameter
@@ -225,7 +288,8 @@ def get_bprop_virtual_div_operator(self):
 
     def bprop(x, out, dout):
         if F.issubclass_(F.typeof(dout), mstype.tensor):
-            if F.issubclass_(F.dtype(dout), mstype.bool_):
+            if F.issubclass_(F.dtype(dout), mstype.bool_) or F.issubclass_(F.dtype(dout), mstype.int32) \
+                                     or F.issubclass_(F.dtype(dout), mstype.int16):
                 return (dout,)
             dx = op(dout, cast(F.scalar_to_array(divisor), dtype(dout)))
             return (dx,)

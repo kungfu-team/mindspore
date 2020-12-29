@@ -17,13 +17,15 @@
 #include "src/ops/space_to_batch_nd.h"
 #include "src/common/common.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 namespace {
 constexpr int kSpaceToBatchNDOutputNum = 1;
 constexpr int kSpaceToBatchNDInputNum = 1;
-constexpr int kBlockSizesSize = 2;
-constexpr int kPaddingsSize = 4;
 }  // namespace
 
 #ifdef PRIMITIVE_WRITEABLE
@@ -76,6 +78,11 @@ int SpaceToBatchND::UnPackToFlatBuilder(const schema::Primitive *primitive, flat
   return RET_OK;
 }
 
+PrimitiveC *SpaceToBatchNDCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<SpaceToBatchND>(primitive);
+}
+Registry SpaceToBatchNDRegistry(schema::PrimitiveType_SpaceToBatchND, SpaceToBatchNDCreator);
+
 #endif  // PRIMITIVE_WRITEABLE
 
 int SpaceToBatchND::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Tensor *> outputs) {
@@ -85,14 +92,14 @@ int SpaceToBatchND::InferShape(std::vector<lite::Tensor *> inputs, std::vector<l
   }
 
   auto input = inputs.at(0);
-  if (input->GetFormat() != schema::Format::Format_NHWC) {
+  if (input->format() != schema::Format::Format_NHWC) {
     MS_LOG(ERROR) << "space_to_batch_nd only support NHWC now!";
     return RET_ERROR;
   }
-  outputs[0]->set_data_type(input->data_type());
-  outputs[0]->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  outputs.at(0)->set_data_type(input->data_type());
+  outputs.at(0)->set_format(input->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   auto input_shape = input->shape();
   if (input_shape.size() != kDimension_4d) {
@@ -100,22 +107,33 @@ int SpaceToBatchND::InferShape(std::vector<lite::Tensor *> inputs, std::vector<l
     return RET_ERROR;
   }
   auto block_shape = GetBlockShape();
-  if (block_shape.size() != kBlockSizesSize) {
-    MS_LOG(ERROR) << "blockShape size != " << kBlockSizesSize;
-    return RET_ERROR;
+  auto padding = GetPaddings();
+  int padding_left = 0;
+  int padding_right = 0;
+  int block_w = 1;
+  if (block_shape.size() == 2) {
+    padding_left = padding.at(2);
+    padding_right = padding.at(3);
+    block_w = block_shape.at(1);
   }
-  auto pedding = GetPaddings();
-  if (pedding.size() != kPaddingsSize) {
-    MS_LOG(ERROR) << "pedding size should be " << kPaddingsSize;
-    return RET_ERROR;
-  }
-
   std::vector<int32_t> output_shape(input_shape.size());
-  output_shape[NHWC_N] = input_shape[NHWC_N] * block_shape[0] * block_shape[1];
-  output_shape[NHWC_H] = (input_shape[NHWC_H] + pedding[0] + pedding[1]) / block_shape[0];
-  output_shape[NHWC_W] = (input_shape[NHWC_W] + pedding[2] + pedding[3]) / block_shape[1];
-  output_shape[NHWC_C] = input_shape[NHWC_C];
-  outputs[0]->set_shape(output_shape);
+  if (block_shape.at(0) * block_w > std::numeric_limits<int>::max() / input_shape.at(NHWC_N)) {
+    MS_LOG(ERROR) << "The value of block_shape.at(0) * block_w is too big";
+    return RET_ERROR;
+  }
+  output_shape.at(NHWC_N) = input_shape.at(NHWC_N) * block_shape.at(0) * block_w;
+  if (padding.at(0) + padding.at(1) > std::numeric_limits<int>::max() - input_shape.at(NHWC_H)) {
+    MS_LOG(ERROR) << "The value of padding.at(0) + padding.at(1) is too big";
+    return RET_ERROR;
+  }
+  output_shape.at(NHWC_H) = (input_shape.at(NHWC_H) + padding.at(0) + padding.at(1)) / block_shape.at(0);
+  if (padding_left + padding_right > std::numeric_limits<int>::max() - input_shape.at(NHWC_W)) {
+    MS_LOG(ERROR) << "The value of padding_left + padding_right is too big";
+    return RET_ERROR;
+  }
+  output_shape.at(NHWC_W) = (input_shape.at(NHWC_W) + padding_left + padding_right) / block_w;
+  output_shape.at(NHWC_C) = input_shape.at(NHWC_C);
+  outputs.at(0)->set_shape(output_shape);
   return RET_OK;
 }
 }  // namespace lite

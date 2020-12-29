@@ -42,7 +42,7 @@ std::map<tflite::BuiltinOperator, std::string> tfMsOpTypeMap{
   {tflite::BuiltinOperator_TRANSPOSE, "Transpose"},
   {tflite::BuiltinOperator_PACK, "Stack"},
   {tflite::BuiltinOperator_MEAN, "Mean"},
-  {tflite::BuiltinOperator_RELU6, "Relu6"},
+  {tflite::BuiltinOperator_RELU6, "ReLU6"},
   {tflite::BuiltinOperator_TANH, "Tanh"},
   {tflite::BuiltinOperator_RSQRT, "Rsqrt"},
   {tflite::BuiltinOperator_ARG_MAX, "Argmax"},
@@ -51,7 +51,7 @@ std::map<tflite::BuiltinOperator, std::string> tfMsOpTypeMap{
   {tflite::BuiltinOperator_TRANSPOSE_CONV, "DeConv2D"},
   {tflite::BuiltinOperator_PAD, "Pad"},
   {tflite::BuiltinOperator_RESIZE_NEAREST_NEIGHBOR, "NearestNeighbor"},
-  {tflite::BuiltinOperator_RELU, "Relu"},
+  {tflite::BuiltinOperator_RELU, "ReLU"},
   {tflite::BuiltinOperator_LEAKY_RELU, "LeakyRelu"},
   {tflite::BuiltinOperator_SQUEEZE, "Squeeze"},
   {tflite::BuiltinOperator_POW, "Pow"},
@@ -87,7 +87,7 @@ std::map<tflite::BuiltinOperator, std::string> tfMsOpTypeMap{
   {tflite::BuiltinOperator_LOGICAL_NOT, "LogicalNot"},
   {tflite::BuiltinOperator_LOGICAL_AND, "LogicalAnd"},
   {tflite::BuiltinOperator_LOGICAL_OR, "LogicalOr"},
-  {tflite::BuiltinOperator_HARD_SWISH, "HardSwish"},
+  {tflite::BuiltinOperator_HARD_SWISH, "HSwish"},
   {tflite::BuiltinOperator_SUM, "Sum"},
   {tflite::BuiltinOperator_REDUCE_PROD, "ReduceProd"},
   {tflite::BuiltinOperator_REDUCE_MAX, "ReduceMax"},
@@ -123,6 +123,7 @@ std::map<tflite::BuiltinOperator, std::string> tfMsOpTypeMap{
   {tflite::BuiltinOperator_HASHTABLE_LOOKUP, "HashtableLookup"},
   {tflite::BuiltinOperator_LSH_PROJECTION, "LshProjection"},
   {tflite::BuiltinOperator_SKIP_GRAM, "SKipGram"},
+  {tflite::BuiltinOperator_WHILE, "While"},
 };
 
 std::map<tflite::ActivationFunctionType, schema::ActivationType> tfMsActivationFunctionMap{
@@ -170,12 +171,22 @@ schema::PadMode GetPadMode(tflite::Padding tflite_padmode) {
   }
 }
 
+std::string GetPadModeStr(tflite::Padding tflite_padmode) {
+  if (tflite_padmode == tflite::Padding_SAME) {
+    return "same";
+  } else if (tflite_padmode == tflite::Padding_VALID) {
+    return "valid";
+  } else {
+    return "pad";
+  }
+}
+
 size_t GetDataTypeSize(const TypeId &data_type) {
   switch (data_type) {
     case TypeId::kNumberTypeFloat32:
       return sizeof(float);
     case TypeId::kNumberTypeFloat16:
-      return sizeof(float) >> 1;
+      return sizeof(float) / 2;
     case TypeId::kNumberTypeInt8:
       return sizeof(int8_t);
     case TypeId::kNumberTypeInt32:
@@ -188,17 +199,20 @@ size_t GetDataTypeSize(const TypeId &data_type) {
       return sizeof(int64_t);
     default:
       MS_LOG(ERROR) << data_type << " is Unsupported datatype";
-      return RET_ERROR;
+      return TypeId::kTypeUnknown;
   }
 }
 
 STATUS getPaddingParam(const std::unique_ptr<tflite::TensorT> &tensor, schema::PadMode pad_mode, int strideH,
-                       int strideW, int windowH, int windowW, std::vector<int> *params) {
+                       int strideW, int windowH, int windowW, std::vector<int64_t> *params) {
   if (tensor == nullptr) {
     MS_LOG(ERROR) << "the input tensor is null";
     return RET_ERROR;
   }
-
+  if (tensor->shape.empty()) {
+    MS_LOG(DEBUG) << "the tensor's shape is dynamic, which obtain only when running.";
+    return RET_NO_CHANGE;
+  }
   int padUp = 0;
   int padDown = 0;
   int padLeft = 0;
@@ -233,6 +247,11 @@ STATUS getPaddingParam(const std::unique_ptr<tflite::TensorT> &tensor, schema::P
 }
 
 void Split(const std::string &src_str, std::vector<std::string> *dst_str, const std::string &chr) {
+  MS_ASSERT(dst_str != nullptr);
+  if (src_str.empty()) {
+    MS_LOG(ERROR) << "src_str is empty";
+    return;
+  }
   std::string ::size_type p1 = 0, p2 = src_str.find(chr);
   while (std::string::npos != p2) {
     dst_str->push_back(src_str.substr(p1, p2 - p1));

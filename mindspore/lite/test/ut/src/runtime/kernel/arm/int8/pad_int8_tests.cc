@@ -34,7 +34,7 @@ class TestPadInt8 : public mindspore::CommonTest {
 
 int PadInt8TestInit1(std::vector<Tensor *> *inputs_, std::vector<Tensor *> *outputs_, PadParameter *pad_param,
                      int8_t **correct) {
-  Tensor *in_t = new Tensor(kNumberTypeInt8, {3}, schema::Format_NHWC, lite::TensorCategory(NodeType_Parameter));
+  Tensor *in_t = new Tensor(kNumberTypeInt8, {3}, schema::Format_NHWC, lite::Tensor::CONST_TENSOR);
   in_t->MallocData();
   int8_t in[] = {1, 1, 1};
   memcpy(in_t->MutableData(), in, sizeof(int8_t) * in_t->ElementsNum());
@@ -43,7 +43,7 @@ int PadInt8TestInit1(std::vector<Tensor *> *inputs_, std::vector<Tensor *> *outp
   in_t->AddQuantParam(*in_quant_arg);
   inputs_->push_back(in_t);
 
-  Tensor *out_t = new Tensor(kNumberTypeInt8, {7}, schema::Format_NHWC, lite::TensorCategory(NodeType_Parameter));
+  Tensor *out_t = new Tensor(kNumberTypeInt8, {7}, schema::Format_NHWC, lite::Tensor::CONST_TENSOR);
   out_t->MallocData();
   QuantArg *out_quant_arg = new QuantArg();
   out_quant_arg->zeroPoint = 10, out_quant_arg->scale = 0.31228156;
@@ -74,7 +74,7 @@ TEST_F(TestPadInt8, PadInt8Test1) {
 
   pad->Init();
   pad->Run();
-  CompareOutputData(reinterpret_cast<int8_t *>(outputs_[0]->MutableData()), correct, total_size, 0);
+  ASSERT_EQ(0, CompareOutputData(reinterpret_cast<int8_t *>(outputs_[0]->MutableData()), correct, total_size, 0));
 
   delete pad_param;
   delete pad;
@@ -85,7 +85,7 @@ TEST_F(TestPadInt8, PadInt8Test1) {
 
 int PadInt8TestInit2(std::vector<Tensor *> *inputs_, std::vector<Tensor *> *outputs_, PadParameter *pad_param,
                      int8_t **correct) {
-  Tensor *in_t = new Tensor(kNumberTypeInt8, {6, 2}, schema::Format_NHWC, lite::TensorCategory(NodeType_Parameter));
+  Tensor *in_t = new Tensor(kNumberTypeInt8, {6, 2}, schema::Format_NHWC, lite::Tensor::VAR);
   in_t->MallocData();
   int8_t in[] = {18, 71, 99, -6, 5, -119, 86, 13, 15, -85, -41, -77};
   memcpy(in_t->MutableData(), in, sizeof(int8_t) * in_t->ElementsNum());
@@ -94,7 +94,7 @@ int PadInt8TestInit2(std::vector<Tensor *> *inputs_, std::vector<Tensor *> *outp
   in_t->AddQuantParam(*in_quant_arg);
   inputs_->push_back(in_t);
 
-  Tensor *out_t = new Tensor(kNumberTypeInt8, {10, 5}, schema::Format_NHWC, lite::TensorCategory(NodeType_Parameter));
+  Tensor *out_t = new Tensor(kNumberTypeInt8, {10, 5}, schema::Format_NHWC, lite::Tensor::VAR);
   out_t->MallocData();
   QuantArg *out_quant_arg = new QuantArg();
   out_quant_arg->zeroPoint = 10, out_quant_arg->scale = 0.31228156;
@@ -127,7 +127,7 @@ TEST_F(TestPadInt8, PadInt8Test2) {
 
   pad->Init();
   pad->Run();
-  CompareOutputData(reinterpret_cast<int8_t *>(outputs_[0]->MutableData()), correct, total_size, 0);
+  ASSERT_EQ(0, CompareOutputData(reinterpret_cast<int8_t *>(outputs_[0]->MutableData()), correct, total_size, 0));
 
   delete pad_param;
   delete pad;
@@ -138,8 +138,7 @@ TEST_F(TestPadInt8, PadInt8Test2) {
 
 int PadInt8TestInit4(std::vector<Tensor *> *inputs_, std::vector<Tensor *> *outputs_, PadParameter *pad_param,
                      int8_t **correct) {
-  Tensor *in_t =
-    new Tensor(kNumberTypeInt8, {2, 3, 2, 1}, schema::Format_NHWC, lite::TensorCategory(NodeType_Parameter));
+  Tensor *in_t = new Tensor(kNumberTypeInt8, {2, 3, 2, 1}, schema::Format_NHWC, lite::Tensor::VAR);
   in_t->MallocData();
   int8_t in[] = {73, 24, 7, -31, -109, -2, 69, -64, 51, -45, 38, 53};
   memcpy(in_t->MutableData(), in, sizeof(int8_t) * in_t->ElementsNum());
@@ -148,8 +147,7 @@ int PadInt8TestInit4(std::vector<Tensor *> *inputs_, std::vector<Tensor *> *outp
   in_t->AddQuantParam(*in_quant_arg);
   inputs_->push_back(in_t);
 
-  Tensor *out_t =
-    new Tensor(kNumberTypeInt8, {6, 6, 4, 3}, schema::Format_NHWC, lite::TensorCategory(NodeType_Parameter));
+  Tensor *out_t = new Tensor(kNumberTypeInt8, {6, 6, 4, 3}, schema::Format_NHWC, lite::Tensor::VAR);
   out_t->MallocData();
   QuantArg *out_quant_arg = new QuantArg();
   out_quant_arg->zeroPoint = 10, out_quant_arg->scale = 0.31228156;
@@ -197,7 +195,7 @@ TEST_F(TestPadInt8, PadInt8TestInit4) {
 
   pad->Init();
   pad->Run();
-  CompareOutputData(reinterpret_cast<int8_t *>(outputs_[0]->MutableData()), correct, total_size, 0);
+  ASSERT_EQ(0, CompareOutputData(reinterpret_cast<int8_t *>(outputs_[0]->MutableData()), correct, total_size, 0));
 
   delete pad_param;
   delete pad;

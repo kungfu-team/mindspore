@@ -18,43 +18,27 @@
 #include <vector>
 #include <memory>
 #include <string>
-#include <map>
 
-namespace mindspore {
-namespace lite {
-STATUS TflitePoolingParser::Parse(TfliteTensorsInfo *tensors_info, const std::unique_ptr<tflite::OperatorT> &tflite_op,
-                                  const std::unique_ptr<tflite::ModelT> &tflite_model, schema::CNodeT *op) {
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
+namespace mindspore::lite {
+lite::PrimitiveC *TflitePoolingParser::ParseLitePrimitive(const std::unique_ptr<tflite::OperatorT> &tflite_op,
+                                                          const std::unique_ptr<tflite::ModelT> &tflite_model) {
+  const auto &tflite_subgraph = tflite_model->subgraphs.front();
   std::unique_ptr<schema::PoolingT> attr = std::make_unique<schema::PoolingT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
-  std::vector<std::string> node_name_str;
-  Split(op->name, &node_name_str, "-");
-  const char *node_name = node_name_str.data()->c_str();
-  if (std::strcmp(node_name, "MeanPooling") == 0) {
-    MS_LOG(DEBUG) << "parser TfliteMeanPoolingParser";
+  auto tflite_op_type = (tflite_model->operator_codes[tflite_op->opcode_index])->builtin_code;
+  if (tflite_op_type == tflite::BuiltinOperator_AVERAGE_POOL_2D) {
     attr->poolingMode = schema::PoolMode_MEAN_POOLING;
-  } else if (std::strcmp(node_name, "MaxPooling") == 0) {
-    MS_LOG(DEBUG) << "parse TfliteMaxPoolingParser";
+  } else if (tflite_op_type == tflite::BuiltinOperator_MAX_POOL_2D) {
     attr->poolingMode = schema::PoolMode_MAX_POOLING;
   }
-
   const auto &tflite_attr = tflite_op->builtin_options.AsPool2DOptions();
   if (tflite_attr == nullptr) {
-    MS_LOG(ERROR) << "get op: " << op->name.c_str() << " attr failed";
-    return RET_NULL_PTR;
+    MS_LOG(ERROR) << "get op pooling attr failed";
+    return nullptr;
   }
   attr->windowW = tflite_attr->filter_width;
   attr->windowH = tflite_attr->filter_height;
@@ -69,30 +53,25 @@ STATUS TflitePoolingParser::Parse(TfliteTensorsInfo *tensors_info, const std::un
 
   // calculate pad params
   auto data_index = tflite_op->inputs[0];
-  const auto &data_tensor = tflite_model->subgraphs[0]->tensors[data_index];
-  std::vector<int> params;
-  if (getPaddingParam(data_tensor, attr->padMode, attr->strideH, attr->strideW, attr->windowH, attr->windowW,
-                      &params) != RET_OK) {
+  const auto &data_tensor = tflite_subgraph->tensors[data_index];
+  std::vector<int64_t> params;
+  int status =
+    getPaddingParam(data_tensor, attr->padMode, attr->strideH, attr->strideW, attr->windowH, attr->windowW, &params);
+  if (status != RET_OK && status != RET_NO_CHANGE) {
     MS_LOG(ERROR) << "get padding params failed";
-    return RET_ERROR;
-  } else {
+    return nullptr;
+  } else if (status == RET_OK) {
     attr->padUp = params.at(0);
     attr->padDown = params.at(1);
     attr->padLeft = params.at(2);
     attr->padRight = params.at(3);
   }
-
-  op->primitive->value.type = schema::PrimitiveType_Pooling;
-  op->primitive->value.value = attr.release();
-
-  AddOpInput(op, tensors_info, tflite_op->inputs[0], tflite_model->subgraphs[0]->tensors.size(),
-             schema::Format::Format_NHWC);
-  AddOpOutput(op, tensors_info, tflite_op->outputs[0], tflite_model->subgraphs[0]->tensors.size(),
-              schema::Format::Format_NHWC);
-  return RET_OK;
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  primitive->value.type = schema::PrimitiveType_Pooling;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
-TfliteNodeRegister g_tfliteMeanPoolingParser("MeanPooling", new TfliteMeanPoolingParser());
-TfliteNodeRegister g_tfliteMaxPoolingParser("MaxPooling", new TfliteMaxPoolingParser());
-}  // namespace lite
-}  // namespace mindspore
+TfliteNodeRegister g_tfliteMeanPoolingParser(tflite::BuiltinOperator_AVERAGE_POOL_2D, new TflitePoolingParser());
+TfliteNodeRegister g_tfliteMaxPoolingParser(tflite::BuiltinOperator_MAX_POOL_2D, new TflitePoolingParser());
+}  // namespace mindspore::lite

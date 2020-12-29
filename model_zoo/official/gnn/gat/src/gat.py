@@ -76,18 +76,18 @@ class GNNFeatureTransform(nn.Cell):
         self.has_bias = has_bias
 
         if isinstance(weight_init, Tensor):
-            if weight_init.dim() != 2 or weight_init.shape[0] != out_channels or \
+            if weight_init.ndim != 2 or weight_init.shape[0] != out_channels or \
                weight_init.shape[1] != in_channels:
                 raise ValueError("weight_init shape error")
 
-        self.weight = Parameter(initializer(weight_init, [out_channels, in_channels]), name="weight")
+        self.weight = Parameter(initializer(weight_init, [out_channels, in_channels]))
 
         if self.has_bias:
             if isinstance(bias_init, Tensor):
-                if bias_init.dim() != 1 or bias_init.shape[0] != out_channels:
+                if bias_init.ndim != 1 or bias_init.shape[0] != out_channels:
                     raise ValueError("bias_init shape error")
 
-            self.bias = Parameter(initializer(bias_init, [out_channels]), name="bias")
+            self.bias = Parameter(initializer(bias_init, [out_channels]))
 
         self.matmul = P.MatMul(transpose_b=True)
         self.bias_add = P.BiasAdd()
@@ -102,12 +102,10 @@ class GNNFeatureTransform(nn.Cell):
         return output
 
     def extend_repr(self):
-        str_info = 'in_channels={}, out_channels={}, weight={}, has_bias={}' \
-                .format(self.in_channels, self.out_channels, self.weight, self.has_bias)
+        s = 'in_channels={}, out_channels={}'.format(self.in_channels, self.out_channels)
         if self.has_bias:
-            str_info = str_info + ', bias={}'.format(self.bias)
-
-        return str_info
+            s += ', has_bias={}'.format(self.has_bias)
+        return s
 
 
 class _BaseAggregator(nn.Cell):
@@ -282,7 +280,7 @@ class AttentionHead(nn.Cell):
         self.coef_drop = nn.Dropout(keep_prob=1 - coef_drop_ratio)
         self.matmul = P.MatMul()
         self.bias_add = P.BiasAdd()
-        self.bias = Parameter(initializer('zeros', self.out_channel), name='bias')
+        self.bias = Parameter(initializer('zeros', self.out_channel))
         self.residual = residual
         if self.residual:
             if in_channel != out_channel:

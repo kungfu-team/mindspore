@@ -31,7 +31,7 @@ HandleRcExit $? 1 1
 export RUN_CACHE_TEST=TRUE
 
 # Each of these tests will create session, use it, then destroy it after the test
-for i in $(seq 1 6)
+for i in $(seq 1 5)
 do
    test_name="test_cache_map_basic${i}"
    GetSession
@@ -53,6 +53,9 @@ export SESSION_ID=$session_id
 # All of these tests will interact with the same cache session and may result in multiple
 # caches under the common session handle (although these are failure tests so probably not)
 PytestCmd "test_cache_map.py" "test_cache_map_failure" 1
+HandleRcExit $? 0 0
+
+PytestCmd "test_cache_map.py" "test_cache_map_split" 1
 HandleRcExit $? 0 0
 
 # DatasetCache parameter check
@@ -119,6 +122,12 @@ PytestCmd "test_cache_map.py" "test_cache_map_cifar" 1
 HandleRcExit $? 0 0
 
 PytestCmd "test_cache_map.py" "test_cache_map_voc" 1
+HandleRcExit $? 0 0
+
+PytestCmd "test_cache_map.py" "test_cache_map_python_sampler" 1
+HandleRcExit $? 0 0
+
+PytestCmd "test_cache_map.py" "test_cache_map_nested_repeat"
 HandleRcExit $? 0 0
 
 # Run two parallel pipelines (sharing cache)
@@ -307,6 +316,15 @@ PytestCmd "test_cache_nomap.py" "test_cache_nomap_csv" 1
 HandleRcExit $? 0 0
 
 PytestCmd "test_cache_nomap.py" "test_cache_nomap_textfile" 1
+HandleRcExit $? 0 0
+
+PytestCmd "test_cache_nomap.py" "test_cache_nomap_nested_repeat"
+HandleRcExit $? 0 0
+
+PytestCmd "test_cache_nomap.py" "test_cache_nomap_get_repeat_count"
+HandleRcExit $? 0 0
+
+PytestCmd "test_cache_nomap.py" "test_cache_nomap_long_file_list"
 HandleRcExit $? 0 0
 
 for i in $(seq 1 3)

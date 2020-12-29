@@ -16,11 +16,11 @@
 
 #include "src/runtime/kernel/arm/base/strided_slice.h"
 #include <vector>
-#include "nnacl/strided_slice.h"
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
 #include "src/runtime/runtime_api.h"
+#include "src/ops/populate/strided_slice_populate.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
@@ -29,12 +29,6 @@ using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_StridedSlice;
 
 namespace mindspore::kernel {
-namespace {
-constexpr size_t kMultiInputsSize = 4;
-constexpr size_t kBeginsIndex = 1;
-constexpr size_t kEndsIndex = 2;
-constexpr size_t kStridesInex = 3;
-}  // namespace
 int StridedSliceCPUKernel::Init() {
   if (!InferShapeDone()) {
     return RET_OK;
@@ -44,71 +38,39 @@ int StridedSliceCPUKernel::Init() {
 }
 
 int StridedSliceCPUKernel::ReSize() {
-  auto input = in_tensors_.at(0);
-  auto parameter = reinterpret_cast<StridedSliceParameter *>(op_parameter_);
-  MS_ASSERT(input);
-  MS_ASSERT(parameter);
-  parameter->data_type = input->data_type() == kNumberTypeInt8 ? kDataTypeInt8 : kDataTypeFloat;
-  auto input_shape = input->shape();
-  for (size_t i = 0; i < input_shape.size(); ++i) {
-    parameter->in_shape_[i] = input_shape[i];
+  if (op_parameter_ != nullptr) {
+    free(op_parameter_);
+    op_parameter_ = nullptr;
   }
-  parameter->in_shape_length_ = static_cast<int>(input_shape.size());
-  return RET_OK;
-}
-
-int StridedSliceCPUKernel::HandleMultiInputs() {
-  if (in_tensors_.size() != kMultiInputsSize) {
-    MS_LOG(ERROR) << "Inputs size should be " << kMultiInputsSize << ", got " << in_tensors_.size();
+  op_parameter_ = PopulateStridedSliceParameter(primitive_);
+  if (op_parameter_ == nullptr) {
+    MS_LOG(ERROR) << "Malloc parameter failed";
     return RET_ERROR;
   }
-  auto param = reinterpret_cast<StridedSliceParameter *>(op_parameter_);
-  if (param == nullptr) {
-    MS_LOG(ERROR) << "StridedSliceParamater cast nullptr";
-    return RET_ERROR;
-  }
-  auto begins = in_tensors_.at(kBeginsIndex);
-  MS_ASSERT(begins != nullptr);
-  int axis_num = begins->ElementsNum();
-  if (axis_num > DIMENSION_6D) {
-    MS_LOG(ERROR) << "StridedSlice supports max dimension " << DIMENSION_6D << ", input begins dim is " << axis_num;
-    return RET_ERROR;
-  }
-  memcpy(param->begins_, begins->MutableData(), axis_num * sizeof(int));
-
-  auto ends = in_tensors_.at(kEndsIndex);
-  MS_ASSERT(ends != nullptr);
-  MS_ASSERT(axis_num == ends->ElementsNum());
-  memcpy(param->ends_, ends->MutableData(), axis_num * sizeof(int));
-
-  auto strides = in_tensors_.at(kStridesInex);
-  MS_ASSERT(strides != nullptr);
-  MS_ASSERT(axis_num == strides->ElementsNum());
-  memcpy(param->strides_, strides->MutableData(), axis_num * sizeof(int));
-
-  param->num_axes_ = axis_num;
+  param_ = reinterpret_cast<StridedSliceParameter *>(op_parameter_);
   return RET_OK;
 }
 
 int StridedSliceCPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << ret;
-    return ret;
-  }
-
   auto input = in_tensors_.at(0);
-  auto output = out_tensors_.at(0);
   MS_ASSERT(input);
-  MS_ASSERT(output);
-  if (in_tensors().size() == kMultiInputsSize) {
-    ret = HandleMultiInputs();
-    if (ret != RET_OK) {
-      return ret;
-    }
+  switch (input->data_type()) {
+    case kNumberTypeInt8:
+      param_->data_type = kDataTypeInt8;
+      break;
+    case kNumberTypeFloat32:
+      param_->data_type = kDataTypeFloat;
+      break;
+    case kNumberTypeInt32:
+      param_->data_type = kDataTypeInt;
+      break;
+    default:
+      MS_LOG(ERROR) << "Not supported data type: " << input->data_type();
+      return RET_ERROR;
   }
-  ret = DoStridedSlice(input->MutableData(), output->MutableData(),
-                       reinterpret_cast<StridedSliceParameter *>(op_parameter_));
+  auto output = out_tensors_.at(0);
+  MS_ASSERT(output);
+  auto ret = DoStridedSlice(input->data_c(), output->data_c(), param_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "StridedSlice error error_code[" << ret << "]";
     return RET_ERROR;
@@ -116,31 +78,7 @@ int StridedSliceCPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuStridedSliceKernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                 const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                 const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                 const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(desc.type == schema::PrimitiveType_StridedSlice);
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "opParameter null pointer dereferencing.";
-    return nullptr;
-  }
-  auto *kernel = new (std::nothrow) StridedSliceCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "New kernel fails.";
-    return nullptr;
-  }
-
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_StridedSlice, CpuStridedSliceKernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_StridedSlice, CpuStridedSliceKernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt32, PrimitiveType_StridedSlice, LiteKernelCreator<StridedSliceCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeFloat32, PrimitiveType_StridedSlice, LiteKernelCreator<StridedSliceCPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_StridedSlice, LiteKernelCreator<StridedSliceCPUKernel>)
 }  // namespace mindspore::kernel

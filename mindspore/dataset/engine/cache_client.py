@@ -15,22 +15,48 @@
 """Cache client
 """
 
-import os
 import copy
+from mindspore._c_dataengine import CacheClient
 
-from ..core.validator_helpers import type_check, check_uint32, check_uint64
+from ..core.validator_helpers import type_check, check_uint32, check_uint64, check_positive, check_value
 
 
 class DatasetCache:
     """
-    A client to interface with tensor caching service
+    A client to interface with tensor caching service.
+
+    For details, please check `Chinese tutorial <https://www.mindspore.cn/tutorial/training/zh-CN/master/advanced_use/enable_cache.html>`_,
+    `Chinese programming guide <https://www.mindspore.cn/doc/programming_guide/zh-CN/master/cache.html?highlight=datasetcache>`_.
+
+    Args:
+        session_id (int): A user assigned session id for the current pipeline.
+        size (int, optional): Size of the memory set aside for the row caching (default=0 which means unlimited,
+            note that it might bring in the risk of running out of memory on the machine).
+        spilling (bool, optional): Whether or not spilling to disk if out of memory (default=False).
+        hostname (str, optional): Host name (default="127.0.0.1").
+        port (int, optional): Port to connect to server (default=50052).
+        num_connections (int, optional): Number of tcp/ip connections (default=12).
+        prefetch_size (int, optional): Prefetch size (default=20).
+
     """
 
-    def __init__(self, session_id=None, size=0, spilling=False, hostname=None, port=None, num_connections=None,
+    def __init__(self, session_id, size=0, spilling=False, hostname=None, port=None, num_connections=None,
                  prefetch_size=None):
         check_uint32(session_id, "session_id")
-        check_uint64(size, "size")
+        type_check(size, (int,), "size")
+        if size != 0:
+            check_positive(size, "size")
+            check_uint64(size, "size")
         type_check(spilling, (bool,), "spilling")
+        if hostname is not None:
+            type_check(hostname, (str,), "hostname")
+        if port is not None:
+            type_check(port, (int,), "port")
+            check_value(port, (1025, 65535), "port")
+        if num_connections is not None:
+            check_uint32(num_connections, "num_connections")
+        if prefetch_size is not None:
+            check_uint32(prefetch_size, "prefetch_size")
 
         self.session_id = session_id
         self.size = size
@@ -39,12 +65,7 @@ class DatasetCache:
         self.port = port
         self.prefetch_size = prefetch_size
         self.num_connections = num_connections
-        if os.getenv('MS_ENABLE_CACHE') != 'TRUE':
-            # temporary disable cache feature in the current release
-            self.cache_client = None
-        else:
-            from mindspore._c_dataengine import CacheClient
-            self.cache_client = CacheClient(session_id, size, spilling, hostname, port, num_connections, prefetch_size)
+        self.cache_client = CacheClient(session_id, size, spilling, hostname, port, num_connections, prefetch_size)
 
     def GetStat(self):
         return self.cache_client.GetStat()

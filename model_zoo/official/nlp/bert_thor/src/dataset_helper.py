@@ -16,7 +16,7 @@
 import os
 
 from mindspore import context
-from mindspore._checkparam import Validator, check_int
+from mindspore._checkparam import Validator
 from mindspore.parallel._utils import _get_device_num, _need_to_full, _to_full_shapes
 from mindspore.train._utils import _exec_datagraph, _get_types_and_shapes
 
@@ -24,14 +24,14 @@ from mindspore.train._utils import _exec_datagraph, _get_types_and_shapes
 def _send_data(dataset, epoch_num):
     """Engine dataset to write data to tdt queue."""
     if not hasattr(dataset, '__has_sent__'):
-        exec_dataset = dataset.__TRANSFER_DATASET__
+        exec_dataset = dataset.__transfer_dataset__
         exec_dataset.send(epoch_num)
         dataset.__has_sent__ = True
 
 
 def _send_data_no_flag(dataset, epoch_num):
     """Engine dataset to write data to tdt queue directly."""
-    exec_dataset = dataset.__TRANSFER_DATASET__
+    exec_dataset = dataset.__transfer_dataset__
     exec_dataset.send(epoch_num)
 
 
@@ -59,7 +59,7 @@ class DatasetHelper:
 
     def __init__(self, dataset, dataset_sink_mode=True, sink_size=-1, epoch_num=1, iter_first_order=0):
         dataset_sink_mode = Validator.check_bool(dataset_sink_mode)
-        check_int(sink_size)
+        Validator.check_is_int(sink_size)
         if sink_size < -1 or sink_size == 0:
             raise ValueError("The sink_size must be -1 or positive, but got sink_size {}.".format(sink_size))
 
@@ -107,17 +107,17 @@ class _DatasetIter:
         self.sink_size = sink_size
         self.sink_count = 1
 
-        if not hasattr(dataset, '__TRANSFER_DATASET__'):
+        if not hasattr(dataset, '__transfer_dataset__'):
             if hasattr(dataset, '__loop_size__'):
                 self.sink_size = dataset.__loop_size__
-            dataset.__TRANSFER_DATASET__ = _exec_datagraph(dataset, self.sink_size)
+            dataset.__transfer_dataset__ = _exec_datagraph(dataset, self.sink_size)
 
             if not hasattr(dataset, '__no_send__'):
                 _send_data(dataset, epoch_num)
         else:
             _send_data_no_flag(dataset, epoch_num)
 
-        self.stop_send = dataset.__TRANSFER_DATASET__.stop_send
+        self.stop_send = dataset.__transfer_dataset__.stop_send
         self.dataset_types, self.dataset_shapes = _get_types_and_shapes(dataset)
 
     def __iter__(self):

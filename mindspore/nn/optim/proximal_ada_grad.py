@@ -17,7 +17,6 @@ from mindspore.ops import functional as F, composite as C, operations as P
 from mindspore.common import Tensor
 import mindspore.common.dtype as mstype
 from mindspore._checkparam import Validator as validator
-from mindspore._checkparam import Rel
 from .optimizer import Optimizer
 
 _proximal_ada_grad_opt = C.MultitypeFuncGraph("proximal_ada_grad_opt")
@@ -45,14 +44,14 @@ def _check_param_value(accum, l1, l2, use_locking, prim_name=None):
     validator.check_value_type("l1", l1, [float], prim_name)
     validator.check_value_type("l2", l2, [float], prim_name)
     validator.check_value_type("use_locking", use_locking, [bool], prim_name)
-    validator.check_number_range("accum", accum, 0.0, float("inf"), Rel.INC_LEFT, prim_name)
-    validator.check_number_range("l1", l1, 0.0, float("inf"), Rel.INC_LEFT, prim_name)
-    validator.check_number_range("l2", l2, 0.0, float("inf"), Rel.INC_LEFT, prim_name)
+    validator.check_non_negative_float(accum, "accum", prim_name)
+    validator.check_non_negative_float(l1, "l1", prim_name)
+    validator.check_non_negative_float(l2, "l2", prim_name)
 
 
 class ProximalAdagrad(Optimizer):
     """
-    Implement the ProximalAdagrad algorithm with ApplyProximalAdagrad Operator.
+    Implements the ProximalAdagrad algorithm with ApplyProximalAdagrad Operator.
 
     ProximalAdagrad is an online Learning and Stochastic Optimization.
     Refer to paper `Efficient Learning using Forward-Backward Splitting
@@ -66,8 +65,8 @@ class ProximalAdagrad(Optimizer):
         To improve parameter groups performance, the customized order of parameters can be supported.
 
         The sparse strategy is applied while the SparseGatherV2 operator being used for forward network.
-        The sparse feature is under continuous development. The sparse
-        behavior is currently performed on the CPU.
+        The sparse feature is under continuous development. If the sparse strategy wants to be executed on the host,
+        set the target to the CPU.
 
     Args:
         params (Union[list[Parameter], list[dict]]): When the `params` is a list of `Parameter` which will be updated,
@@ -108,6 +107,9 @@ class ProximalAdagrad(Optimizer):
     Outputs:
         Tensor[bool], the value is True.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> net = Net()
         >>> #1) All parameters use the same learning rate and weight decay
@@ -117,8 +119,8 @@ class ProximalAdagrad(Optimizer):
         >>> conv_params = list(filter(lambda x: 'conv' in x.name, net.trainable_params()))
         >>> no_conv_params = list(filter(lambda x: 'conv' not in x.name, net.trainable_params()))
         >>> group_params = [{'params': conv_params, 'weight_decay': 0.01},
-        >>>                 {'params': no_conv_params, 'lr': 0.01},
-        >>>                 {'order_params': net.trainable_params()}]
+        ...                 {'params': no_conv_params, 'lr': 0.01},
+        ...                 {'order_params': net.trainable_params()}]
         >>> optim = nn.ProximalAdagrad(group_params, learning_rate=0.1, weight_decay=0.0)
         >>> # The conv_params's parameters will use default learning rate of 0.1 and weight decay of 0.01.
         >>> # The no_conv_params's parameters will use learning rate of 0.01 and default weight decay of 0.0.
@@ -136,14 +138,16 @@ class ProximalAdagrad(Optimizer):
         self.l1 = Tensor(l1, mstype.float32)
         self.l2 = Tensor(l2, mstype.float32)
         self.hyper_map = C.HyperMap()
+        self.use_locking = use_locking
         self.opt = P.ApplyProximalAdagrad(use_locking=use_locking)
-        self.sparse_opt = P.FusedSparseProximalAdagrad(use_locking=use_locking)
+        self.sparse_opt = P.SparseApplyProximalAdagrad(use_locking=use_locking)
 
     def construct(self, grads):
         params = self.parameters
         accum = self.accum
         grads = self.decay_weight(grads)
         grads = self.scale_grad(grads)
+        grads = self._grad_sparse_indices_deduplicate(grads)
         lr = self.get_lr()
         if self.is_group_lr:
             success = self.map_(F.partial(_proximal_ada_grad_opt, self.opt, self.sparse_opt, self.l1, self.l2), lr,
@@ -152,3 +156,20 @@ class ProximalAdagrad(Optimizer):
             success = self.map_(F.partial(_proximal_ada_grad_opt, self.opt, self.sparse_opt, self.l1, self.l2, lr),
                                 grads, params, accum)
         return success
+
+    @Optimizer.target.setter
+    def target(self, value):
+        """If the input value is set to "CPU", the parameters will be updated on the host using the Fused
+           optimizer operation."""
+        if not isinstance(value, str):
+            raise TypeError("The value must be str type, but got value type is {}".format(type(value)))
+
+        if value not in ('CPU', 'Ascend', 'GPU'):
+            raise ValueError("The value must be 'CPU', 'Ascend' or 'GPU', but got value {}".format(value))
+
+        if value == 'CPU':
+            self.sparse_opt = P.FusedSparseProximalAdagrad(self.use_locking).add_prim_attr("primitive_target", "CPU")
+        else:
+            self.sparse_opt = P.SparseApplyProximalAdagrad(self.use_locking)
+
+        self._target = value

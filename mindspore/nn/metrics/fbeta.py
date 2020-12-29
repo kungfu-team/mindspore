@@ -36,8 +36,11 @@ class Fbeta(Metric):
         >>> x = Tensor(np.array([[0.2, 0.5], [0.3, 0.1], [0.9, 0.6]]))
         >>> y = Tensor(np.array([1, 0, 1]))
         >>> metric = nn.Fbeta(1)
+        >>> metric.clear()
         >>> metric.update(x, y)
         >>> fbeta = metric.eval()
+        >>> print(fbeta)
+        [0.66666667 0.66666667]
     """
     def __init__(self, beta):
         super(Fbeta, self).__init__()
@@ -119,7 +122,7 @@ class Fbeta(Metric):
 class F1(Fbeta):
     r"""
     Calculates the F1 score. F1 is a special case of Fbeta when beta is 1.
-    Refer to class `Fbeta` for more details.
+    Refer to class :class:`mindspore.nn.Fbeta` for more details.
 
     .. math::
         F_1=\frac{2\cdot true\_positive}{2\cdot true\_positive + false\_negative + false\_positive}
@@ -129,7 +132,9 @@ class F1(Fbeta):
         >>> y = Tensor(np.array([1, 0, 1]))
         >>> metric = nn.F1()
         >>> metric.update(x, y)
-        >>> f1 = metric.eval()
+        >>> result = metric.eval()
+        >>> print(result)
+        [0.66666667 0.66666667]
     """
     def __init__(self):
         super(F1, self).__init__(1.0)

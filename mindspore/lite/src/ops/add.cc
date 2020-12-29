@@ -16,6 +16,9 @@
 
 #include "src/ops/add.h"
 #include <memory>
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
 
 namespace mindspore {
 namespace lite {
@@ -46,12 +49,7 @@ int Add::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs
       return RET_ERROR;
     }
   }
-  if (GetQuantType() == schema::QuantType_AwareTraining) {
-    std::vector<std::vector<schema::QuantParamT>> vecInputQuantParam;
-    std::vector<std::vector<schema::QuantParamT>> vecOutputQuantParam;
-    PopulaterQuantParam(prim, &vecInputQuantParam, &vecOutputQuantParam, inputs);
-    SetOutputQuantParam(vecOutputQuantParam);
-  }
+  PopulaterQuantParam(prim, inputs);
   return RET_OK;
 }
 
@@ -71,6 +69,9 @@ int Add::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::Fl
 }
 int Add::GetActivationType() const { return this->primitive_->value_as_Add()->activationType(); }
 
+PrimitiveC *AddCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Add>(primitive); }
+Registry AddRegistry(schema::PrimitiveType_Add, AddCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

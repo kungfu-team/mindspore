@@ -18,7 +18,11 @@
 #include "minddata/dataset/core/pybind_support.h"
 #endif
 
+#ifndef ENABLE_ANDROID
 #include "utils/log_adapter.h"
+#else
+#include "mindspore/lite/src/common/log_adapter.h"
+#endif
 
 namespace mindspore {
 namespace dataset {
@@ -39,6 +43,7 @@ py::dtype DataType::AsNumpyType() const {
 }
 #endif
 
+#ifndef ENABLE_ANDROID
 uint8_t DataType::AsCVType() const {
   uint8_t res = kCVInvalidType;
   if (type_ < DataType::NUM_OF_TYPES) {
@@ -76,6 +81,7 @@ DataType DataType::FromCVType(int cv_type) {
       return DataType(DataType::DE_UNKNOWN);
   }
 }
+#endif
 
 DataType::DataType(const std::string &type_str) {
   if (type_str == "bool")

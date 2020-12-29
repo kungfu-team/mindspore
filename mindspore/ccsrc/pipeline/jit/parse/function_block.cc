@@ -49,11 +49,11 @@ AnfNodePtr FunctionBlock::ReadVariable(const std::string &var) {
   if (vars_.count(var)) {
     AnfNodePtr node = vars_[var];
     MS_EXCEPTION_IF_NULL(node);
-    if (node->isa<ValueNode>()) {
-      return NewValueNode(GetValueNode(node));
-    } else {
-      return node;
+    auto iter = resolve_to_removable_phis_.find(node);
+    if (iter != resolve_to_removable_phis_.end()) {
+      return iter->second;
     }
+    return node;
   }
   // get var from predecessor block ,if can't get the make a resolve node to it
   if (matured_) {
@@ -64,15 +64,20 @@ AnfNodePtr FunctionBlock::ReadVariable(const std::string &var) {
       return block->ReadVariable(var);
     } else if (prev_blocks_.empty()) {
       // get namespace and make Reslove
-      return MakeResolveSymbol(var);
+      auto it = var_to_resolve_.find(var);
+      if (it != var_to_resolve_.end()) {
+        return it->second;
+      }
+      auto tmp_node = MakeResolveSymbol(var);
+      var_to_resolve_[var] = tmp_node;
+      return tmp_node;
     }
   }
   // If have more than one predecessor blocks then build a phi node.
   auto debug_info = std::make_shared<NodeDebugInfo>();
   debug_info->set_name(var);
-  TraceManager::DebugTrace(std::make_shared<TracePhi>(debug_info));
+  TraceGuard guard(std::make_shared<TracePhi>(debug_info));
   ParameterPtr phi_param = std::make_shared<Parameter>(func_graph());
-  TraceManager::EndTrace();
   MS_LOG(DEBUG) << func_graph_->ToString() << " generate phi node " << phi_param->ToString() << " for " << var;
   func_graph()->add_parameter(phi_param);
   phi_nodes_[phi_param] = var;
@@ -217,6 +222,7 @@ bool FunctionBlock::CollectRemovablePhi(const ParameterPtr &phi) {
     // replace var with new one. This equal to statement in TR "v0 is immediately replaced by v1."
     WriteVariable(var, arg_node);
     removable_phis_[phi] = arg_node;
+    resolve_to_removable_phis_[arg_node] = phi;
     // The following equal to statement "The φ-function defining v1, which now reads φ(v2, v1), is optimized
     // recursively". check if phi1 is assigned with this phi before, then phi1 can be replaced with arg_node.
     for (auto &prev : prev_blocks_) {
@@ -257,16 +263,14 @@ void FunctionBlock::Mature() {
 
 // Force the conditIon node to bool using bool operation
 CNodePtr FunctionBlock::ForceToBoolNode(const AnfNodePtr &cond) {
-  TraceManager::DebugTrace(std::make_shared<TraceForceBool>(cond->debug_info()));
+  TraceGuard trace_guard(std::make_shared<TraceForceBool>(cond->debug_info()));
   CNodePtr op_apply_node = func_graph()->NewCNode({MakeResolveOperation(NAMED_PRIMITIVE_BOOL), cond});
-  TraceManager::EndTrace();
   return op_apply_node;
 }
 
 CNodePtr FunctionBlock::ForceToWhileCond(const AnfNodePtr &cond) {
-  TraceManager::DebugTrace(std::make_shared<TraceForceWhileCond>(cond->debug_info()));
+  TraceGuard trace_guard(std::make_shared<TraceForceWhileCond>(cond->debug_info()));
   CNodePtr op_apply_node = func_graph()->NewCNode({MakeResolveOperation("while_cond"), cond});
-  TraceManager::EndTrace();
   return op_apply_node;
 }
 

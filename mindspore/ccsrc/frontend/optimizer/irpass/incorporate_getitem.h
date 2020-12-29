@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <utility>
 
 #include "ir/func_graph.h"
 #include "ir/func_graph_cloner.h"
@@ -40,7 +41,7 @@ class GetitemTransform {
   GetitemTransform() : cache_() {}
   ~GetitemTransform() = default;
 
-  FuncGraphPtr operator()(const FuncGraphPtr &fg, int idx) {
+  FuncGraphPtr operator()(const FuncGraphPtr &fg, int64_t idx) {
     if (cache_.find(fg) == cache_.end()) {
       cache_[fg] = {};
     }
@@ -54,7 +55,7 @@ class GetitemTransform {
       auto output = new_fg->output();
       if (IsPrimitiveCNode(output, prim::kPrimMakeTuple)) {
         auto cnode = output->cast<CNodePtr>();
-        auto ids = IntToSize(idx + 1);
+        auto ids = LongToSize(idx + 1);
         // Inputs should be [make_tuple, item1, item2, ...], so have to offset idx in tuple_getitem by 1.
         if (ids >= cnode->size()) {
           MS_LOG(EXCEPTION) << "index " << ids << " is out of inputs length " << cnode->size();
@@ -70,7 +71,7 @@ class GetitemTransform {
   }
 
  private:
-  std::unordered_map<FuncGraphPtr, std::unordered_map<int, FuncGraphPtr>> cache_;
+  std::unordered_map<FuncGraphPtr, std::unordered_map<int64_t, FuncGraphPtr>> cache_;
 };
 
 class GetItemTransformACrossGraph {
@@ -78,7 +79,7 @@ class GetItemTransformACrossGraph {
   GetItemTransformACrossGraph() : cache_() {}
   ~GetItemTransformACrossGraph() = default;
 
-  FuncGraphPtr operator()(const FuncGraphPtr &fg, int idx) {
+  FuncGraphPtr operator()(const FuncGraphPtr &fg, int64_t idx) {
     if (cache_.find(fg) == cache_.end()) {
       cache_[fg] = {};
     }
@@ -101,7 +102,7 @@ class GetItemTransformACrossGraph {
       auto output = new_fg->output();
       if (IsPrimitiveCNode(output, prim::kPrimMakeTuple)) {
         auto cnode = output->cast<CNodePtr>();
-        auto ids = IntToSize(idx + 1);
+        auto ids = LongToSize(idx + 1);
         // Inputs should be [make_tuple, item1, item2, ...], so have to offset idx in tuple_getitem by 1.
         if (ids >= cnode->size()) {
           MS_LOG(EXCEPTION) << "index " << ids << " is out of inputs length " << cnode->size();
@@ -117,7 +118,7 @@ class GetItemTransformACrossGraph {
   }
 
  private:
-  std::unordered_map<FuncGraphPtr, std::unordered_map<int, FuncGraphPtr>> cache_;
+  std::unordered_map<FuncGraphPtr, std::unordered_map<int64_t, FuncGraphPtr>> cache_;
 };
 }  // namespace internal
 
@@ -129,8 +130,8 @@ class IncorporateGetitem : public AnfVisitor {
 
   AnfNodePtr operator()(const OptimizerPtr &, const AnfNodePtr &node) override {
     Reset();
-    AnfVisitor::Match(prim::kPrimTupleGetItem, {IsCNode, IsValueNode<Int32Imm>})(node);
-    if (node->func_graph() == nullptr || idx_ == -1 || fg_ == nullptr) {
+    AnfVisitor::Match(prim::kPrimTupleGetItem, {IsCNode, IsValueNode<Int64Imm>})(node);
+    if (node->func_graph() == nullptr || idx_ == -1 || fg_ == nullptr || fg_->has_flag(FUNC_GRAPH_FLAG_DEFER_INLINE)) {
       return nullptr;
     }
 
@@ -141,7 +142,7 @@ class IncorporateGetitem : public AnfVisitor {
       if (IsPrimitiveCNode(output, prim::kPrimMakeTuple)) {
         auto output_cnode = output->cast<CNodePtr>();
         auto outputs = output_cnode->inputs();
-        int real_output_cnt = 0;
+        int64_t real_output_cnt = 0;
         for (size_t i = 1; i < outputs.size(); ++i) {
           if (IsCNode(outputs[i]) || IsValueNode<tensor::Tensor>(outputs[i]) || IsParam(outputs[i])) {
             real_output_cnt++;
@@ -168,7 +169,7 @@ class IncorporateGetitem : public AnfVisitor {
     (void)std::copy(inputs.begin() + 1, inputs.end(), std::back_inserter(args_));
   }
 
-  void Visit(const ValueNodePtr &vnode) override { idx_ = GetValue<int>(vnode->value()); }
+  void Visit(const ValueNodePtr &vnode) override { idx_ = GetValue<int64_t>(vnode->value()); }
 
   void Reset() {
     idx_ = -1;
@@ -177,7 +178,7 @@ class IncorporateGetitem : public AnfVisitor {
   }
 
  private:
-  int idx_{-1};
+  int64_t idx_{-1};
   FuncGraphPtr fg_{nullptr};
   std::vector<AnfNodePtr> args_{};
   internal::GetitemTransform getitem_transform_;
@@ -227,8 +228,8 @@ class IncorporateGetitemFromParam : public AnfVisitor {
       inputs_num_[input_idx] = make_tuple_cnode->inputs().size() - 1;
       for (size_t output_i = 0; output_i < inputs_num_[input_idx]; ++output_i) {
         auto new_getitem =
-          func_graph->NewCNode({NewValueNode(prim::kPrimTupleGetItem), prev_cnode, NewValueNode(SizeToInt(output_i))});
-        auto aptr = std::make_shared<abstract::AbstractScalar>(std::make_shared<Int32Imm>(SizeToInt(output_i)));
+          func_graph->NewCNode({NewValueNode(prim::kPrimTupleGetItem), prev_cnode, NewValueNode(SizeToLong(output_i))});
+        auto aptr = std::make_shared<abstract::AbstractScalar>(std::make_shared<Int64Imm>(SizeToLong(output_i)));
         new_getitem->input(2)->set_abstract(aptr);
         new_getitem->set_abstract(make_tuple_cnode->input(output_i + 1)->abstract());
         args_.push_back(new_getitem);
@@ -299,14 +300,14 @@ class IncorporateGetitemFromParam : public AnfVisitor {
         // update users of new parameter.
         for (auto &user : node_users[new_fg_parameters[param_i]]) {
           idx_ = -1;
-          AnfVisitor::Match(prim::kPrimTupleGetItem, {IsParam, IsValueNode<Int32Imm>})(user.first);
+          AnfVisitor::Match(prim::kPrimTupleGetItem, {IsParam, IsValueNode<Int64Imm>})(user.first);
           if (idx_ == -1) {
             MS_LOG(ERROR) << "User of: " << new_fg_parameters[param_i]->DebugString()
                           << " must be tuple getitem here, but got: " << user.first->DebugString();
             return nullptr;
           }
 
-          if (input_i == IntToSize(idx_)) {
+          if (input_i == LongToSize(idx_)) {
             for (auto &sub_user : node_users[user.first]) {
               auto sub_user_cnode = sub_user.first->cast<CNodePtr>();
               MS_EXCEPTION_IF_NULL(sub_user_cnode);
@@ -328,7 +329,7 @@ class IncorporateGetitemFromParam : public AnfVisitor {
     return new_call;
   }
 
-  void Visit(const ValueNodePtr &vnode) override { idx_ = GetValue<int>(vnode->value()); }
+  void Visit(const ValueNodePtr &vnode) override { idx_ = GetValue<int64_t>(vnode->value()); }
 
   void Visit(const CNodePtr &cnode) override {}
 
@@ -345,7 +346,7 @@ class IncorporateGetitemFromParam : public AnfVisitor {
   std::vector<AnfNodePtr> args_{};
   std::vector<size_t> inputs_num_{};
   bool need_update_{false};
-  int idx_{-1};
+  int64_t idx_{-1};
 };
 
 // {prim::kPrimTupleGetItem, {{prim::kPrimSwitch, X, G1, G2}, Xs}, C}
@@ -357,11 +358,11 @@ class IncorporateGetitemSwitch : public AnfVisitor {
   AnfNodePtr operator()(const OptimizerPtr &, const AnfNodePtr &node) override {
     Reset();
     is_in_get_ = true;
-    AnfVisitor::Match(prim::kPrimTupleGetItem, {IsCNode, IsValueNode<Int32Imm>})(node);
+    AnfVisitor::Match(prim::kPrimTupleGetItem, {IsCNode, IsValueNode<Int64Imm>})(node);
     is_in_get_ = false;
 
     auto fg = node->func_graph();
-    if (idx_ == -1 || switch_ == nullptr || fg == nullptr) {
+    if (idx_ == -1 || switch_ == nullptr || fg == nullptr || fg->has_flag(FUNC_GRAPH_FLAG_DEFER_INLINE)) {
       return nullptr;
     }
 
@@ -372,7 +373,11 @@ class IncorporateGetitemSwitch : public AnfVisitor {
     if (g2_ == nullptr) {
       return nullptr;
     }
-
+    auto tuple_getitem = node->cast<CNodePtr>();
+    MS_EXCEPTION_IF_NULL(tuple_getitem);
+    if (MultipleUseOfSwitch(tuple_getitem->input(1), fg)) {
+      return nullptr;
+    }
     auto new_g1 = getitem_transform_(g1_, idx_);
     auto new_g2 = getitem_transform_(g2_, idx_);
     auto sw_node = fg->NewCNode({NewValueNode(prim::kPrimSwitch), x_, NewValueNode(new_g1), NewValueNode(new_g2)});
@@ -399,7 +404,7 @@ class IncorporateGetitemSwitch : public AnfVisitor {
 
   void Visit(const ValueNodePtr &vnode) override {
     if (is_in_get_) {
-      idx_ = GetValue<int>(vnode->value());
+      idx_ = GetValue<int64_t>(vnode->value());
     }
 
     if (is_in_switch_) {
@@ -423,7 +428,25 @@ class IncorporateGetitemSwitch : public AnfVisitor {
   }
 
  private:
-  int idx_{-1};
+  bool MultipleUseOfSwitch(const AnfNodePtr &switch_call, const FuncGraphPtr &fg) const {
+    auto switch_call_cnode = switch_call->cast<CNodePtr>();
+    MS_EXCEPTION_IF_NULL(switch_call_cnode);
+    auto manager = fg->manager();
+    MS_EXCEPTION_IF_NULL(manager);
+    auto node_users_map = manager->node_users();
+    auto it = node_users_map.find(switch_call);
+    if (it == node_users_map.end()) {
+      return false;
+    }
+    auto node_users = it->second;
+    // If switch was used by more than 1 tuple_getitem nodes, this pass shouldn't be execute.s
+    auto tuple_getitem_num = std::count_if(node_users.begin(), node_users.end(), [](std::pair<AnfNodePtr, int> &user) {
+      return IsPrimitiveCNode(user.first, prim::kPrimTupleGetItem);
+    });
+    return tuple_getitem_num > 1;
+  }
+
+  int64_t idx_{-1};
   AnfNodePtr switch_{nullptr}, x_{nullptr};
   FuncGraphPtr g1_{nullptr}, g2_{nullptr};
   bool is_in_get_{false}, is_in_switch_{false};
@@ -440,7 +463,7 @@ class IncorporateGetitemSwitchLayerA : public AnfVisitor {
   AnfNodePtr operator()(const OptimizerPtr &, const AnfNodePtr &node) override {
     Reset();
     is_in_get_ = true;
-    AnfVisitor::Match(prim::kPrimTupleGetItem, {IsCNode, IsValueNode<Int32Imm>})(node);
+    AnfVisitor::Match(prim::kPrimTupleGetItem, {IsCNode, IsValueNode<Int64Imm>})(node);
     is_in_get_ = false;
 
     auto fg = node->func_graph();
@@ -497,7 +520,7 @@ class IncorporateGetitemSwitchLayerA : public AnfVisitor {
 
   void Visit(const ValueNodePtr &vnode) override {
     if (is_in_get_) {
-      idx_ = GetValue<int>(vnode->value());
+      idx_ = GetValue<int64_t>(vnode->value());
     }
   }
 
@@ -511,7 +534,7 @@ class IncorporateGetitemSwitchLayerA : public AnfVisitor {
   }
 
  private:
-  int idx_{-1};
+  int64_t idx_{-1};
   AnfNodePtr switch_layer_{nullptr}, x_{nullptr};
   std::vector<FuncGraphPtr> graphs_{};
   bool is_in_get_{false}, is_in_switch_{false};
@@ -528,7 +551,7 @@ class IncorporateGetitemSwitchLayerB : public AnfVisitor {
   AnfNodePtr operator()(const OptimizerPtr &, const AnfNodePtr &node) override {
     Reset();
     is_in_get_ = true;
-    AnfVisitor::Match(prim::kPrimTupleGetItem, {IsCNode, IsValueNode<Int32Imm>})(node);
+    AnfVisitor::Match(prim::kPrimTupleGetItem, {IsCNode, IsValueNode<Int64Imm>})(node);
     is_in_get_ = false;
 
     auto fg = node->func_graph();
@@ -589,7 +612,7 @@ class IncorporateGetitemSwitchLayerB : public AnfVisitor {
 
   void Visit(const ValueNodePtr &vnode) override {
     if (is_in_get_) {
-      idx_ = GetValue<int>(vnode->value());
+      idx_ = GetValue<int64_t>(vnode->value());
     }
   }
 
@@ -604,7 +627,7 @@ class IncorporateGetitemSwitchLayerB : public AnfVisitor {
   }
 
  private:
-  int idx_{-1};
+  int64_t idx_{-1};
   AnfNodePtr switch_layer_call_{nullptr}, x_{nullptr};
   std::vector<FuncGraphPtr> graphs_{};
   bool is_in_get_{false}, is_in_switch_{false};

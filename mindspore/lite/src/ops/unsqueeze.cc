@@ -19,6 +19,10 @@
 #include "src/common/log_adapter.h"
 #include "src/tensor.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -51,6 +55,12 @@ int Unsqueeze::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffe
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *UnsqueezeCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<Unsqueeze>(primitive);
+}
+Registry UnsqueezeRegistry(schema::PrimitiveType_Unsqueeze, UnsqueezeCreator);
+
 #endif
 
 int Unsqueeze::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
@@ -66,9 +76,9 @@ int Unsqueeze::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> o
     MS_LOG(ERROR) << "output size is invalid";
   }
   output->set_data_type(input->data_type());
-  output->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output->set_format(input->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
 
   auto dims = GetAxis();
@@ -87,16 +97,14 @@ int Unsqueeze::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> o
     size_t in_itr = 0;
     size_t ax_itr = 0;
     for (size_t i = 0; i < sz; i++) {
-      if (ax_itr < dim_rank && dims[ax_itr] == static_cast<int>(i)) {
+      if (ax_itr < dim_rank && dims.at(ax_itr) == static_cast<int>(i)) {
         out_shape.emplace_back(1);
         ax_itr++;
-      } else if (ax_itr < dim_rank && dims[ax_itr] + sz == i) {
+      } else if (ax_itr < dim_rank && dims.at(ax_itr) + sz == i) {
         out_shape.emplace_back(1);
         ax_itr++;
       } else {
-        if (in_shape[in_itr] > 1) {
-          out_shape.emplace_back(in_shape[in_itr]);
-        }
+        out_shape.emplace_back(in_shape.at(in_itr));
         in_itr++;
       }
     }

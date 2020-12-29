@@ -16,6 +16,7 @@
 #include <iomanip>
 #include <utility>
 
+#include <algorithm>
 #include "utils/ms_utils.h"
 #include "minddata/dataset/core/config_manager.h"
 #include "minddata/dataset/engine/data_buffer.h"
@@ -131,5 +132,12 @@ Status TakeOp::Accept(NodePass *p, bool *modified) {
   // Downcast shared pointer then call visitor
   return p->RunOnNode(shared_from_base<TakeOp>(), modified);
 }
+
+// Visitor pre-accept method for NodePass
+Status TakeOp::PreAccept(NodePass *p, bool *modified) {
+  // Downcast shared pointer then call visitor
+  return p->PreRunOnNode(shared_from_base<TakeOp>(), modified);
+}
+
 }  // namespace dataset
 }  // namespace mindspore

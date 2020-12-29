@@ -20,7 +20,6 @@
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
 #include "src/runtime/runtime_api.h"
-#include "src/runtime/kernel/arm/fp32/nchw2nhwc.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
@@ -33,22 +32,43 @@ namespace mindspore::kernel {
 int SgdCPUKernel::ReSize() { return RET_OK; }
 
 int SgdCPUKernel::Execute(int task_id) {
-  auto weight = reinterpret_cast<float *>(in_tensors_[0]->MutableData());
-  auto accumulate = reinterpret_cast<float *>(in_tensors_[3]->MutableData());
-  float learning_rate = reinterpret_cast<float *>(in_tensors_[2]->MutableData())[0];
-  auto gradient = reinterpret_cast<float *>(in_tensors_[1]->MutableData());
-  float moment = reinterpret_cast<float *>(in_tensors_[4]->MutableData())[0];
-  size_t elem_num = in_tensors_[0]->ElementsNum();
+  auto weight = reinterpret_cast<float *>(in_tensors_.at(0)->MutableData());
+  auto accumulate = reinterpret_cast<float *>(in_tensors_.at(3)->MutableData());
+  float learning_rate = reinterpret_cast<float *>(in_tensors_.at(2)->MutableData())[0];
+  auto gradient = reinterpret_cast<float *>(in_tensors_.at(1)->MutableData());
+  float moment = reinterpret_cast<float *>(in_tensors_.at(4)->MutableData())[0];
+  size_t elem_num = in_tensors_.at(0)->ElementsNum();
+  auto stat = reinterpret_cast<float *>(in_tensors_.at(5)->MutableData());
 
-  if (sgd_param_->use_nesterov_) {
-    for (size_t i = 0; i < elem_num; ++i) {
-      accumulate[i] = accumulate[i] * moment + gradient[i];
-      weight[i] -= (accumulate[i] * moment + gradient[i]) * learning_rate;
+  if (stat[0] > 0) {
+    stat[0] = 0;
+    memcpy(accumulate, gradient, elem_num * sizeof(float));
+    if (sgd_param_->use_nesterov_) {
+      for (size_t i = 0; i < elem_num; ++i) {
+        weight[i] -= (accumulate[i] * moment + gradient[i]) * learning_rate;
+      }
+    } else {
+      for (size_t i = 0; i < elem_num; ++i) {
+        weight[i] -= accumulate[i] * learning_rate;
+      }
     }
   } else {
-    for (size_t i = 0; i < elem_num; ++i) {
-      accumulate[i] = accumulate[i] * moment + gradient[i] * (1.f - sgd_param_->dampening_);
-      weight[i] -= accumulate[i] * learning_rate;
+    if (moment > 0.f) {
+      if (sgd_param_->use_nesterov_) {
+        for (size_t i = 0; i < elem_num; ++i) {
+          accumulate[i] = accumulate[i] * moment + gradient[i] * (1.f - sgd_param_->dampening_);
+          weight[i] -= (accumulate[i] * moment + gradient[i]) * learning_rate;
+        }
+      } else {
+        for (size_t i = 0; i < elem_num; ++i) {
+          accumulate[i] = accumulate[i] * moment + gradient[i] * (1.f - sgd_param_->dampening_);
+          weight[i] -= accumulate[i] * learning_rate;
+        }
+      }
+    } else {
+      for (size_t i = 0; i < elem_num; ++i) {
+        weight[i] -= gradient[i] * learning_rate;
+      }
     }
   }
   return RET_OK;
@@ -65,12 +85,6 @@ int SgdRun(void *cdata, int task_id) {
 }
 
 int SgdCPUKernel::Run() {
-  auto prepare_ret = Prepare();
-  if (prepare_ret != RET_OK) {
-    MS_LOG(ERROR) << "SgdCPUKernel Prepare fail!ret: " << prepare_ret;
-    return prepare_ret;
-  }
-
   int error_code = ParallelLaunch(this->context_->thread_pool_, SgdRun, this, 1);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "SGD function error error_code[" << error_code << "]";
@@ -81,9 +95,11 @@ int SgdCPUKernel::Run() {
 
 int SgdCPUKernel::Init() {
   // Only for test with uninitialized Data
-  size_t elem_num = in_tensors_[0]->ElementsNum();
-  auto accumulate = reinterpret_cast<float *>(in_tensors_[3]->MutableData());
-  for (size_t i = 0; i < elem_num; i++) accumulate[i] = 0.0;
+  size_t elem_num = in_tensors_.at(0)->ElementsNum();
+  auto accumulate = reinterpret_cast<float *>(in_tensors_.at(3)->MutableData());
+  for (size_t i = 0; i < elem_num; i++) {
+    accumulate[i] = 0.0;
+  }
 
   if (sgd_param_->dampening_ < 0.0f) {
     MS_LOG(ERROR) << "dampening should be at least 0.0";
@@ -104,10 +120,14 @@ kernel::LiteKernel *CpuSgdFp32KernelCreator(const std::vector<lite::Tensor *> &i
                                             const lite::PrimitiveC *primitive) {
   MS_ASSERT(desc.type == schema::PrimitiveType_Sgd);
   auto *kernel = new (std::nothrow) SgdCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  MS_ASSERT(kernel != nullptr);
+  if (kernel == nullptr) {
+    MS_LOG(ERROR) << "new SgdCPUKernel failed!";
+    free(opParameter);
+    return nullptr;
+  }
 
   auto ret = kernel->Init();
-  if (0 != ret) {
+  if (ret != RET_OK) {
     MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
                   << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
     delete kernel;

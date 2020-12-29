@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <sys/stat.h>
 #include <fstream>
 #include <iterator>
 #include <algorithm>
@@ -96,8 +97,13 @@ Status ConnectorThroughput::SaveToFile() {
   json output;
   if (path.Exists()) {
     MS_LOG(DEBUG) << file_path_ << " exists";
-    std::ifstream file(file_path_);
-    file >> output;
+    try {
+      std::ifstream file(file_path_);
+      file >> output;
+    } catch (const std::exception &err) {
+      RETURN_STATUS_UNEXPECTED("Invalid file, failed to open json file: " + file_path_ +
+                               ", please delete it and try again!");
+    }
   } else {
     output["sampling_interval"] = GlobalContext::config_manager()->monitor_sampling_interval();
   }
@@ -130,6 +136,18 @@ Status ConnectorThroughput::SaveToFile() {
 
 Status ConnectorThroughput::Init(const std::string &dir_path, const std::string &device_id) {
   file_path_ = (Path(dir_path) / Path("pipeline_profiling_" + device_id + ".json")).toString();
+  return Status::OK();
+}
+
+Status ConnectorThroughput::ChangeFileMode() {
+  if (file_path_.empty()) {
+    return Status::OK();
+  }
+
+  if (chmod(common::SafeCStr(file_path_), S_IRUSR | S_IWUSR) == -1) {
+    std::string err_str = "Change file mode failed," + file_path_;
+    return Status(StatusCode::kUnexpectedError, err_str);
+  }
   return Status::OK();
 }
 }  // namespace dataset

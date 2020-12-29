@@ -38,7 +38,7 @@ __dtype__ = [
     "number", "tensor",
     "string", "type_none",
     "tensor_type",
-    "Type"
+    "Type", "Int"
 ]
 
 __method__ = [
@@ -104,6 +104,9 @@ tuple_type = typing.Tuple
 index_slices = typing.RowTensorType()
 sparse_tensor = typing.SparseTensorType()
 undetermined = typing.UndeterminedType()
+Int = typing.Int
+bool_type = typing.Bool
+none_type = typing.TypeNone
 
 number_type = (int8,
                int16,
@@ -118,7 +121,7 @@ number_type = (int8,
                float64,)
 
 int_type = (int8, int16, int32, int64,)
-uint_type = (uint8, uint16, uint32, uint64)
+uint_type = (uint8, uint16, uint32, uint64,)
 float_type = (float16, float32, float64,)
 
 implicit_conversion_seq = {t: idx for idx, t in enumerate((

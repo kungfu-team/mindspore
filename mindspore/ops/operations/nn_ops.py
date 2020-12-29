@@ -17,7 +17,8 @@
 
 import math
 import operator
-from functools import reduce
+from functools import reduce, partial
+from mindspore._checkparam import _check_3d_int_or_tuple
 import numpy as np
 from ... import context
 from .. import signature as sig
@@ -52,10 +53,27 @@ def _check_positive_int_or_tuple(arg_name, arg_value, prim_name, allow_four=Fals
     validator.check_value_type(arg_name, arg_value, (int, tuple), prim_name)
     ret_value = _get_return_value()
     for item in ret_value:
-        if isinstance(item, int) and item > 0:
+        if isinstance(item, int) and not isinstance(item, bool) and item > 0:
             continue
         _raise_message()
     return ret_value
+
+
+def _check_shape(arg_name, arg_value, prim_name):
+    """
+    Checks whether an shape dims is a positive int elements.
+    """
+
+    def _raise_message():
+        raise ValueError(f"For '{prim_name}' attr '{arg_name}' dims elements should be positive int numbers, "
+                         f"but got {arg_value}")
+
+    validator.check_value_type(arg_name, arg_value, (list, tuple), prim_name)
+    for item in arg_value:
+        if isinstance(item, int) and item > 0:
+            continue
+        _raise_message()
+    return arg_value
 
 
 class Flatten(PrimitiveWithInfer):
@@ -69,11 +87,15 @@ class Flatten(PrimitiveWithInfer):
         Tensor, the shape of the output tensor is :math:`(N, X)`, where :math:`X` is
         the product of the remaining dimension.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_tensor = Tensor(np.ones(shape=[1, 2, 3, 4]), mindspore.float32)
-        >>> flatten = P.Flatten()
+        >>> flatten = ops.Flatten()
         >>> output = flatten(input_tensor)
-        >>> assert output.shape == (1, 24)
+        >>> print(output.shape)
+        (1, 24)
     """
 
     @prim_attr_register
@@ -81,7 +103,7 @@ class Flatten(PrimitiveWithInfer):
         pass
 
     def infer_shape(self, input_x):
-        validator.check_integer('input_x rank', len(input_x), 1, Rel.GE, self.name)
+        validator.check_int(len(input_x), 1, Rel.GE, 'input_x rank', self.name)
         prod = 1 if len(input_x) == 1 else reduce(operator.mul, input_x[1:])
         return input_x[0], prod
 
@@ -112,11 +134,15 @@ class Softmax(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same type and shape as the logits.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1, 2, 3, 4, 5]), mindspore.float32)
-        >>> softmax = P.Softmax()
-        >>> softmax(input_x)
-        [0.01165623, 0.03168492, 0.08612854, 0.23412167, 0.6364086]
+        >>> softmax = ops.Softmax()
+        >>> output = softmax(input_x)
+        >>> print(output)
+        [0.01165623 0.03168492 0.08612854 0.23412167 0.6364086 ]
     """
 
     @prim_attr_register
@@ -129,15 +155,14 @@ class Softmax(PrimitiveWithInfer):
             validator.check_value_type("item of axis", item, [int], self.name)
 
     def infer_shape(self, logits):
-        validator.check_integer("length of axis", len(self.axis), 1, Rel.GE, self.name)
+        validator.check_int(len(self.axis), 1, Rel.GE, "length of axis", self.name)
         rank = len(logits)
         for axis_v in self.axis:
-            validator.check_int_range("axis", axis_v, -rank, rank, Rel.INC_LEFT, self.name)
+            validator.check_int_range(axis_v, -rank, rank, Rel.INC_LEFT, "axis", self.name)
         return logits
 
     def infer_dtype(self, logits):
-        validator.check_subclass("logits", logits, mstype.tensor, self.name)
-        validator.check_tensor_type_same({"logits": logits}, mstype.float_type, self.name)
+        validator.check_tensor_dtype_valid("logits", logits, mstype.float_type, self.name)
         return logits
 
 
@@ -150,7 +175,7 @@ class LogSoftmax(PrimitiveWithInfer):
     the Log Softmax function is shown as follows:
 
     .. math::
-        \text{output}(x_i) = \log \left(\frac{exp(x_i)} {\sum_{j = 0}^{N-1}\exp(x_j)}\right),
+        \text{output}(x_i) = \log \left(\frac{\exp(x_i)} {\sum_{j = 0}^{N-1}\exp(x_j)}\right),
 
     where :math:`N` is the length of the Tensor.
 
@@ -163,11 +188,15 @@ class LogSoftmax(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same type and shape as the logits.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1, 2, 3, 4, 5]), mindspore.float32)
-        >>> log_softmax = P.LogSoftmax()
-        >>> log_softmax(input_x)
-        [-4.4519143, -3.4519143, -2.4519143, -1.4519144, -0.4519144]
+        >>> log_softmax = ops.LogSoftmax()
+        >>> output = log_softmax(input_x)
+        >>> print(output)
+        [-4.4519143 -3.4519143 -2.4519143 -1.4519144 -0.4519144]
     """
 
     @prim_attr_register
@@ -176,12 +205,11 @@ class LogSoftmax(PrimitiveWithInfer):
 
     def infer_shape(self, logits):
         rank = len(logits)
-        validator.check_int_range('axis', self.axis, -rank, rank, Rel.INC_LEFT, self.name)
+        validator.check_int_range(self.axis, -rank, rank, Rel.INC_LEFT, 'axis', self.name)
         return logits
 
     def infer_dtype(self, logits):
-        validator.check_subclass("logits", logits, mstype.tensor, self.name)
-        validator.check_tensor_type_same({"logits": logits}, mstype.float_type, self.name)
+        validator.check_tensor_dtype_valid("logits", logits, mstype.float_type, self.name)
         return logits
 
 
@@ -201,11 +229,15 @@ class Softplus(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same type and shape as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend``  ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1, 2, 3, 4, 5]), mindspore.float32)
-        >>> softplus = P.Softplus()
-        >>> softplus(input_x)
-        [1.3132615, 2.126928, 3.0485873, 4.01815, 5.0067153]
+        >>> softplus = ops.Softplus()
+        >>> output = softplus(input_x)
+        >>> print(output)
+        [1.3132615 2.126928  3.0485873 4.01815   5.0067153]
     """
 
     @prim_attr_register
@@ -213,12 +245,12 @@ class Softplus(PrimitiveWithInfer):
         """Initialize Softplus"""
         self.init_prim_io_names(inputs=['x'], outputs=['output'])
 
-    def infer_shape(self, input_x):
-        return input_x
+    def infer_shape(self, x_shape):
+        return x_shape
 
-    def infer_dtype(self, input_x):
-        validator.check_tensor_type_same({'input_x': input_x}, mstype.float_type, self.name)
-        return input_x
+    def infer_dtype(self, x_dtype):
+        validator.check_tensor_dtype_valid('x', x_dtype, mstype.float_type, self.name)
+        return x_dtype
 
 
 class Softsign(PrimitiveWithInfer):
@@ -236,11 +268,15 @@ class Softsign(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same type and shape as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([0, -1, 2, 30, -30]), mindspore.float32)
-        >>> softsign = P.Softsign()
-        >>> softsign(input_x)
-        [0. -0.5 0.6666667 0.9677419 -0.9677419]
+        >>> softsign = ops.Softsign()
+        >>> output = softsign(input_x)
+        >>> print(output)
+        [ 0.        -0.5         0.6666667  0.9677419 -0.9677419]
     """
 
     @prim_attr_register
@@ -252,13 +288,13 @@ class Softsign(PrimitiveWithInfer):
         return input_x
 
     def infer_dtype(self, input_x):
-        validator.check_tensor_type_same({'input_x': input_x}, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid('input_x', input_x, [mstype.float16, mstype.float32], self.name)
         return input_x
 
 
-class ReLU(PrimitiveWithInfer):
+class ReLU(PrimitiveWithCheck):
     r"""
-    Computes ReLU(Rectified Linear Unit) of input tensor element-wise.
+    Computes ReLU (Rectified Linear Unit) of input tensors element-wise.
 
     It returns :math:`\max(x,\  0)` element-wise.
 
@@ -268,11 +304,16 @@ class ReLU(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same type and shape as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([[-1.0, 4.0, -8.0], [2.0, -5.0, 9.0]]), mindspore.float32)
-        >>> relu = P.ReLU()
-        >>> result = relu(input_x)
-        [[0, 4.0, 0.0], [2.0, 0.0, 9.0]]
+        >>> relu = ops.ReLU()
+        >>> output = relu(input_x)
+        >>> print(output)
+        [[0. 4. 0.]
+         [2. 0. 9.]]
     """
 
     @prim_attr_register
@@ -280,17 +321,16 @@ class ReLU(PrimitiveWithInfer):
         """Initialize ReLU"""
         self.init_prim_io_names(inputs=['x'], outputs=['output'])
 
-    def infer_shape(self, input_x):
-        return input_x
+    def check_shape(self, input_x):
+        pass
 
-    def infer_dtype(self, input_x):
-        validator.check_tensor_type_same({'input_x': input_x}, mstype.number_type, self.name)
-        return input_x
+    def check_dtype(self, input_x):
+        validator.check_tensor_dtype_valid('input_x', input_x, mstype.number_type, self.name)
 
 
 class ReLU6(PrimitiveWithInfer):
     r"""
-    Computes ReLU(Rectified Linear Unit) upper bounded by 6 of input tensor element-wise.
+    Computes ReLU (Rectified Linear Unit) upper bounded by 6 of input tensors element-wise.
 
     It returns :math:`\min(\max(0,x), 6)` element-wise.
 
@@ -300,10 +340,16 @@ class ReLU6(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same type and shape as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.array([[-1.0, 4.0, -8.0], [2.0, -5.0, 9.0]]), mindspore.float32)
-        >>> relu6 = P.ReLU6()
+        >>> relu6 = ops.ReLU6()
         >>> result = relu6(input_x)
+        >>> print(result)
+        [[0. 4. 0.]
+         [2. 0. 6.]]
     """
 
     @prim_attr_register
@@ -315,13 +361,13 @@ class ReLU6(PrimitiveWithInfer):
         return input_x
 
     def infer_dtype(self, input_x):
-        validator.check_tensor_type_same({'input_x': input_x}, (mstype.float16, mstype.float32), self.name)
+        validator.check_tensor_dtype_valid('input_x', input_x, (mstype.float16, mstype.float32), self.name)
         return input_x
 
 
 class ReLUV2(PrimitiveWithInfer):
     r"""
-    Computes ReLU(Rectified Linear Unit) of input tensor element-wise.
+    Computes ReLU (Rectified Linear Unit) of input tensors element-wise.
 
     It returns :math:`\max(x,\  0)` element-wise.
 
@@ -332,12 +378,23 @@ class ReLUV2(PrimitiveWithInfer):
         - **output** (Tensor) - Has the same type and shape as the `input_x`.
         - **mask** (Tensor) - A tensor whose data type must be uint8.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_x = Tensor(np.array([[[[1, -2], [-3, 4]], [[-5, 6], [7, -8]]]]), mindspore.float32)
-        >>> relu_v2 = P.ReLUV2()
-        >>> output = relu_v2(input_x)
-        ([[[[1., 0.], [0., 4.]], [[0., 6.], [7., 0.]]]],
-         [[[[1, 0], [2, 0]], [[2, 0], [1, 0]]]])
+        >>> relu_v2 = ops.ReLUV2()
+        >>> output, mask= relu_v2(input_x)
+        >>> print(output)
+        [[[[1. 0.]
+           [0. 4.]]
+          [[0. 6.]
+           [7. 0.]]]]
+        >>> print(mask)
+        [[[[[1 0]
+            [2 0]]
+           [[2 0]
+            [1 0]]]]]
     """
 
     @prim_attr_register
@@ -367,7 +424,7 @@ class ReLUV2(PrimitiveWithInfer):
 
         output_shape = (input_x['shape'], mask_shape)
         validator.check_subclass("input_x", input_dtype, mstype.tensor, self.name)
-        validator.check_tensor_type_same({'input_x': input_dtype}, mstype.number_type, self.name)
+        validator.check_tensor_dtype_valid('input_x', input_dtype, mstype.number_type, self.name)
         mask_dtype = mstype.uint8
         output_dtype = (input_dtype, mask_dtype)
 
@@ -378,7 +435,18 @@ class ReLUV2(PrimitiveWithInfer):
 
 class Elu(PrimitiveWithInfer):
     r"""
-    Computes exponential linear: `alpha * (exp(x) - 1)` if x < 0, `x` otherwise.
+    Computes exponential linear:
+
+    if x < 0:
+
+    .. math::
+        \text{x} = \alpha * (\exp(\text{x}) - 1)
+
+    if x >= 0:
+
+    .. math::
+        \text{x} = \text{x}
+
     The data type of input tensor must be float.
 
     Args:
@@ -391,12 +459,16 @@ class Elu(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same shape and data type as `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([[-1.0, 4.0, -8.0], [2.0, -5.0, 9.0]]), mindspore.float32)
-        >>> elu = P.Elu()
-        >>> result = elu(input_x)
-        Tensor([[-0.632  4.0   -0.999]
-                [2.0    -0.993  9.0  ]], shape=(2, 3), dtype=mindspore.float32)
+        >>> elu = ops.Elu()
+        >>> output = elu(input_x)
+        >>> print(output)
+        [[-0.63212055  4.         -0.99966455]
+         [ 2.         -0.99326205  9.        ]]
     """
 
     @prim_attr_register
@@ -409,7 +481,7 @@ class Elu(PrimitiveWithInfer):
         return input_x
 
     def infer_dtype(self, input_x):
-        validator.check_tensor_type_same({'input_x': input_x}, mstype.float_type, self.name)
+        validator.check_tensor_dtype_valid('input_x', input_x, mstype.float_type, self.name)
         return input_x
 
 
@@ -432,10 +504,15 @@ class HSwish(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same type and shape as the `input_data`.
 
+    Supported Platforms:
+        ``GPU``
+
     Examples:
-        >>> hswish = P.HSwish()
+        >>> hswish = ops.HSwish()
         >>> input_x = Tensor(np.array([-1, -2, 0, 2, 1]), mindspore.float16)
         >>> result = hswish(input_x)
+        >>> print(result)
+        [-0.3333  -0.3333  0  1.666  0.6665]
     """
 
     @prim_attr_register
@@ -446,7 +523,7 @@ class HSwish(PrimitiveWithInfer):
         return xshape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({"x": x_dtype}, (mstype.float16, mstype.float32), self.name)
+        validator.check_tensor_dtype_valid("x", x_dtype, (mstype.float16, mstype.float32), self.name)
         return x_dtype
 
 
@@ -457,7 +534,7 @@ class Sigmoid(PrimitiveWithInfer):
     Computes Sigmoid of input element-wise. The Sigmoid function is defined as:
 
     .. math::
-        \text{sigmoid}(x_i) = \frac{1}{1 + exp(-x_i)},
+        \text{sigmoid}(x_i) = \frac{1}{1 + \exp(-x_i)},
 
     where :math:`x_i` is the element of the input.
 
@@ -467,11 +544,15 @@ class Sigmoid(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same type and shape as the input_x.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1, 2, 3, 4, 5]), mindspore.float32)
-        >>> sigmoid = P.Sigmoid()
-        >>> sigmoid(input_x)
-        [0.73105866, 0.880797, 0.9525742, 0.98201376, 0.9933071]
+        >>> sigmoid = ops.Sigmoid()
+        >>> output = sigmoid(input_x)
+        >>> print(output)
+        [0.7310586  0.880797   0.95257413 0.98201376 0.9933072 ]
     """
 
     @prim_attr_register
@@ -482,7 +563,7 @@ class Sigmoid(PrimitiveWithInfer):
         return input_x
 
     def infer_dtype(self, input_x):
-        validator.check_tensor_type_same({"input_x": input_x}, (mstype.float16, mstype.float32), self.name)
+        validator.check_tensor_dtype_valid("input_x", input_x, (mstype.float16, mstype.float32), self.name)
         return input_x
 
 
@@ -505,10 +586,15 @@ class HSigmoid(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same type and shape as the `input_data`.
 
+    Supported Platforms:
+        ``GPU``
+
     Examples:
-        >>> hsigmoid = P.HSigmoid()
+        >>> hsigmoid = ops.HSigmoid()
         >>> input_x = Tensor(np.array([-1, -2, 0, 2, 1]), mindspore.float16)
         >>> result = hsigmoid(input_x)
+        >>> print(result)
+        [0.3333  0.1666  0.5  0.833  0.6665]
     """
 
     @prim_attr_register
@@ -519,7 +605,7 @@ class HSigmoid(PrimitiveWithInfer):
         return x_shape
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({"x": x_dtype}, (mstype.float16, mstype.float32), self.name)
+        validator.check_tensor_dtype_valid("x", x_dtype, (mstype.float16, mstype.float32), self.name)
         return x_dtype
 
 
@@ -540,11 +626,15 @@ class Tanh(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same type and shape as the input_x.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([1, 2, 3, 4, 5]), mindspore.float32)
-        >>> tanh = P.Tanh()
-        >>> tanh(input_x)
-        [0.7615941, 0.9640276, 0.9950548, 0.9993293, 0.99990916]
+        >>> tanh = ops.Tanh()
+        >>> output = tanh(input_x)
+        >>> print(output)
+        [0.7615941 0.9640276 0.9950547 0.9993293 0.9999092]
     """
 
     @prim_attr_register
@@ -561,7 +651,7 @@ class Tanh(PrimitiveWithInfer):
 
 class FusedBatchNorm(Primitive):
     r"""
-    FusedBatchNorm is a BatchNorm that moving mean and moving variance will be computed instead of being loaded.
+    FusedBatchNorm is a BatchNorm. Moving mean and moving variance will be computed instead of being loaded.
 
     Batch Normalization is widely used in convolutional networks. This operation applies
     Batch Normalization over input to avoid internal covariate shift as described in the
@@ -584,10 +674,10 @@ class FusedBatchNorm(Primitive):
 
     Inputs:
         - **input_x** (Tensor) - Tensor of shape :math:`(N, C)`.
-        - **scale** (Tensor) - Tensor of shape :math:`(C,)`.
-        - **bias** (Tensor) - Tensor of shape :math:`(C,)`.
-        - **mean** (Tensor) - Tensor of shape :math:`(C,)`.
-        - **variance** (Tensor) - Tensor of shape :math:`(C,)`.
+        - **scale** (Parameter) - Tensor of shape :math:`(C,)`.
+        - **bias** (Parameter) - Tensor of shape :math:`(C,)`.
+        - **mean** (Parameter) - Tensor of shape :math:`(C,)`.
+        - **variance** (Parameter) - Tensor of shape :math:`(C,)`.
 
     Outputs:
         Tuple of 5 Tensor, the normalized input and the updated parameters.
@@ -598,14 +688,35 @@ class FusedBatchNorm(Primitive):
         - **updated_moving_mean** (Tensor) - Tensor of shape :math:`(C,)`.
         - **updated_moving_variance** (Tensor) - Tensor of shape :math:`(C,)`.
 
+    Supported Platforms:
+        ``CPU``
+
     Examples:
+        >>> import mindspore
+        >>> import mindspore.nn as nn
+        >>> import numpy as np
+        >>> from mindspore import Parameter
+        >>> from mindspore import Tensor
+        >>> from mindspore.ops import operations as ops
+        >>> class FusedBatchNormNet(nn.Cell):
+        >>>     def __init__(self):
+        >>>         super(FusedBatchNormNet, self).__init__()
+        >>>         self.fused_batch_norm = ops.FusedBatchNorm()
+        >>>         self.scale = Parameter(Tensor(np.ones([64]), mindspore.float32), name="scale")
+        >>>         self.bias = Parameter(Tensor(np.ones([64]), mindspore.float32), name="bias")
+        >>>         self.mean = Parameter(Tensor(np.ones([64]), mindspore.float32), name="mean")
+        >>>         self.variance = Parameter(Tensor(np.ones([64]), mindspore.float32), name="variance")
+        >>>
+        >>>     def construct(self, input_x):
+        >>>         out = self.fused_batch_norm(input_x, self.scale, self.bias, self.mean, self.variance)
+        >>>         return out
+        >>>
         >>> input_x = Tensor(np.ones([128, 64, 32, 64]), mindspore.float32)
-        >>> scale = Tensor(np.ones([64]), mindspore.float32)
-        >>> bias = Tensor(np.ones([64]), mindspore.float32)
-        >>> mean = Tensor(np.ones([64]), mindspore.float32)
-        >>> variance = Tensor(np.ones([64]), mindspore.float32)
-        >>> op = P.FusedBatchNorm()
-        >>> output = op(input_x, scale, bias, mean, variance)
+        >>> net = FusedBatchNormNet()
+        >>> output = net(input_x)
+        >>> result = output[0].shape
+        >>> print(result)
+        (128, 64, 32, 64)
     """
     __mindspore_signature__ = (
         sig.make_sig('input_x', dtype=sig.sig_dtype.T2),
@@ -619,10 +730,11 @@ class FusedBatchNorm(Primitive):
     def __init__(self, mode=0, epsilon=1e-5, momentum=0.1):
         self.init_prim_io_names(inputs=['x', 'scale', 'b', 'mean', 'variance'],
                                 outputs=['y', 'running_mean', 'running_variance', 'save_mean', 'save_inv_variance'])
-        self.mode = validator.check_integer('mode', mode, [0, 1], Rel.IN, self.name)
-        self.epsilon = validator.check_number_range('epsilon', epsilon, 0, 1, Rel.INC_RIGHT, self.name)
-        self.momentum = validator.check_number_range('momentum', momentum, 0, 1, Rel.INC_BOTH, self.name)
+        self.mode = validator.check_int(mode, [0, 1], Rel.IN, 'mode', self.name)
+        self.epsilon = validator.check_float_range(epsilon, 0, 1, Rel.INC_RIGHT, 'epsilon', self.name)
+        self.momentum = validator.check_float_range(momentum, 0, 1, Rel.INC_BOTH, 'momentum', self.name)
         self._update_parameter = True
+        self.target = context.get_context("device_target")
 
 
 class FusedBatchNormEx(PrimitiveWithInfer):
@@ -649,21 +761,23 @@ class FusedBatchNormEx(PrimitiveWithInfer):
         momentum (float): The hyper parameter to compute moving average for running_mean and running_var
             (e.g. :math:`new\_running\_mean = momentum * running\_mean + (1 - momentum) * current\_mean`).
             Momentum value must be [0, 1]. Default: 0.9.
+        data_format (str): The optional value for data format, is 'NHWC' or 'NCHW'.
+            Default: "NCHW".
 
     Inputs:
         - **input_x** (Tensor) - The input of FusedBatchNormEx, Tensor of shape :math:`(N, C)`,
           data type: float16 or float32.
-        - **scale** (Tensor) - Parameter scale, same with gamma above-mentioned, Tensor of shape :math:`(C,)`,
+        - **scale** (Parameter) - Parameter scale, same with gamma above-mentioned, Tensor of shape :math:`(C,)`,
           data type: float32.
-        - **bias** (Tensor) - Parameter bias, same with beta above-mentioned, Tensor of shape :math:`(C,)`,
+        - **bias** (Parameter) - Parameter bias, same with beta above-mentioned, Tensor of shape :math:`(C,)`,
           data type: float32.
-        - **mean** (Tensor) - mean value, Tensor of shape :math:`(C,)`, data type: float32.
-        - **variance** (Tensor) - variance value, Tensor of shape :math:`(C,)`, data type: float32.
+        - **mean** (Parameter) - mean value, Tensor of shape :math:`(C,)`, data type: float32.
+        - **variance** (Parameter) - variance value, Tensor of shape :math:`(C,)`, data type: float32.
 
     Outputs:
         Tuple of 6 Tensors, the normalized input, the updated parameters and reserve.
 
-        - **output_x** (Tensor) - The input of FusedBatchNormEx, same type and shape as the `input_x`.
+        - **output_x** (Tensor) - The output of FusedBatchNormEx, same type and shape as the `input_x`.
         - **updated_scale** (Tensor) - Updated parameter scale, Tensor of shape :math:`(C,)`, data type: float32.
         - **updated_bias** (Tensor) - Updated parameter bias, Tensor of shape :math:`(C,)`, data type: float32.
         - **updated_moving_mean** (Tensor) - Updated mean value, Tensor of shape :math:`(C,)`, data type: float32.
@@ -671,14 +785,35 @@ class FusedBatchNormEx(PrimitiveWithInfer):
           data type: float32.
         - **reserve** (Tensor) - reserve space, Tensor of shape :math:`(C,)`, data type: float32.
 
+    Supported Platforms:
+        ``GPU``
+
     Examples:
+        >>> import mindspore
+        >>> import mindspore.nn as nn
+        >>> import numpy as np
+        >>> from mindspore import Parameter
+        >>> from mindspore import Tensor
+        >>> from mindspore.ops import operations as ops
+        >>> class FusedBatchNormExNet(nn.Cell):
+        >>>     def __init__(self):
+        >>>         super(FusedBatchNormExNet, self).__init__()
+        >>>         self.fused_batch_norm_ex = ops.FusedBatchNormEx()
+        >>>         self.scale = Parameter(Tensor(np.ones([64]), mindspore.float32), name="scale")
+        >>>         self.bias = Parameter(Tensor(np.ones([64]), mindspore.float32), name="bias")
+        >>>         self.mean = Parameter(Tensor(np.ones([64]), mindspore.float32), name="mean")
+        >>>         self.variance = Parameter(Tensor(np.ones([64]), mindspore.float32), name="variance")
+        >>>
+        >>>     def construct(self, input_x):
+        >>>         out = self.fused_batch_norm_ex(input_x, self.scale, self.bias, self.mean, self.variance)
+        >>>         return out
+        >>>
         >>> input_x = Tensor(np.ones([128, 64, 32, 64]), mindspore.float32)
-        >>> scale = Tensor(np.ones([64]), mindspore.float32)
-        >>> bias = Tensor(np.ones([64]), mindspore.float32)
-        >>> mean = Tensor(np.ones([64]), mindspore.float32)
-        >>> variance = Tensor(np.ones([64]), mindspore.float32)
-        >>> op = P.FusedBatchNormEx()
-        >>> output = op(input_x, scale, bias, mean, variance)
+        >>> net = FusedBatchNormExNet()
+        >>> output = net(input_x)
+        >>> result = output[0].shape
+        >>> print(result)
+        (128, 64, 32, 64)
     """
     __mindspore_signature__ = (
         sig.make_sig('input_x', dtype=sig.sig_dtype.T2),
@@ -689,37 +824,42 @@ class FusedBatchNormEx(PrimitiveWithInfer):
     )
 
     @prim_attr_register
-    def __init__(self, mode=0, epsilon=1e-5, momentum=0.1):
+    def __init__(self, mode=0, epsilon=1e-5, momentum=0.1, data_format="NCHW"):
         self.init_prim_io_names(inputs=['x', 'scale', 'b', 'mean', 'variance'],
                                 outputs=['y', 'save_scale', 'save_bias', 'save_mean', 'save_inv_variance', 'reserve'])
-        self.mode = validator.check_integer('mode', mode, [0, 1], Rel.IN, self.name)
-        self.epsilon = validator.check_number_range('epsilon', epsilon, 0, 1, Rel.INC_RIGHT, self.name)
-        self.momentum = validator.check_number_range('momentum', momentum, 0, 1, Rel.INC_BOTH, self.name)
+        self.mode = validator.check_int(mode, [0, 1], Rel.IN, 'mode', self.name)
+        self.epsilon = validator.check_float_range(epsilon, 0, 1, Rel.INC_RIGHT, 'epsilon', self.name)
+        self.momentum = validator.check_float_range(momentum, 0, 1, Rel.INC_BOTH, 'momentum', self.name)
         self._update_parameter = True
-        self.add_prim_attr('data_format', "NCHW")
+        self.format = validator.check_string(data_format, ['NCHW', 'NHWC'], 'format', self.name)
+        if context.get_context("device_target") != "GPU" and self.format == "NHWC":
+            raise ValueError("NHWC format only support in GPU target.")
+        self.add_prim_attr('data_format', self.format)
 
     def infer_shape(self, input_x, scale, bias, mean, variance):
-        validator.check_integer("scale rank", len(scale), 1, Rel.EQ, self.name)
+        input_shape_norm = input_x if self.format == "NCHW" else (input_x[0], input_x[3], input_x[1], input_x[2])
+        validator.check_equal_int(len(scale), 1, "scale rank", self.name)
         validator.check("scale shape", scale, "bias shape", bias, Rel.EQ, self.name)
-        validator.check("scale shape[0]", scale[0], "input_x shape[1]", input_x[1], Rel.EQ, self.name)
-        validator.check_integer("mean rank", len(mean), 1, Rel.EQ, self.name)
+        validator.check("scale shape[0]", scale[0], "input channel", input_shape_norm[1], Rel.EQ, self.name)
+        validator.check_equal_int(len(mean), 1, "mean rank", self.name)
+
         validator.check("mean shape", mean, "variance shape", variance, Rel.EQ, self.name)
         validator.check("mean shape", mean, "scale shape", scale, Rel.EQ, self.name)
         return (input_x, scale, scale, scale, scale, scale)
 
     def infer_dtype(self, input_x, scale, bias, mean, variance):
-        validator.check_tensor_type_same({"input_x": input_x}, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid("input_x", input_x, [mstype.float16, mstype.float32], self.name)
         args = {"scale": scale, "bias": bias}
-        validator.check_tensor_type_same(args, [mstype.float32], self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, [mstype.float32], self.name)
         args_moving = {"mean": mean, "variance": variance}
-        valid_types = [mstype.tensor_type(mstype.float32)]
-        validator.check_type_same(args_moving, valid_types, self.name)
+        valid_dtypes = [mstype.tensor_type(mstype.float32)]
+        validator.check_types_same_and_valid(args_moving, valid_dtypes, self.name)
         return (input_x, scale, scale, scale, scale, scale)
 
 
 class BNTrainingReduce(PrimitiveWithInfer):
     """
-    For BatchNorm operator, this operator update the moving averages for training and is used in conjunction with
+    For the BatchNorm operation this operator update the moving averages for training and is used in conjunction with
     BNTrainingUpdate.
 
     Inputs:
@@ -729,10 +869,17 @@ class BNTrainingReduce(PrimitiveWithInfer):
         - **sum** (Tensor) - A 1-D Tensor with float32 data type. Tensor of shape :math:`(C,)`.
         - **square_sum** (Tensor) - A 1-D Tensor with float32 data type. Tensor of shape :math:`(C,)`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> input_x = Tensor(np.ones([128, 64, 32, 64]), mindspore.float32)
-        >>> bn_training_reduce = P.BNTrainingReduce(input_x)
+        >>> input_x = Tensor(np.ones([128, 3, 32, 3]), mindspore.float32)
+        >>> bn_training_reduce = ops.BNTrainingReduce()
         >>> output = bn_training_reduce(input_x)
+        >>> print(output)
+        (Tensor(shape=[3], dtype=Float32, value=
+        [ 1.22880000e+04,  1.22880000e+04,  1.22880000e+04]), Tensor(shape=[3], dtype=Float32, value=
+        [ 1.22880000e+04,  1.22880000e+04,  1.22880000e+04]))
     """
 
     @prim_attr_register
@@ -740,17 +887,17 @@ class BNTrainingReduce(PrimitiveWithInfer):
         self.init_prim_io_names(inputs=['x'], outputs=['sum', 'square_sum'])
 
     def infer_shape(self, x_shape):
-        validator.check_integer("x rank", len(x_shape), 4, Rel.EQ, self.name)
+        validator.check_equal_int(len(x_shape), 4, "x rank", self.name)
         return ([x_shape[1]], [x_shape[1]])
 
     def infer_dtype(self, x_type):
-        validator.check_tensor_type_same({"x_type": x_type}, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid("x", x_type, [mstype.float16, mstype.float32], self.name)
         return (x_type, x_type)
 
 
 class BNTrainingUpdate(PrimitiveWithInfer):
     """
-    For BatchNorm operator, this operator update the moving averages for training and is used in conjunction with
+    For the BatchNorm operation, this operator update the moving averages for training and is used in conjunction with
     BNTrainingReduce.
 
     Args:
@@ -783,17 +930,37 @@ class BNTrainingUpdate(PrimitiveWithInfer):
         - **batch_variance** (Tensor) - Tensor for the mean of `variance`, with float32 data type.
           Has the same shape as `variance`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> input_x = Tensor(np.ones([128, 64, 32, 64]), mindspore.float32)
-        >>> sum = Tensor(np.ones([64]), mindspore.float32)
-        >>> square_sum = Tensor(np.ones([64]), mindspore.float32)
-        >>> scale = Tensor(np.ones([64]), mindspore.float32)
-        >>> offset = Tensor(np.ones([64]), mindspore.float32)
-        >>> mean = Tensor(np.ones([64]), mindspore.float32)
-        >>> variance = Tensor(np.ones([64]), mindspore.float32)
-        >>> bn_training_update = P.BNTrainingUpdate()
+        >>> input_x = Tensor(np.ones([1, 2, 2, 2]), mindspore.float32)
+        >>> sum = Tensor(np.ones([2]), mindspore.float32)
+        >>> square_sum = Tensor(np.ones([2]), mindspore.float32)
+        >>> scale = Tensor(np.ones([2]), mindspore.float32)
+        >>> offset = Tensor(np.ones([2]), mindspore.float32)
+        >>> mean = Tensor(np.ones([2]), mindspore.float32)
+        >>> variance = Tensor(np.ones([2]), mindspore.float32)
+        >>> bn_training_update = ops.BNTrainingUpdate()
         >>> output = bn_training_update(input_x, sum, square_sum, scale, offset, mean, variance)
+        >>> print(output)
+        (Tensor(shape=[1, 2, 2, 2], dtype=Float32, value=
+        [[[[ 2.73200464e+00,  2.73200464e+00],
+           [ 2.73200464e+00,  2.73200464e+00]],
+          [[ 2.73200464e+00,  2.73200464e+00],
+           [ 2.73200464e+00,  2.73200464e+00]]]]), Tensor(shape=[1, 2, 2, 2], dtype=Float32, value=
+        [[[[ 2.73200464e+00,  2.73200464e+00],
+           [ 2.73200464e+00,  2.73200464e+00]],
+          [[ 2.73200464e+00,  2.73200464e+00],
+           [ 2.73200464e+00,  2.73200464e+00]]]]), Tensor(shape=[1, 2, 2, 2], dtype=Float32, value=
+        [[[[ 2.73200464e+00,  2.73200464e+00],
+           [ 2.73200464e+00,  2.73200464e+00]],
+          [[ 2.73200464e+00,  2.73200464e+00],
+           [ 2.73200464e+00,  2.73200464e+00]]]]), Tensor(shape=[2], dtype=Float32, value=
+           [ 2.50000000e-01,  2.50000000e-01]), Tensor(shape=[2], dtype=Float32, value=
+           [ 1.87500000e-01,  1.87500000e-01]))
     """
+
     @prim_attr_register
     def __init__(self, isRef=True, epsilon=1e-5, factor=0.1):
         self.init_prim_io_names(inputs=['x', 'sum', 'square_sum', 'scale', 'b', 'mean', 'variance'],
@@ -801,33 +968,30 @@ class BNTrainingUpdate(PrimitiveWithInfer):
         validator.check_value_type("isRef", isRef, [bool], self.name)
         validator.check_value_type("epsilon", epsilon, [float], self.name)
         validator.check_value_type("factor", factor, [float], self.name)
-        self.epsilon = validator.check_number_range('epsilon', epsilon, 0, 1, Rel.INC_RIGHT, 'BNTrainingUpdate')
-        self.factor = validator.check_number_range('factor', factor, 0, 1, Rel.INC_BOTH, 'BNTrainingUpdate')
+        self.epsilon = validator.check_float_range(epsilon, 0, 1, Rel.INC_RIGHT, 'epsilon', 'BNTrainingUpdate')
+        self.factor = validator.check_float_range(factor, 0, 1, Rel.INC_BOTH, 'factor', 'BNTrainingUpdate')
 
     def infer_shape(self, x, sum, square_sum, scale, b, mean, variance):
-        validator.check_integer("x rank", len(x), 4, Rel.EQ, self.name)
-        validator.check_integer("sum rank", len(sum), 1, Rel.EQ, self.name)
-        validator.check_integer("square_sum rank", len(square_sum), 1, Rel.EQ, self.name)
-        validator.check_integer("scale rank", len(scale), 1, Rel.EQ, self.name)
-        validator.check_integer("b rank", len(b), 1, Rel.EQ, self.name)
-        validator.check_integer("mean rank", len(mean), 1, Rel.EQ, self.name)
-        validator.check_integer("variance rank", len(variance), 1, Rel.EQ, self.name)
-        validator.check("sum shape", sum, "x_shape[1]", x[1], Rel.EQ, self.name)
+        validator.check_equal_int(len(x), 4, "x rank", self.name)
+        validator.check_equal_int(len(sum), 1, "sum rank", self.name)
+        validator.check_equal_int(len(square_sum), 1, "square_sum rank", self.name)
+        validator.check_equal_int(len(scale), 1, "scale rank", self.name)
+        validator.check_equal_int(len(b), 1, "b rank", self.name)
+        validator.check_equal_int(len(mean), 1, "mean rank", self.name)
+        validator.check_equal_int(len(variance), 1, "variance rank", self.name)
+        validator.check("sum shape", sum[0], "x_shape[1]", x[1], Rel.EQ, self.name)
         validator.check("square_sum shape", square_sum, "sum", sum, Rel.EQ, self.name)
-        validator.check("scale shape", scale, "x_shape[1]", x[1], Rel.EQ, self.name)
-        validator.check("offset shape", b, "x_shape[1]", x[1], Rel.EQ, self.name)
-        validator.check("mean shape", mean, "x_shape[1]", x[1], Rel.EQ, self.name)
-        validator.check("variance shape", variance, "x_shape[1]", x[1], Rel.EQ, self.name)
+        validator.check("scale shape", scale[0], "x_shape[1]", x[1], Rel.EQ, self.name)
+        validator.check("offset shape", b[0], "x_shape[1]", x[1], Rel.EQ, self.name)
+        validator.check("mean shape", mean[0], "x_shape[1]", x[1], Rel.EQ, self.name)
+        validator.check("variance shape", variance[0], "x_shape[1]", x[1], Rel.EQ, self.name)
         return (x, variance, variance, variance, variance)
 
     def infer_dtype(self, x, sum, square_sum, scale, b, mean, variance):
-        validator.check_tensor_type_same({"x_type": x}, [mstype.float16, mstype.float32], self.name)
-        validator.check_tensor_type_same({"sum_type": sum}, [mstype.float16, mstype.float32], self.name)
-        validator.check_tensor_type_same({"square_sum_type": square_sum}, [mstype.float16, mstype.float32], self.name)
-        validator.check_tensor_type_same({"scale_type": scale}, [mstype.float16, mstype.float32], self.name)
-        validator.check_tensor_type_same({"b_type": b}, [mstype.float16, mstype.float32], self.name)
-        validator.check_tensor_type_same({"mean_type": mean}, [mstype.float16, mstype.float32], self.name)
-        validator.check_tensor_type_same({"variance_type": variance}, [mstype.float16, mstype.float32], self.name)
+        tuple(map(partial(validator.check_tensor_dtype_valid,
+                          valid_dtypes=(mstype.float16, mstype.float32), prim_name=self.name),
+                  ("x", "sum", "square_sum", "scale", "b", "mean", "variance"),
+                  (x, sum, square_sum, scale, b, mean, variance)))
         return (x, variance, variance, variance, variance)
 
 
@@ -851,6 +1015,8 @@ class BatchNorm(PrimitiveWithInfer):
         is_training (bool): If `is_training` is True, `mean` and `variance` are computed during training.
             If `is_training` is False, they're loaded from checkpoint during inference. Default: False.
         epsilon (float): A small value added for numerical stability. Default: 1e-5.
+        data_format (str): The optional value for data format, is 'NHWC' or 'NCHW'.
+            Default: "NCHW".
 
     Inputs:
         - **input_x** (Tensor) - Tensor of shape :math:`(N, C)`, with float16 or float32 data type.
@@ -868,45 +1034,60 @@ class BatchNorm(PrimitiveWithInfer):
         - **reserve_space_1** (Tensor) - Tensor of shape :math:`(C,)`.
         - **reserve_space_2** (Tensor) - Tensor of shape :math:`(C,)`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> input_x = Tensor(np.ones([128, 64, 32, 64]), mindspore.float32)
-        >>> scale = Tensor(np.ones([64]), mindspore.float32)
-        >>> bias = Tensor(np.ones([64]), mindspore.float32)
-        >>> mean = Tensor(np.ones([64]), mindspore.float32)
-        >>> variance = Tensor(np.ones([64]), mindspore.float32)
-        >>> batch_norm = P.BatchNorm()
+        >>> input_x = Tensor(np.ones([2, 2]), mindspore.float32)
+        >>> scale = Tensor(np.ones([2]), mindspore.float32)
+        >>> bias = Tensor(np.ones([2]), mindspore.float32)
+        >>> mean = Tensor(np.ones([2]), mindspore.float32)
+        >>> variance = Tensor(np.ones([2]), mindspore.float32)
+        >>> batch_norm = ops.BatchNorm()
         >>> output = batch_norm(input_x, scale, bias, mean, variance)
+        >>> print(output)
+        (Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 1.00000000e+00, 1.00000000e+00],
+         [ 1.00000000e+00, 1.00000000e+00]]), Tensor(shape=[2], dtype=Float32, value=
+         [ 1.00000000e+00, 1.00000000e+00]), Tensor(shape=[2], dtype=Float32, value=
+         [ 1.00000000e+00, 1.00000000e+00]), Tensor(shape=[2], dtype=Float32, value=
+         [ 1.00000000e+00, 1.00000000e+00]), Tensor(shape=[2], dtype=Float32, value=
+         [ 1.00000000e+00, 1.00000000e+00]))
     """
 
     @prim_attr_register
-    def __init__(self, is_training=False, epsilon=1e-5):
+    def __init__(self, is_training=False, epsilon=1e-5, data_format="NCHW"):
         validator.check_value_type('is_training', is_training, (bool,), self.name)
-        validator.check_number_range('epsilon', epsilon, 0, 1, Rel.INC_RIGHT, self.name)
-        self.add_prim_attr('data_format', "NCHW")
+        validator.check_float_range(epsilon, 0, 1, Rel.INC_RIGHT, 'epsilon', self.name)
+        self.format = validator.check_string(data_format, ['NCHW', 'NHWC'], 'format', self.name)
+        if context.get_context("device_target") != "GPU" and self.format == "NHWC":
+            raise ValueError("NHWC format only support in GPU target.")
+        self.add_prim_attr('data_format', self.format)
         self.init_prim_io_names(inputs=['x', 'scale', 'offset', 'mean', 'variance'],
                                 outputs=['y', 'batch_mean', 'batch_variance', 'reserve_space_1', 'reserve_space_2'])
 
     def infer_shape(self, input_x, scale, bias, mean, variance):
-        validator.check_integer("scale rank", len(scale), 1, Rel.EQ, self.name)
+        input_shape_norm = input_x if self.format == "NCHW" else (input_x[0], input_x[3], input_x[1], input_x[2])
+        validator.check_equal_int(len(scale), 1, "scale rank", self.name)
         validator.check("scale shape", scale, "bias shape", bias, Rel.EQ, self.name)
-        validator.check("scale shape[0]", scale[0], "input_x shape[1]", input_x[1], Rel.EQ, self.name)
+        validator.check("scale shape[0]", scale[0], "input_x channel", input_shape_norm[1], Rel.EQ, self.name)
         if not self.is_training:
-            validator.check_integer("mean rank", len(mean), 1, Rel.EQ, self.name)
+            validator.check_equal_int(len(mean), 1, "mean rank", self.name)
             validator.check("mean shape", mean, "variance shape", variance, Rel.EQ, self.name)
             validator.check("mean shape", mean, "scale shape", scale, Rel.EQ, self.name)
         return (input_x, scale, scale, scale, scale)
 
     def infer_dtype(self, input_x, scale, bias, mean, variance):
-        validator.check_tensor_type_same({"input_x": input_x}, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid("input_x", input_x, [mstype.float16, mstype.float32], self.name)
         args = {"scale": scale, "bias": bias}
-        validator.check_tensor_type_same(args, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, [mstype.float16, mstype.float32], self.name)
         args_moving = {"mean": mean, "variance": variance}
         if self.is_training:
-            valid_types = [mstype.tensor_type(mstype.float16), mstype.tensor_type(mstype.float32), None]
-            validator.check_type_same(args_moving, valid_types, self.name)
+            valid_dtypes = [mstype.tensor_type(mstype.float16), mstype.tensor_type(mstype.float32), None]
+            validator.check_types_same_and_valid(args_moving, valid_dtypes, self.name)
         else:
             args_moving = {"mean": mean, "variance": variance}
-            validator.check_tensor_type_same(args_moving, [mstype.float16, mstype.float32], self.name)
+            validator.check_tensors_dtypes_same_and_valid(args_moving, [mstype.float16, mstype.float32], self.name)
         return (input_x, scale, bias, input_x, input_x)
 
 
@@ -953,9 +1134,7 @@ class Conv2D(PrimitiveWithInfer):
         stride (Union(int, tuple[int])): The stride to be applied to the convolution filter. Default: 1.
         dilation (Union(int, tuple[int])): Specifies the space to use between kernel elements. Default: 1.
         group (int): Splits input into groups. Default: 1.
-
-    Returns:
-        Tensor, the value that applied 2D convolution.
+        data_format (str): The optional value for data format, is 'NHWC' or 'NCHW'. Default: "NCHW".
 
     Inputs:
         - **input** (Tensor) - Tensor of shape :math:`(N, C_{in}, H_{in}, W_{in})`.
@@ -963,13 +1142,18 @@ class Conv2D(PrimitiveWithInfer):
           :math:`(C_{out}, C_{in}, K_1, K_2)`.
 
     Outputs:
-        Tensor of shape :math:`(N, C_{out}, H_{out}, W_{out})`.
+        Tensor, the value that applied 2D convolution. The shape is :math:`(N, C_{out}, H_{out}, W_{out})`.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
 
     Examples:
         >>> input = Tensor(np.ones([10, 32, 32, 32]), mindspore.float32)
         >>> weight = Tensor(np.ones([32, 32, 3, 3]), mindspore.float32)
-        >>> conv2d = P.Conv2D(out_channel=32, kernel_size=3)
-        >>> conv2d(input, weight)
+        >>> conv2d = ops.Conv2D(out_channel=32, kernel_size=3)
+        >>> output = conv2d(input, weight)
+        >>> print(output.shape)
+        (10, 32, 30, 30)
     """
 
     @prim_attr_register
@@ -981,7 +1165,8 @@ class Conv2D(PrimitiveWithInfer):
                  pad=0,
                  stride=1,
                  dilation=1,
-                 group=1):
+                 group=1,
+                 data_format="NCHW"):
         """Initialize Conv2D"""
         self.init_prim_io_names(inputs=['x', 'w'], outputs=['output'])
         self.kernel_size = _check_positive_int_or_tuple('kernel_size', kernel_size, self.name)
@@ -993,7 +1178,7 @@ class Conv2D(PrimitiveWithInfer):
         if isinstance(pad, int):
             pad = (pad,) * 4
         else:
-            validator.check_integer('pad size', len(pad), 4, Rel.EQ, self.name)
+            validator.check_equal_int(len(pad), 4, 'pad size', self.name)
         self.padding = pad
         self.pad_mode = validator.check_string(pad_mode, ['valid', 'same', 'pad'], 'pad_mode', self.name)
 
@@ -1003,61 +1188,72 @@ class Conv2D(PrimitiveWithInfer):
             for item in pad:
                 validator.check_non_negative_int(item, 'pad item', self.name)
 
-        self.mode = validator.check_integer('mode', mode, 1, Rel.EQ, self.name)
-        self.add_prim_attr('data_format', "NCHW")
+        self.mode = validator.check_equal_int(mode, 1, 'mode', self.name)
+        self.format = validator.check_string(data_format, ['NCHW', 'NHWC'], 'format', self.name)
+        if context.get_context("device_target") != "GPU" and self.format == "NHWC":
+            raise ValueError("NHWC format only support in GPU target.")
+        self.add_prim_attr('data_format', self.format)
         self.out_channel = validator.check_positive_int(out_channel, 'out_channel', self.name)
         self.group = validator.check_positive_int(group, 'group', self.name)
+        self.add_prim_attr('groups', self.group)
         self.add_prim_attr('offset_a', 0)
 
     def infer_shape(self, x_shape, w_shape, b_shape=None):
-        validator.check_integer("weight rank", len(w_shape), 4, Rel.EQ, self.name)
-        validator.check_integer("x rank", len(x_shape), 4, Rel.EQ, self.name)
-        validator.check(f"x_shape[1] / group", x_shape[1] // self.group, "w_shape[1]", w_shape[1], Rel.EQ, self.name)
-        validator.check('out_channel', self.out_channel, 'w_shape[0]', w_shape[0], Rel.EQ, self.name)
-        validator.check('kernel_size', self.kernel_size, 'w_shape[2:4]', tuple(w_shape[2:4]), Rel.EQ, self.name)
+        x_shape_norm = x_shape if self.format == "NCHW" else (x_shape[0], x_shape[3], x_shape[1], x_shape[2])
+        w_shape_norm = w_shape if self.format == "NCHW" else (w_shape[0], w_shape[3], w_shape[1], w_shape[2])
 
-        kernel_size_h = w_shape[2]
-        kernel_size_w = w_shape[3]
+        validator.check_equal_int(len(w_shape_norm), 4, "weight rank", self.name)
+        validator.check_equal_int(len(x_shape_norm), 4, "x rank", self.name)
+        validator.check(f"x_shape[1] / group", x_shape_norm[1] // self.group, "w_shape[1]", w_shape_norm[1], \
+                        Rel.EQ, self.name)
+        validator.check('out_channel', self.out_channel, 'w_shape[0]', w_shape_norm[0], Rel.EQ, self.name)
+        validator.check('kernel_size', self.kernel_size, 'w_shape[2:4]', tuple(w_shape_norm[2:4]), Rel.EQ, self.name)
+
+        kernel_size_h = w_shape_norm[2]
+        kernel_size_w = w_shape_norm[3]
+
         stride_h = self.stride[2]
         stride_w = self.stride[3]
         dilation_h = self.dilation[2]
         dilation_w = self.dilation[3]
 
         if self.pad_mode == "valid":
-            h_out = math.ceil((x_shape[2] - dilation_h * (kernel_size_h - 1)) / stride_h)
-            w_out = math.ceil((x_shape[3] - dilation_w * (kernel_size_w - 1)) / stride_w)
+            h_out = math.ceil((x_shape_norm[2] - dilation_h * (kernel_size_h - 1)) / stride_h)
+            w_out = math.ceil((x_shape_norm[3] - dilation_w * (kernel_size_w - 1)) / stride_w)
             pad_top, pad_bottom, pad_left, pad_right = 0, 0, 0, 0
         elif self.pad_mode == "same":
-            h_out = math.ceil(x_shape[2] / stride_h)
-            w_out = math.ceil(x_shape[3] / stride_w)
+            h_out = math.ceil(x_shape_norm[2] / stride_h)
+            w_out = math.ceil(x_shape_norm[3] / stride_w)
 
-            pad_needed_h = max(0, (h_out - 1) * stride_h + dilation_h * (kernel_size_h - 1) + 1 - x_shape[2])
+            pad_needed_h = max(0, (h_out - 1) * stride_h + dilation_h * (kernel_size_h - 1) + 1 - x_shape_norm[2])
             pad_top = math.floor(pad_needed_h / 2)
             pad_bottom = pad_needed_h - pad_top
 
-            pad_needed_w = max(0, (w_out - 1) * stride_w + dilation_w * (kernel_size_w - 1) + 1 - x_shape[3])
+            pad_needed_w = max(0, (w_out - 1) * stride_w + dilation_w * (kernel_size_w - 1) + 1 - x_shape_norm[3])
             pad_left = math.floor(pad_needed_w / 2)
             pad_right = pad_needed_w - pad_left
         elif self.pad_mode == 'pad':
             pad_top, pad_bottom, pad_left, pad_right = self.padding
 
-            h_out = 1 + (x_shape[2] + pad_top + pad_bottom - kernel_size_h - (kernel_size_h - 1) * (dilation_h - 1)) \
-                / stride_h
-            w_out = 1 + (x_shape[3] + pad_left + pad_right - kernel_size_w - (kernel_size_w - 1) * (dilation_w - 1)) \
-                / stride_w
+            h_out = 1 + (x_shape_norm[2] + pad_top + pad_bottom - kernel_size_h - (kernel_size_h - 1) \
+                         * (dilation_h - 1)) / stride_h
+            w_out = 1 + (x_shape_norm[3] + pad_left + pad_right - kernel_size_w - (kernel_size_w - 1) \
+                         * (dilation_w - 1)) / stride_w
             h_out = math.floor(h_out)
             w_out = math.floor(w_out)
 
         self.pad_list = [pad_top, pad_bottom, pad_left, pad_right]
         self.add_prim_attr('pad_list', (pad_top, pad_bottom, pad_left, pad_right))
         out_channel = self.out_channel
-        out_shape = [x_shape[0], out_channel, h_out, w_out]
+        out_shape = [x_shape_norm[0], out_channel, h_out, w_out] if self.format == "NCHW" else \
+            [x_shape_norm[0], h_out, w_out, out_channel]
+        _check_shape('output', out_shape, self.name)
         return out_shape
 
     def infer_dtype(self, x_dtype, w_dtype, b_dtype=None):
         args = {'x': x_dtype, 'w': w_dtype}
-        valid_types = [mstype.int8, mstype.int32, mstype.float16, mstype.float32]
-        validator.check_tensor_type_same(args, valid_types, self.name)
+        valid_dtypes = [mstype.int8, mstype.int32, mstype.float16, mstype.float32]
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
         if x_dtype.element_type() == mstype.int8:
             return mstype.tensor_type(mstype.int32)
         return x_dtype
@@ -1096,12 +1292,16 @@ class DepthwiseConv2dNative(PrimitiveWithInfer):
     Outputs:
         Tensor of shape :math:`(N, C_{in} * \text{channel_multiplier}, H_{out}, W_{out})`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input = Tensor(np.ones([10, 32, 32, 32]), mindspore.float32)
         >>> weight = Tensor(np.ones([1, 32, 3, 3]), mindspore.float32)
-        >>> depthwise_conv2d = P.DepthwiseConv2dNative(channel_multiplier = 3, kernel_size = (3, 3))
+        >>> depthwise_conv2d = ops.DepthwiseConv2dNative(channel_multiplier=3, kernel_size=(3, 3))
         >>> output = depthwise_conv2d(input, weight)
-        >>> output.shape == (10, 96, 30, 30)
+        >>> print(output.shape)
+        (10, 96, 30, 30)
     """
 
     @prim_attr_register
@@ -1132,7 +1332,7 @@ class DepthwiseConv2dNative(PrimitiveWithInfer):
         if isinstance(pad, int):
             pad = (pad,) * 4
         else:
-            validator.check_integer('pad size', len(pad), 4, Rel.EQ, self.name)
+            validator.check_equal_int(len(pad), 4, 'pad size', self.name)
         self.padding = pad
         self.pad_mode = validator.check_string(pad_mode, ['valid', 'same', 'pad'], 'pad_mode', self.name)
         if pad_mode != 'pad' and pad != (0, 0, 0, 0):
@@ -1140,15 +1340,15 @@ class DepthwiseConv2dNative(PrimitiveWithInfer):
         if self.pad_mode == 'pad':
             for item in pad:
                 validator.check_non_negative_int(item, 'pad item', self.name)
-        self.mode = validator.check_integer("mode", mode, 3, Rel.EQ, self.name)
+        self.mode = validator.check_equal_int(mode, 3, "mode", self.name)
         self.add_prim_attr('data_format', "NCHW")
         self.channel_multiplier = validator.check_positive_int(channel_multiplier, "channel_multiplier", self.name)
         self.group = validator.check_positive_int(group, "group", self.name)
         self.add_prim_attr('offset_a', 0)
 
     def infer_shape(self, x_shape, w_shape, b_shape=None):
-        validator.check_integer("weight rank", len(w_shape), 4, Rel.EQ, self.name)
-        validator.check_integer("x rank", len(x_shape), 4, Rel.EQ, self.name)
+        validator.check_equal_int(len(w_shape), 4, "weight rank", self.name)
+        validator.check_equal_int(len(x_shape), 4, "x rank", self.name)
         validator.check("x_shape[1]", x_shape[1], "w_shape[1]", w_shape[1], Rel.EQ, self.name)
         validator.check('kernel_size', self.kernel_size, 'w_shape[2:4]', tuple(w_shape[2:4]), Rel.EQ, self.name)
 
@@ -1176,9 +1376,9 @@ class DepthwiseConv2dNative(PrimitiveWithInfer):
             pad_top, pad_bottom, pad_left, pad_right = self.padding
 
             h_out = 1 + (x_shape[2] + pad_top + pad_bottom - kernel_size_h - (kernel_size_h - 1) * (dilation_h - 1)) \
-                / stride_h
+                    / stride_h
             w_out = 1 + (x_shape[3] + pad_left + pad_right - kernel_size_w - (kernel_size_w - 1) * (dilation_w - 1)) \
-                / stride_w
+                    / stride_w
             h_out = math.floor(h_out)
             w_out = math.floor(w_out)
 
@@ -1191,7 +1391,7 @@ class DepthwiseConv2dNative(PrimitiveWithInfer):
 
     def infer_dtype(self, x_dtype, w_dtype, b_dtype=None):
         args = {'x': x_dtype, 'w': w_dtype}
-        validator.check_tensor_type_same(args, mstype.number_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, mstype.number_type, self.name)
         if x_dtype.element_type() == mstype.int8:
             return mstype.tensor_type(mstype.int32)
         return x_dtype
@@ -1208,18 +1408,23 @@ class _Pool(PrimitiveWithInfer):
             a tuple of two `int` for height and width. Default: 1.
         padding (str): The optional value for pad mode, is "same" or "valid", not case sensitive.
             Default: "valid".
+        data_format (str): The optional value for data format, is 'NHWC' or 'NCHW'.
+            Default: "NCHW".
     """
 
     @prim_attr_register
-    def __init__(self, ksize=1, strides=1, padding="valid"):
+    def __init__(self, ksize=1, strides=1, padding="valid", data_format="NCHW"):
         self.init_prim_io_names(inputs=['x'], outputs=['output'])
         validator.check_value_type('ksize', ksize, [int, tuple], self.name)
         validator.check_value_type('strides', strides, [int, tuple], self.name)
         self.padding = validator.check_string(padding.upper(), ['VALID', 'SAME'], 'padding', self.name)
         self.add_prim_attr("padding", self.padding)
         self.is_maxpoolwithargmax = (self.name == "MaxPoolWithArgmax")
+        self.format = validator.check_string(data_format, ['NCHW', 'NHWC'], 'format', self.name)
+        if context.get_context("device_target") != "GPU" and self.format == "NHWC":
+            raise ValueError("NHWC format only support in GPU target.")
         if not self.is_maxpoolwithargmax:
-            self.add_prim_attr('data_format', "NCHW")
+            self.add_prim_attr('data_format', self.format)
 
         self.ksize = _check_positive_int_or_tuple("ksize", ksize, self.name, allow_four=False, ret_four=True)
         if self.is_maxpoolwithargmax:
@@ -1232,8 +1437,9 @@ class _Pool(PrimitiveWithInfer):
         self.add_prim_attr("strides", self.strides)
 
     def infer_shape(self, x_shape):
-        validator.check_integer("x rank", len(x_shape), 4, Rel.EQ, self.name)
-        batch, channel, input_h, input_w = x_shape
+        x_shape_norm = x_shape if self.format == "NCHW" else [x_shape[0], x_shape[3], x_shape[1], x_shape[2]]
+        validator.check_equal_int(len(x_shape_norm), 4, "x rank", self.name)
+        batch, channel, input_h, input_w = x_shape_norm
         if self.is_maxpoolwithargmax:
             _, kernel_h, kernel_w, _ = self.ksize
             _, stride_h, stride_w, _ = self.strides
@@ -1247,7 +1453,7 @@ class _Pool(PrimitiveWithInfer):
         elif self.padding == "SAME":
             out_h = math.ceil(input_h / stride_h)
             out_w = math.ceil(input_w / stride_w)
-        out_shape = [batch, channel, out_h, out_w]
+        out_shape = [batch, channel, out_h, out_w] if self.format == "NCHW" else [batch, out_h, out_w, channel]
 
         for shape_value in out_shape:
             if shape_value <= 0:
@@ -1283,6 +1489,8 @@ class MaxPool(_Pool):
             represent height and width of movement respectively. Default: 1.
         padding (str): The optional value for pad mode, is "same" or "valid", not case sensitive.
             Default: "valid".
+        format (str) : The optional value for data format, is 'NHWC' or 'NCHW'.
+            Default: 'NCHW'.
 
             - same: Adopts the way of completion. The height and width of the output will be the same as
               the input. The total number of padding will be calculated in horizontal and vertical
@@ -1298,20 +1506,30 @@ class MaxPool(_Pool):
     Outputs:
         Tensor, with shape :math:`(N, C_{out}, H_{out}, W_{out})`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_tensor = Tensor(np.arange(1 * 3 * 3 * 4).reshape((1, 3, 3, 4)), mindspore.float32)
-        >>> maxpool_op = P.MaxPool(padding="VALID", ksize=2, strides=1)
-        >>> output_tensor = maxpool_op(input_tensor)
+        >>> maxpool_op = ops.MaxPool(padding="VALID", ksize=2, strides=1)
+        >>> output = maxpool_op(input_tensor)
+        >>> print(output)
+        [[[[ 5.  6.  7.]
+           [ 9. 10. 11.]]
+          [[17. 18. 19.]
+           [21. 22. 23.]]
+          [[29. 30. 31.]
+           [33. 34. 35.]]]]
     """
 
     @prim_attr_register
-    def __init__(self, ksize=1, strides=1, padding="valid"):
-        super(MaxPool, self).__init__(ksize, strides, padding)
+    def __init__(self, ksize=1, strides=1, padding="valid", data_format="NCHW"):
+        super(MaxPool, self).__init__(ksize, strides, padding, data_format)
 
 
 class MaxPoolWithArgmax(_Pool):
     r"""
-    Perform max pooling on the input Tensor and return both max values and indices.
+    Performs max pooling on the input Tensor and returns both max values and indices.
 
     Typically the input is of shape :math:`(N_{in}, C_{in}, H_{in}, W_{in})`, MaxPool outputs
     regional maximum in the :math:`(H_{in}, W_{in})`-dimension. Given kernel size
@@ -1350,45 +1568,35 @@ class MaxPoolWithArgmax(_Pool):
         - **output** (Tensor) -  Maxpooling result, with shape :math:`(N, C_{out}, H_{out}, W_{out})`.
         - **mask** (Tensor) -  Max values' index represented by the mask.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> input_tensor = Tensor(np.arange(1 * 3 * 3 * 4).reshape((1, 3, 3, 4)), mindspore.float32)
-        >>> maxpool_arg_op = P.MaxPoolWithArgmax(padding="VALID", ksize=2, strides=1)
+        >>> maxpool_arg_op = ops.MaxPoolWithArgmax(padding="VALID", ksize=2, strides=1)
         >>> output_tensor, argmax = maxpool_arg_op(input_tensor)
+        >>> print(output_tensor)
+        [[[[ 5.  6.  7.]
+           [ 9. 10. 11.]]
+          [[17. 18. 19.]
+           [21. 22. 23.]]
+          [[29. 30. 31.]
+           [33. 34. 35.]]]]
     """
 
-    def __init__(self, ksize=1, strides=1, padding="valid"):
-        super(MaxPoolWithArgmax, self).__init__(ksize, strides, padding)
+    def __init__(self, ksize=1, strides=1, padding="valid", data_format="NCHW"):
+        super(MaxPoolWithArgmax, self).__init__(ksize, strides, padding, data_format)
         self.is_tbe = context.get_context("device_target") == "Ascend"
         self.is_gpu = context.get_context("device_target") == "GPU"
 
     def infer_shape(self, x_shape):
         out_shape = _Pool.infer_shape(self, x_shape)
-        _, _, out_h, out_w = out_shape
-        _, kernel_h, kernel_w, _ = self.ksize
-
-        argmax_shape = []
-        if self.is_tbe:
-            for i in range(4):
-                if i == 2:
-                    dim = kernel_h * kernel_w
-                    argmax_shape.append(dim)
-                elif i == 3:
-                    dim = math.ceil(out_h * out_w / 16) + 1
-                    argmax_shape.append(dim)
-                else:
-                    argmax_shape.append(x_shape[i])
-        else:
-            argmax_shape = out_shape
-
-        return out_shape, argmax_shape
+        return out_shape, out_shape
 
     def infer_dtype(self, x_dtype):
-        out_dtype = x_dtype
-        validator.check_tensor_type_same({"x": x_dtype}, (mstype.float16, mstype.float32), self.name)
-        argmax_dtype = mstype.uint16
-        if self.is_gpu:
-            argmax_dtype = mstype.int32
-        return out_dtype, argmax_dtype
+        validator.check_tensor_dtype_valid("x", x_dtype, (mstype.float16, mstype.float32), self.name)
+        argmax_dtype = mstype.int32
+        return x_dtype, argmax_dtype
 
 
 class AvgPool(_Pool):
@@ -1421,6 +1629,8 @@ class AvgPool(_Pool):
 
             - valid: Adopts the way of discarding. The possible largest height and width of output
               will be returned without padding. Extra pixels will be discarded.
+        data_format (str) - The format of input and output data. It should be 'NHWC' or 'NCHW'，\
+            default is 'NCHW'.
 
     Inputs:
         - **input** (Tensor) - Tensor of shape :math:`(N, C_{in}, H_{in}, W_{in})`.
@@ -1428,41 +1638,47 @@ class AvgPool(_Pool):
     Outputs:
         Tensor, with shape :math:`(N, C_{out}, H_{out}, W_{out})`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> import mindspore
         >>> import mindspore.nn as nn
         >>> import numpy as np
         >>> from mindspore import Tensor
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.avgpool_op = P.AvgPool(padding="VALID", ksize=2, strides=1)
-        >>>
-        >>>     def construct(self, x):
-        >>>         result = self.avgpool_op(x)
-        >>>         return result
-        >>>
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.avgpool_op = ops.AvgPool(padding="VALID", ksize=2, strides=1)
+        ...
+        ...     def construct(self, x):
+        ...         result = self.avgpool_op(x)
+        ...         return result
+        ...
         >>> input_x = Tensor(np.arange(1 * 3 * 3 * 4).reshape(1, 3, 3, 4), mindspore.float32)
         >>> net = Net()
-        >>> result = net(input_x)
+        >>> output = net(input_x)
+        >>> print(output)
         [[[[ 2.5   3.5   4.5]
            [ 6.5   7.5   8.5]]
-          [[ 14.5  15.5  16.5]
-           [ 18.5  19.5  20.5]]
-          [[ 26.5  27.5  28.5]
-           [ 30.5  31.5  32.5]]]]
+          [[14.5  15.5  16.5]
+           [18.5  19.5  20.5]]
+          [[26.5  27.5  28.5]
+           [30.5  31.5  32.5]]]]
     """
 
     @prim_attr_register
-    def __init__(self, ksize=1, strides=1, padding="valid"):
+    def __init__(self, ksize=1, strides=1, padding="valid", data_format="NCHW"):
         if context.get_context("device_target") == "GPU":
             self.target = "GPU"
+        elif context.get_context("device_target") == "CPU":
+            self.target = "CPU"
         elif context.get_context("enable_ge"):
             self.target = "GE"
         else:
             self.target = "OTHER"
-        super(AvgPool, self).__init__(ksize, strides, padding)
+        super(AvgPool, self).__init__(ksize, strides, padding, data_format)
 
 
 class Conv2DBackpropInput(PrimitiveWithInfer):
@@ -1482,16 +1698,31 @@ class Conv2DBackpropInput(PrimitiveWithInfer):
         dilation (Union[int. tuple[int]]): Specifies the dilation rate to be used for the dilated convolution.
             Default: 1.
         group (int): Splits input into groups. Default: 1.
+        data_format (str) - The format of input and output data. It should be 'NHWC' or 'NCHW'，\
+            default is 'NCHW'.
 
-    Returns:
-        Tensor, the gradients of convolution.
+    Inputs:
+        - **dout** (Tensor) - the gradients w.r.t the output of the convolution. The shape conforms to the default
+          data_format :math:`(N, C_{out}, H_{out}, W_{out})`.
+        - **weight** (Tensor) - Set size of kernel is :math:`(K_1, K_2)`, then the shape is
+          :math:`(C_{out}, C_{in}, K_1, K_2)`.
+        - **input_size** (Tensor) - A tuple describes the shape of the input which conforms to the format
+          :math:`(N, C_{in}, H_{in}, W_{in})`.
+
+    Outputs:
+        Tensor, the gradients w.r.t the input of convolution. It has the same shape as the input.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Examples:
         >>> dout = Tensor(np.ones([10, 32, 30, 30]), mindspore.float32)
         >>> weight = Tensor(np.ones([32, 32, 3, 3]), mindspore.float32)
         >>> x = Tensor(np.ones([10, 32, 32, 32]))
-        >>> conv2d_backprop_input = P.Conv2DBackpropInput(out_channel=32, kernel_size=3)
-        >>> conv2d_backprop_input(dout, weight, F.shape(x))
+        >>> conv2d_backprop_input = ops.Conv2DBackpropInput(out_channel=32, kernel_size=3)
+        >>> output = conv2d_backprop_input(dout, weight, F.shape(x))
+        >>> print(output.shape)
+        (10, 32, 32, 32)
     """
 
     @prim_attr_register
@@ -1504,7 +1735,8 @@ class Conv2DBackpropInput(PrimitiveWithInfer):
                  mode=1,
                  stride=1,
                  dilation=1,
-                 group=1):
+                 group=1,
+                 data_format="NCHW"):
         """Initialize Conv2DBackpropInput"""
         self.init_prim_io_names(inputs=['out_backprop', 'filter', 'input_sizes'], outputs=['output'])
         self.out_channel = validator.check_positive_int(out_channel, 'out_channel', self.name)
@@ -1518,7 +1750,7 @@ class Conv2DBackpropInput(PrimitiveWithInfer):
         if isinstance(pad, int):
             pad = (pad,) * 4
         else:
-            validator.check_integer('pad size', len(pad), 4, Rel.EQ, self.name)
+            validator.check_equal_int(len(pad), 4, 'pad size', self.name)
         self.padding = pad
         self.pad_mode = validator.check_string(pad_mode, ['valid', 'same', 'pad'], 'pad_mode', self.name)
         if pad_mode != 'pad' and pad != (0, 0, 0, 0):
@@ -1529,9 +1761,13 @@ class Conv2DBackpropInput(PrimitiveWithInfer):
 
         pad_mode = pad_mode.upper()
         self.add_prim_attr('pad_mode', pad_mode)
-        self.mode = validator.check_integer('mode', mode, 1, Rel.EQ, self.name)
+        self.mode = validator.check_equal_int(mode, 1, 'mode', self.name)
         self.group = validator.check_positive_int(group, 'group', self.name)
-        self.add_prim_attr('data_format', "NCHW")
+        self.add_prim_attr('groups', self.group)
+        self.format = validator.check_string(data_format, ['NCHW', 'NHWC'], 'format', self.name)
+        if context.get_context("device_target") != "GPU" and self.format == "NHWC":
+            raise ValueError("NHWC format only support in GPU target.")
+        self.add_prim_attr('data_format', self.format)
         if pad_list:
             for x in pad_list:
                 validator.check_non_negative_int(x, 'element of pad_list', self.name)
@@ -1543,11 +1779,13 @@ class Conv2DBackpropInput(PrimitiveWithInfer):
         for i, dim_len in enumerate(x_size_v):
             validator.check_value_type("x_size[%d]" % i, dim_len, [int], self.name)
         args = {'doutput': doutput['dtype'], 'w': w['dtype']}
-        valid_types = [mstype.int8, mstype.int32, mstype.float16, mstype.float32]
-        validator.check_tensor_type_same(args, valid_types, self.name)
+        valid_dtypes = [mstype.int8, mstype.int32, mstype.float16, mstype.float32]
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
 
         # infer shape
         dout_shape = doutput['shape']
+        dout_shape_norm = dout_shape if self.format == "NCHW" else \
+            [dout_shape[0], dout_shape[2], dout_shape[3], dout_shape[1]]
         kernel_h = self.kernel_size[0]
         kernel_w = self.kernel_size[1]
         stride_h = self.stride[0]
@@ -1559,11 +1797,11 @@ class Conv2DBackpropInput(PrimitiveWithInfer):
         if self.pad_list:
             pad_list = tuple(self.pad_list)
         elif self.pad_mode == "SAME":
-            pad_needed_h = max(0, (dout_shape[2] - 1) * stride_h + dilation_h * (kernel_h - 1) + 1 - x_size_v[2])
+            pad_needed_h = max(0, (dout_shape_norm[2] - 1) * stride_h + dilation_h * (kernel_h - 1) + 1 - x_size_v[2])
             pad_top = math.floor(pad_needed_h / 2)
             pad_bottom = pad_needed_h - pad_top
 
-            pad_needed_w = max(0, (dout_shape[3] - 1) * stride_w + dilation_w * (kernel_w - 1) + 1 - x_size_v[3])
+            pad_needed_w = max(0, (dout_shape_norm[3] - 1) * stride_w + dilation_w * (kernel_w - 1) + 1 - x_size_v[3])
             pad_left = math.floor(pad_needed_w / 2)
             pad_right = pad_needed_w - pad_left
             pad_list = (pad_top, pad_bottom, pad_left, pad_right)
@@ -1588,32 +1826,43 @@ class BiasAdd(PrimitiveWithInfer):
     Inputs:
         - **input_x** (Tensor) - The input tensor. The shape can be 2-4 dimensions.
         - **bias** (Tensor) - The bias tensor, with shape :math:`(C)`.
+        - **data_format** (str) - The format of input and output data. It should be 'NHWC' or 'NCHW'，\
+          default is 'NCHW'.
           The shape of `bias` must be the same as `input_x` in the second dimension.
 
     Outputs:
         Tensor, with the same shape and type as `input_x`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> input_x = Tensor(np.arange(6).reshape((2, 3)), mindspore.float32)
         >>> bias = Tensor(np.random.random(3).reshape((3,)), mindspore.float32)
-        >>> bias_add = P.BiasAdd()
-        >>> bias_add(input_x, bias)
+        >>> bias_add = ops.BiasAdd()
+        >>> output = bias_add(input_x, bias)
+        >>> print(output.shape)
+        (2, 3)
     """
 
     @prim_attr_register
-    def __init__(self):
+    def __init__(self, data_format="NCHW"):
         self.init_prim_io_names(inputs=['x', 'b'], outputs=['output'])
-        self.add_prim_attr('data_format', 'NCHW')
+        self.format = validator.check_string(data_format, ['NCHW', 'NHWC'], 'format', self.name)
+        if context.get_context("device_target") != "GPU" and self.format == "NHWC":
+            raise ValueError("NHWC format only support in GPU target.")
+        self.add_prim_attr('data_format', self.format)
 
     def infer_shape(self, x_shape, b_shape):
-        validator.check_integer("x rank", len(x_shape), 2, Rel.GE, self.name)
-        validator.check_integer("bias rank", len(b_shape), 1, Rel.EQ, self.name)
-        validator.check("b_shape[0]", b_shape[0], "x_shape[1]", x_shape[1], Rel.EQ, self.name)
+        validator.check_int(len(x_shape), 2, Rel.GE, "x rank", self.name)
+        validator.check_equal_int(len(b_shape), 1, "bias rank", self.name)
+        x_channel = x_shape[1] if self.format == "NCHW" else x_shape[-1]
+        validator.check("b_shape[0]", b_shape[0], "x_shape[1]", x_channel, Rel.EQ, self.name)
         return x_shape
 
     def infer_dtype(self, x_type, b_type):
         args = {"input_x": x_type, "bias": b_type}
-        validator.check_tensor_type_same(args, mstype.number_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, mstype.number_type, self.name)
         return x_type
 
 
@@ -1635,13 +1884,16 @@ class TopK(PrimitiveWithInfer):
         - **values** (Tensor) - The `k` largest elements in each slice of the last dimensional.
         - **indices** (Tensor) - The indices of values within the last dimension of input.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
-        >>> topk = P.TopK(sorted=True)
+        >>> topk = ops.TopK(sorted=True)
         >>> input_x = Tensor([1, 2, 3, 4, 5], mindspore.float16)
         >>> k = 3
         >>> values, indices = topk(input_x, k)
-        >>> assert values == Tensor(np.array([5, 4, 3]), mstype.float16)
-        >>> assert indices == Tensor(np.array([4, 3, 2]), mstype.int32)
+        >>> print((values, indices))
+        ([5.0, 4.0, 3.0], [4, 3, 2])
     """
 
     @prim_attr_register
@@ -1652,8 +1904,8 @@ class TopK(PrimitiveWithInfer):
 
     def __infer__(self, input_x, k):
         x_dtype = input_x['dtype']
-        valid_types = (mstype.int32, mstype.float16, mstype.float32)
-        validator.check_tensor_type_same({'x': x_dtype}, valid_types, self.name)
+        valid_dtypes = (mstype.int32, mstype.float16, mstype.float32)
+        validator.check_tensor_dtype_valid('x', x_dtype, valid_dtypes, self.name)
         k_v = k['value']
         validator.check_value_type('k', k_v, (int,), self.name)
         x_shape = list(input_x['shape'])
@@ -1672,7 +1924,7 @@ class SoftmaxCrossEntropyWithLogits(PrimitiveWithInfer):
         Sets input logits as `X`, input label as `Y`, output as `loss`. Then,
 
         .. math::
-            p_{ij} = softmax(X_{ij}) = \frac{exp(x_i)}{\sum_{j = 0}^{N-1}\exp(x_j)}
+            p_{ij} = softmax(X_{ij}) = \frac{\exp(x_i)}{\sum_{j = 0}^{N-1}\exp(x_j)}
 
         .. math::
             loss_{ij} = -\sum_j{Y_{ij} * ln(p_{ij})}
@@ -1684,13 +1936,19 @@ class SoftmaxCrossEntropyWithLogits(PrimitiveWithInfer):
     Outputs:
         Tuple of 2 tensors, the `loss` shape is `(N,)`, and the `dlogits` with the same shape as `logits`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> logits = Tensor([[2, 4, 1, 4, 5], [2, 1, 2, 4, 3]], mindspore.float32)
         >>> labels = Tensor([[0, 0, 0, 0, 1], [0, 0, 0, 1, 0]], mindspore.float32)
-        >>> softmax_cross = P.SoftmaxCrossEntropyWithLogits()
-        >>> loss, backprop = softmax_cross(logits, labels)
-        ([0.5899297, 0.52374405], [[0.02760027, 0.20393994, 0.01015357, 0.20393994, -0.44563377],
-        [0.08015892, 0.02948882, 0.08015892, -0.4077012, 0.21789455]])
+        >>> softmax_cross = ops.SoftmaxCrossEntropyWithLogits()
+        >>> loss, dlogits = softmax_cross(logits, labels)
+        >>> print(loss)
+        [0.5899297  0.52374405]
+        >>> print(dlogits)
+        [[ 0.02760027  0.20393994  0.01015357  0.20393994 -0.44563377]
+         [ 0.08015892  0.02948882  0.08015892 -0.4077012   0.21789455]]
     """
 
     @prim_attr_register
@@ -1705,7 +1963,7 @@ class SoftmaxCrossEntropyWithLogits(PrimitiveWithInfer):
 
     def infer_dtype(self, logits_type, labels_type):
         args = {"logits": logits_type, "labels": labels_type}
-        validator.check_tensor_type_same(args, (mstype.float16, mstype.float32), self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, (mstype.float16, mstype.float32), self.name)
         return (logits_type, logits_type)
 
 
@@ -1717,7 +1975,7 @@ class SparseSoftmaxCrossEntropyWithLogits(PrimitiveWithInfer):
         Sets input logits as `X`, input label as `Y`, output as `loss`. Then,
 
         .. math::
-            p_{ij} = softmax(X_{ij}) = \frac{exp(x_i)}{\sum_{j = 0}^{N-1}\exp(x_j)}
+            p_{ij} = softmax(X_{ij}) = \frac{\exp(x_i)}{\sum_{j = 0}^{N-1}\exp(x_j)}
 
         .. math::
             loss_{ij} = \begin{cases} -ln(p_{ij}), &j = y_i \cr -ln(1 - p_{ij}), & j \neq y_i \end{cases}
@@ -1737,12 +1995,16 @@ class SparseSoftmaxCrossEntropyWithLogits(PrimitiveWithInfer):
         Tensor, if `is_grad` is False, the output tensor is the value of loss which is a scalar tensor;
         if `is_grad` is True, the output tensor is the gradient of input with the same shape as `logits`.
 
+    Supported Platforms:
+        ``GPU`` ``CPU``
+
     Examples:
         Please refer to the usage in nn.SoftmaxCrossEntropyWithLogits source code.
     """
 
     @prim_attr_register
     def __init__(self, is_grad=False):
+        validator.check_value_type('is_grad', is_grad, [bool], self.name)
         self.init_prim_io_names(inputs=['features', 'labels'], outputs=['output'])
         self.is_grad = is_grad
         self.add_prim_attr('sens', 1.0)
@@ -1755,8 +2017,9 @@ class SparseSoftmaxCrossEntropyWithLogits(PrimitiveWithInfer):
         return loss_shape
 
     def infer_dtype(self, logits_type, labels_type):
-        validator.check_tensor_type_same({"logits": logits_type}, (mstype.float16, mstype.float32), self.name)
-        validator.check_tensor_type_same({"labels": labels_type}, (mstype.int32, mstype.int64), self.name)
+        validator.check_tensor_dtype_valid("logits", logits_type, (mstype.float16, mstype.float32),
+                                           self.name)
+        validator.check_tensor_dtype_valid("labels", labels_type, (mstype.int32, mstype.int64), self.name)
         return logits_type
 
 
@@ -1792,6 +2055,9 @@ class ApplyMomentum(PrimitiveWithInfer):
     Outputs:
         Tensor, parameters to be updated.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         Please refer to the usage in nn.ApplyMomentum.
     """
@@ -1816,13 +2082,13 @@ class ApplyMomentum(PrimitiveWithInfer):
         return v_shape
 
     def infer_dtype(self, v_dtype, a_dtype, l_dtype, g_dtype, m_dtype):
-        valid_types = [mstype.float16, mstype.float32, mstype.float64]
+        valid_dtypes = [mstype.float16, mstype.float32, mstype.float64]
         if v_dtype != mstype.type_refkey and a_dtype != mstype.type_refkey:
-            validator.check_tensor_type_same({"v": v_dtype}, valid_types, self.name)
-            validator.check_tensor_type_same({"a": a_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"l_dtype": l_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"g_dtype": g_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"m_dtype": m_dtype}, valid_types, self.name)
+            validator.check_tensor_dtype_valid("v", v_dtype, valid_dtypes, self.name)
+            validator.check_tensor_dtype_valid("a", a_dtype, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"l_dtype": l_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"g_dtype": g_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"m_dtype": m_dtype}, valid_dtypes, self.name)
         if not self.is_ge and self.is_tbe:
             return g_dtype, g_dtype
         return g_dtype
@@ -1853,12 +2119,16 @@ class SmoothL1Loss(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same type and shape as `prediction`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> loss = P.SmoothL1Loss()
+        >>> loss = ops.SmoothL1Loss()
         >>> input_data = Tensor(np.array([1, 2, 3]), mindspore.float32)
         >>> target_data = Tensor(np.array([1, 2, 2]), mindspore.float32)
-        >>> loss(input_data, target_data)
-        [0, 0, 0.5]
+        >>> output = loss(input_data, target_data)
+        >>> print(output)
+        [0.  0.  0.5]
     """
 
     @prim_attr_register
@@ -1866,6 +2136,7 @@ class SmoothL1Loss(PrimitiveWithInfer):
         validator.check_value_type('beta', beta, [float], self.name)
         validator.check('beta', beta, '', 0, Rel.GT, self.name)
         self.init_prim_io_names(inputs=['prediction', 'target'], outputs=['output'])
+        self.add_prim_attr('sigma', beta)
 
     def infer_shape(self, prediction, target):
         validator.check('prediction shape', prediction, 'target shape', target, Rel.EQ, self.name)
@@ -1873,7 +2144,7 @@ class SmoothL1Loss(PrimitiveWithInfer):
 
     def infer_dtype(self, prediction, target):
         args = {"prediction": prediction, "target": target}
-        validator.check_tensor_type_same(args, (mstype.float16, mstype.float32), self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, (mstype.float16, mstype.float32), self.name)
         return prediction
 
 
@@ -1884,9 +2155,7 @@ class L2Loss(PrimitiveWithInfer):
     Set `input_x` as x and output as loss.
 
     .. math::
-        loss = sum(x ** 2) / nelement(x)
-
-    :math:`nelement(x)` represents the number of `input_x`.
+        loss = sum(x ** 2) / 2
 
     Inputs:
         - **input_x** (Tensor) - A input Tensor. Data type must be float16 or float32.
@@ -1894,10 +2163,14 @@ class L2Loss(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same dtype as `input_x`. The output tensor is the value of loss which is a scalar tensor.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples
         >>> input_x = Tensor(np.array([1, 2, 3]), mindspore.float16)
-        >>> l2_loss = P.L2Loss()
-        >>> l2_loss(input_x)
+        >>> l2_loss = ops.L2Loss()
+        >>> output = l2_loss(input_x)
+        >>> print(output)
         7.0
     """
 
@@ -1910,9 +2183,8 @@ class L2Loss(PrimitiveWithInfer):
         return loss_shape
 
     def infer_dtype(self, x_type):
-        validator.check_subclass("x_type", x_type, mstype.tensor, self.name)
-        valid_types = [mstype.float16, mstype.float32]
-        validator.check_tensor_type_same({'x_type': x_type}, valid_types, self.name)
+        valid_dtypes = [mstype.float16, mstype.float32]
+        validator.check_tensor_dtype_valid('x_type', x_type, valid_dtypes, self.name)
         return x_type
 
 
@@ -1931,10 +2203,14 @@ class DataFormatDimMap(PrimitiveWithInfer):
     Outputs:
         Tensor, has the same type as the `input_x`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> x = Tensor([0, 1, 2, 3], mindspore.int32)
-        >>> dfdm = P.DataFormatDimMap()
-        >>> dfdm(x)
+        >>> dfdm = ops.DataFormatDimMap()
+        >>> output = dfdm(x)
+        >>> print(output)
         [0 3 1 2]
     """
 
@@ -1948,11 +2224,10 @@ class DataFormatDimMap(PrimitiveWithInfer):
     def infer_shape(self, x_shape):
         return x_shape
 
-    def infer_dtype(self, x_type):
-        validator.check_subclass("x", x_type, mstype.tensor, self.name)
-        valid_types = [mstype.int32]
-        validator.check_tensor_type_same({"x": x_type}, valid_types, self.name)
-        return x_type
+    def infer_dtype(self, x_dtype):
+        valid_dtypes = [mstype.int32]
+        validator.check_tensor_dtype_valid("x", x_dtype, valid_dtypes, self.name)
+        return x_dtype
 
 
 class RNNTLoss(PrimitiveWithInfer):
@@ -1972,14 +2247,22 @@ class RNNTLoss(PrimitiveWithInfer):
         - **costs** (Tensor[int32]) - Tensor of shape :math:`(B,)`.
         - **grads** (Tensor[int32]) - Has the same shape as `acts`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> B, T, U, V = 1, 2, 3, 5
+        >>> blank = 0
         >>> acts = np.random.random((B, T, U, V)).astype(np.float32)
         >>> labels = np.array([[1, 2]]).astype(np.int32)
         >>> input_length = np.array([T] * B).astype(np.int32)
         >>> label_length = np.array([len(l) for l in labels]).astype(np.int32)
-        >>> rnnt_loss = P.RNNTLoss(blank_label=blank)
+        >>> rnnt_loss = ops.RNNTLoss(blank_label=0)
         >>> costs, grads = rnnt_loss(Tensor(acts), Tensor(labels), Tensor(input_length), Tensor(label_length))
+        >>> print(costs.shape)
+        (1,)
+        >>> print(grads.shape)
+        (1, 2, 3, 5)
     """
 
     @prim_attr_register
@@ -1989,32 +2272,29 @@ class RNNTLoss(PrimitiveWithInfer):
                                 outputs=['costs', 'grads'])
 
     def infer_shape(self, acts_shape, labels_shape, input_length_shape, label_length_shape):
-        validator.check_integer('acts_rank', len(acts_shape), 4, Rel.EQ, self.name)
-        validator.check_integer('labels_rank', len(labels_shape), 2, Rel.EQ, self.name)
-        validator.check_integer('input_length_rank', len(input_length_shape), 1, Rel.EQ, self.name)
-        validator.check_integer('label_length_rank', len(label_length_shape), 1, Rel.EQ, self.name)
+        validator.check_equal_int(len(acts_shape), 4, 'acts_rank', self.name)
+        validator.check_equal_int(len(labels_shape), 2, 'labels_rank', self.name)
+        validator.check_equal_int(len(input_length_shape), 1, 'input_length_rank', self.name)
+        validator.check_equal_int(len(label_length_shape), 1, 'label_length_rank', self.name)
         validator.check('labels shape[0]', labels_shape[0], 'acts shape[0]', acts_shape[0], Rel.EQ, self.name)
-        validator.check('labels shape[1]', labels_shape[1], 'acts shape[2]-1', acts_shape[2]-1, Rel.EQ, self.name)
+        validator.check('labels shape[1]', labels_shape[1], 'acts shape[2]-1', acts_shape[2] - 1, Rel.EQ, self.name)
         validator.check('input_length size', input_length_shape[0], 'acts shape[0]', acts_shape[0], Rel.EQ, self.name)
         validator.check('label_length size', label_length_shape[0], 'acts shape[0]', acts_shape[0], Rel.EQ, self.name)
         costs_shape = (acts_shape[0],)
         return (costs_shape, acts_shape)
 
     def infer_dtype(self, acts_type, labels_type, input_length_type, label_length_type):
-        validator.check_subclass("acts_type", acts_type, mstype.tensor, self.name)
-        validator.check_subclass("labels_type", labels_type, mstype.tensor, self.name)
-        validator.check_subclass("input_length_type", input_length_type, mstype.tensor, self.name)
-        validator.check_subclass("label_length_type", label_length_type, mstype.tensor, self.name)
-        validator.check_tensor_type_same({"acts_type": acts_type}, [mstype.float32, mstype.float16], self.name)
-        validator.check_tensor_type_same({"labels_type": labels_type}, [mstype.int32], self.name)
-        validator.check_tensor_type_same({"input_length_type": input_length_type}, [mstype.int32], self.name)
-        validator.check_tensor_type_same({"label_length_type": label_length_type}, [mstype.int32], self.name)
+        validator.check_tensor_dtype_valid("acts_type", acts_type, [mstype.float32, mstype.float16], self.name)
+        tuple(map(partial(validator.check_tensor_dtype_valid,
+                          valid_dtypes=(mstype.int32,), prim_name=self.name),
+                  ("labels", "input_length", "label_length"),
+                  (labels_type, input_length_type, label_length_type)))
         return (acts_type, acts_type)
 
 
-class SGD(PrimitiveWithInfer):
+class SGD(PrimitiveWithCheck):
     """
-    Computes stochastic gradient descent (optionally with momentum).
+    Computes the stochastic gradient descent. Momentum is optional.
 
     Nesterov momentum is based on the formula from On the importance of
     initialization and momentum in deep learning.
@@ -2040,15 +2320,20 @@ class SGD(PrimitiveWithInfer):
     Outputs:
         Tensor, parameters to be updated.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> sgd = P.SGD()
+        >>> sgd = ops.SGD()
         >>> parameters = Tensor(np.array([2, -0.5, 1.7, 4]), mindspore.float32)
         >>> gradient = Tensor(np.array([1, -1, 0.5, 2]), mindspore.float32)
         >>> learning_rate = Tensor(0.01, mindspore.float32)
         >>> accum = Tensor(np.array([0.1, 0.3, -0.2, -0.1]), mindspore.float32)
         >>> momentum = Tensor(0.1, mindspore.float32)
         >>> stat = Tensor(np.array([1.5, -0.3, 0.2, -0.7]), mindspore.float32)
-        >>> result = sgd(parameters, gradient, learning_rate, accum, momentum, stat)
+        >>> output = sgd(parameters, gradient, learning_rate, accum, momentum, stat)
+        >>> print(output[0])
+        [ 1.9899   -0.4903   1.6952001  3.9801   ]
     """
 
     @prim_attr_register
@@ -2059,27 +2344,22 @@ class SGD(PrimitiveWithInfer):
         self.init_prim_io_names(inputs=['parameters', 'gradient', 'learning_rate', 'accum', 'momentum', 'stat'],
                                 outputs=['output'])
 
-    def infer_shape(self, parameters_shape, gradient_shape, learning_rate_shape,
+    def check_shape(self, parameters_shape, gradient_shape, learning_rate_shape,
                     accum_shape, momentum_shape, stat_shape):
         validator.check_positive_int(len(parameters_shape), "parameters rank", self.name)
-        validator.check_integer(f'gradient rank', len(gradient_shape), 0, Rel.GE, self.name)
-        validator.check_integer(f'learning rate rank', len(learning_rate_shape), 0, Rel.GE, self.name)
+        validator.check_int(len(gradient_shape), 0, Rel.GE, f'gradient rank', self.name)
+        validator.check_int(len(learning_rate_shape), 0, Rel.GE, f'learning rate rank', self.name)
         validator.check_positive_int(len(accum_shape), "accumulation rank", self.name)
-        validator.check_integer(f'momentum rank', len(momentum_shape), 0, Rel.GE, self.name)
-        validator.check_integer(f'stat rank', len(stat_shape), 0, Rel.GE, self.name)
+        validator.check_int(len(momentum_shape), 0, Rel.GE, f'momentum rank', self.name)
+        validator.check_int(len(stat_shape), 0, Rel.GE, f'stat rank', self.name)
         validator.check("gradient shape", gradient_shape, "stat shape", stat_shape, Rel.EQ, self.name)
-        return parameters_shape
 
-    def infer_dtype(self, parameters_dtype, gradient_dtype, learning_rate_dtype,
+    def check_dtype(self, parameters_dtype, gradient_dtype, learning_rate_dtype,
                     accum_dtype, momentum_dtype, stat_dtype):
-        valid_types = [mstype.float16, mstype.float32]
-        validator.check_tensor_type_same({"parameters": parameters_dtype}, valid_types, self.name)
-        validator.check_tensor_type_same({"gradient": gradient_dtype}, valid_types, self.name)
-        validator.check_tensor_type_same({"learning_rate": learning_rate_dtype}, valid_types, self.name)
-        validator.check_tensor_type_same({"accum": accum_dtype}, valid_types, self.name)
-        validator.check_tensor_type_same({"momentum": momentum_dtype}, valid_types, self.name)
-        validator.check_tensor_type_same({"stat": stat_dtype}, valid_types, self.name)
-        return parameters_dtype
+        tuple(map(partial(validator.check_tensor_dtype_valid,
+                          valid_dtypes=(mstype.float16, mstype.float32), prim_name=self.name),
+                  ("parameters", "gradient", "learning_rate", "accum", "momentum", "stat"),
+                  (parameters_dtype, gradient_dtype, learning_rate_dtype, accum_dtype, momentum_dtype, stat_dtype)))
 
 
 class ApplyRMSProp(PrimitiveWithInfer):
@@ -2124,18 +2404,23 @@ class ApplyRMSProp(PrimitiveWithInfer):
     Outputs:
         Tensor, parameters to be update.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> apply_rms = P.ApplyRMSProp()
+        >>> apply_rms = ops.ApplyRMSProp()
         >>> input_x = Tensor(1., mindspore.float32)
         >>> mean_square = Tensor(2., mindspore.float32)
         >>> moment = Tensor(1., mindspore.float32)
-        >>> grad = Tensor(2., mindspore.float32 )
+        >>> grad = Tensor(2., mindspore.float32)
         >>> learning_rate = Tensor(0.9, mindspore.float32)
         >>> decay = 0.0
         >>> momentum = 1e-10
         >>> epsilon = 0.001
-        >>> result = apply_rms(input_x, mean_square, moment, learning_rate, grad, decay, momentum, epsilon)
-        (-2.9977674, 0.80999994, 1.9987665)
+        >>> output = apply_rms(input_x, mean_square, moment, learning_rate, grad, decay, momentum, epsilon)
+        >>> print(output)
+        (Tensor(shape=[], dtype=Float32, value= 0.100112), Tensor(shape=[], dtype=Float32, value= 4),
+        Tensor(shape=[], dtype=Float32, value= 0.899888))
     """
 
     @prim_attr_register
@@ -2158,13 +2443,13 @@ class ApplyRMSProp(PrimitiveWithInfer):
     def infer_dtype(self, var_dtype, mean_square_dtype, moment_dtype, learning_rate_dtype, grad_dtype, decay_dtype,
                     momentum_dtype, epsilon_dtype):
         args = {"var": var_dtype, "mean_square": mean_square_dtype, "moment": moment_dtype, "grad": grad_dtype}
-        validator.check_tensor_type_same(args, mstype.number_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, mstype.number_type, self.name)
 
-        valid_types = [mstype.float16, mstype.float32]
+        valid_dtypes = [mstype.float16, mstype.float32]
         args_decay = {"decay": decay_dtype, 'momentum': momentum_dtype, "epsilon": epsilon_dtype}
-        validator.check_type_same(args_decay, valid_types, self.name)
+        validator.check_types_same_and_valid(args_decay, valid_dtypes, self.name)
         args_lr = {"learning_rate": learning_rate_dtype, "decay": decay_dtype}
-        validator.check_scalar_or_tensor_type_same(args_lr, valid_types, self.name, allow_mix=True)
+        validator.check_scalar_or_tensor_types_same(args_lr, valid_dtypes, self.name, allow_mix=True)
         if not self.is_ge and self.is_d:
             return var_dtype, var_dtype, var_dtype
         return var_dtype
@@ -2221,25 +2506,32 @@ class ApplyCenteredRMSProp(PrimitiveWithInfer):
     Outputs:
         Tensor, parameters to be update.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
-        >>> centered_rms_prop = P.ApplyCenteredRMSProp()
-        >>> input_x = Tensor(np.arange(-6, 6).astype(np.float32).reshape(2, 3, 2), mindspore.float32)
-        >>> mean_grad = Tensor(np.arange(12).astype(np.float32).reshape(2, 3, 2), mindspore.float32)
-        >>> mean_square = Tensor(np.arange(-8, 4).astype(np.float32).reshape(2, 3, 2), mindspore.float32)
-        >>> moment = Tensor(np.arange(12).astype(np.float32).reshape(2, 3, 2), mindspore.float32)
-        >>> grad = Tensor(np.arange(12).astype(np.float32).reshape(2, 3, 2), mindspore.float32)
+        >>> centered_rms_prop = ops.ApplyCenteredRMSProp()
+        >>> input_x = Tensor(np.arange(-2, 2).astype(np.float32).reshape(2, 2), mindspore.float32)
+        >>> mean_grad = Tensor(np.arange(4).astype(np.float32).reshape(2, 2), mindspore.float32)
+        >>> mean_square = Tensor(np.arange(-3, 1).astype(np.float32).reshape(2, 2), mindspore.float32)
+        >>> moment = Tensor(np.arange(4).astype(np.float32).reshape(2, 2), mindspore.float32)
+        >>> grad = Tensor(np.arange(4).astype(np.float32).reshape(2, 2), mindspore.float32)
         >>> learning_rate = Tensor(0.9, mindspore.float32)
         >>> decay = 0.0
         >>> momentum = 1e-10
         >>> epsilon = 0.05
-        >>> result = centered_rms_prop(input_x, mean_grad, mean_square, moment, grad,
-        >>>                            learning_rate, decay, momentum, epsilon)
-        [[[ -6.        -9.024922]
-          [-12.049845 -15.074766]
-          [-18.09969  -21.124613]]
-         [[-24.149532 -27.174456]
-          [-30.199379 -33.2243  ]
-          [-36.249226 -39.274143]]]
+        >>> output = centered_rms_prop(input_x, mean_grad, mean_square, moment, grad,
+        ...                            learning_rate, decay, momentum, epsilon)
+        >>> print(output)
+        (Tensor(shape=[2, 2], dtype=Float32, value=
+        [[-2.00000000e+00, -5.02492237e+00],
+         [-8.04984474e+00, -1.10747662e+01]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 0.00000000e+00,  1.00000000e+00],
+         [ 2.00000000e+00,  3.00000000e+00]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 0.00000000e+00,  1.00000000e+00],
+         [ 4.00000000e+00,  9.00000000e+00]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 0.00000000e+00,  4.02492237e+00],
+         [ 8.04984474e+00,  1.20747662e+01]]))
     """
 
     @prim_attr_register
@@ -2261,13 +2553,13 @@ class ApplyCenteredRMSProp(PrimitiveWithInfer):
                     learning_rate_dtype, rho_dtype, momentum_dtype, epsilon_dtype):
         args = {"var": var_dtype, "mean_gradient": mean_gradient_dtype,
                 "mean_square": mean_square_dtype, "moment": moment_dtype, "grad": grad_dtype}
-        validator.check_tensor_type_same(args, mstype.number_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, mstype.number_type, self.name)
 
-        valid_types = [mstype.float16, mstype.float32]
+        valid_dtypes = [mstype.float16, mstype.float32]
         args_rho = {"rho": rho_dtype, 'momentum': momentum_dtype, "epsilon": epsilon_dtype}
-        validator.check_type_same(args_rho, valid_types, self.name)
+        validator.check_types_same_and_valid(args_rho, valid_dtypes, self.name)
         args_lr = {"learning_rate": learning_rate_dtype, "rho": rho_dtype}
-        validator.check_scalar_or_tensor_type_same(args_lr, valid_types, self.name, allow_mix=True)
+        validator.check_scalar_or_tensor_types_same(args_lr, valid_dtypes, self.name, allow_mix=True)
         if self.is_ascend:
             return var_dtype, mean_gradient_dtype, mean_square_dtype, moment_dtype
         return var_dtype
@@ -2308,14 +2600,24 @@ class LayerNorm(Primitive):
         - **mean** (Tensor) - Tensor of shape :math:`(C,)`.
         - **variance** (Tensor) - Tensor of shape :math:`(C,)`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_x = Tensor(np.array([[1, 2, 3], [1, 2, 3]]), mindspore.float32)
         >>> gamma = Tensor(np.ones([3]), mindspore.float32)
         >>> beta = Tensor(np.ones([3]), mindspore.float32)
-        >>> layer_norm = P.LayerNorm()
-        >>> output = layer_norm(input_x, gamma, beta)
-        ([[-0.22474492, 1., 2.2247488], [-0.22474492, 1., 2.2247488]],
-         [[2.], [2.]], [[0.6666667], [0.6666667]])
+        >>> layer_norm = ops.LayerNorm()
+        >>> output, mean, variance = layer_norm(input_x, gamma, beta)
+        >>> print(output)
+        [[-0.2247448  1.         2.2247448]
+         [-0.2247448  1.         2.2247448]]
+        >>> print(mean)
+        [[2.]
+         [2.]]
+        >>> print(variance)
+        [[0.6666667]
+         [0.6666667]])
     """
 
     @prim_attr_register
@@ -2346,16 +2648,15 @@ class L2Normalize(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same type and shape as the input.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> l2_normalize = P.L2Normalize()
+        >>> l2_normalize = ops.L2Normalize()
         >>> input_x = Tensor(np.random.randint(-256, 256, (2, 3, 4)), mindspore.float32)
-        >>> result = l2_normalize(input_x)
-        [[[-0.47247353   -0.30934513   -0.4991462   0.8185567 ]
-          [-0.08070751   -0.9961299    -0.5741758   0.09262337]
-          [-0.9916556    -0.3049123     0.5730487  -0.40579924]
-         [[-0.88134485    0.9509498    -0.86651784  0.57442576]
-          [ 0.99673784    0.08789381   -0.8187321   0.9957012 ]
-          [ 0.12891524   -0.9523804    -0.81952125  0.91396334]]]
+        >>> output = l2_normalize(input_x)
+        >>> print(output.shape)
+        (2, 3, 4)
     """
 
     @prim_attr_register
@@ -2365,12 +2666,11 @@ class L2Normalize(PrimitiveWithInfer):
 
     def infer_shape(self, input_x):
         dim = len(input_x)
-        validator.check_int_range('axis value', self.axis, -dim, dim, Rel.INC_LEFT, self.name)
+        validator.check_int_range(self.axis, -dim, dim, Rel.INC_LEFT, 'axis value', self.name)
         return input_x
 
     def infer_dtype(self, input_x):
-        validator.check_subclass("x", input_x, mstype.tensor, self.name)
-        validator.check_tensor_type_same({"input_x": input_x}, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid("input_x", input_x, [mstype.float16, mstype.float32], self.name)
         return input_x
 
 
@@ -2390,12 +2690,16 @@ class DropoutGenMask(Primitive):
     Outputs:
         Tensor, the value of generated mask for input shape.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> dropout_gen_mask = P.DropoutGenMask()
+        >>> dropout_gen_mask = ops.DropoutGenMask()
         >>> shape = (2, 4, 5)
         >>> keep_prob = Tensor(0.5, mindspore.float32)
-        >>> mask = dropout_gen_mask(shape, keep_prob)
-        [249, 11, 134, 133, 143, 246, 89, 52, 169, 15, 94, 63, 146, 103, 7, 101]
+        >>> output = dropout_gen_mask(shape, keep_prob)
+        >>> print(output.shape)
+        (16,)
     """
 
     @prim_attr_register
@@ -2424,19 +2728,19 @@ class DropoutDoMask(PrimitiveWithInfer):
     Outputs:
         Tensor, the value that applied dropout on.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> x = Tensor(np.ones([2, 2, 3]), mindspore.float32)
         >>> shape = (2, 2, 3)
         >>> keep_prob = Tensor(0.5, mindspore.float32)
-        >>> dropout_gen_mask = P.DropoutGenMask()
-        >>> dropout_do_mask = P.DropoutDoMask()
+        >>> dropout_gen_mask = ops.DropoutGenMask()
+        >>> dropout_do_mask = ops.DropoutDoMask()
         >>> mask = dropout_gen_mask(shape, keep_prob)
         >>> output = dropout_do_mask(x, mask, keep_prob)
-        >>> assert output.shape == (2, 2, 3)
-        [[[2.0, 0.0, 0.0],
-          [0.0, 0.0, 0.0]],
-         [[0.0, 0.0, 0.0],
-          [2.0, 2.0, 2.0]]]
+        >>> print(output.shape)
+        (2, 2, 3)
     """
 
     @prim_attr_register
@@ -2456,17 +2760,17 @@ class DropoutDoMask(PrimitiveWithInfer):
             raise ValueError(f"DropoutDoMask y mask do not math input input_x shape:"
                              "{input_x_shape}, mask shape: {mask_shape}.")
 
-        validator.check_tensor_type_same({"input_x": input_x['dtype']}, [mstype.float32, mstype.float16, mstype.int32],
-                                         self.name)
-        validator.check_tensor_type_same({"input_mask": mask['dtype']}, [mstype.uint8], self.name)
+        validator.check_tensor_dtype_valid("input_x", input_x['dtype'], [mstype.float32, mstype.float16, mstype.int32],
+                                           self.name)
+        validator.check_tensor_dtype_valid("input_mask", mask['dtype'], [mstype.uint8], self.name)
 
         keep_prob_v = keep_prob['value']
         if keep_prob_v is not None:
             if isinstance(keep_prob['dtype'], type(mstype.tensor)):
-                validator.check_number_range('keep_prob', keep_prob_v.asnumpy(), 0, 1, Rel.INC_BOTH, self.name)
+                validator.check_float_range(keep_prob_v.asnumpy(), 0, 1, Rel.INC_BOTH, 'keep_prob', self.name)
             else:
                 validator.check_value_type("keep_prob", keep_prob_v, [float], self.name)
-                validator.check_number_range('keep_prob', keep_prob_v, 0, 1, Rel.INC_BOTH, self.name)
+                validator.check_float_range(keep_prob_v, 0, 1, Rel.INC_BOTH, 'keep_prob', self.name)
 
         out = {'shape': input_x_shape,
                'dtype': input_x['dtype'],
@@ -2476,13 +2780,14 @@ class DropoutDoMask(PrimitiveWithInfer):
 
 class ResizeBilinear(PrimitiveWithInfer):
     r"""
-    Resizes the image to certain size using bilinear interpolation.
+    Resizes an image to a certain size using the bilinear interpolation.
 
     The resizing only affects the lower two dimensions which represent the height and width. The input images
     can be represented by different data types, but the data types of output images are always float32.
 
     Args:
-        size (tuple[int]): A tuple of 2 int elements `(new_height, new_width)`, the new size of the images.
+        size (Union[tuple[int], list[int]]): A tuple or list of 2 int elements `(new_height, new_width)`, the new size
+            of the images.
         align_corners (bool): If true, rescale input by `(new_height - 1) / (height - 1)`,
                        which exactly aligns the 4 corners of images and resized images. If false,
                        rescale by `new_height / height`. Default: False.
@@ -2494,16 +2799,24 @@ class ResizeBilinear(PrimitiveWithInfer):
     Outputs:
         Tensor, resized image. 4-D with shape [batch, channels, new_height, new_width] in `float32`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> tensor = Tensor([[[[1, 2, 3, 4, 5], [1, 2, 3, 4, 5]]]], mindspore.float32)
-        >>> resize_bilinear = P.ResizeBilinear((5, 5))
-        >>> result = resize_bilinear(tensor)
-        >>> assert result.shape == (1, 1, 5, 5)
+        >>> resize_bilinear = ops.ResizeBilinear((5, 5))
+        >>> output = resize_bilinear(tensor)
+        >>> print(output)
+        [[[[1. 2. 3. 4. 5.]
+           [1. 2. 3. 4. 5.]
+           [1. 2. 3. 4. 5.]
+           [1. 2. 3. 4. 5.]
+           [1. 2. 3. 4. 5.]]]]
     """
 
     @prim_attr_register
     def __init__(self, size, align_corners=False):
-        pass
+        validator.check_value_type("size", size, [tuple, list], self.name)
 
     def infer_shape(self, input_shape):
         validator.check("input shape rank", len(input_shape), "", 4, Rel.EQ, self.name)
@@ -2515,7 +2828,8 @@ class ResizeBilinear(PrimitiveWithInfer):
         return out_shape
 
     def infer_dtype(self, input_dtype):
-        validator.check_tensor_type_same({'input_dtype': input_dtype}, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid('input_dtype', input_dtype, [mstype.float16, mstype.float32],
+                                           self.name)
         return mstype.tensor_type(mstype.float32)
 
 
@@ -2544,12 +2858,18 @@ class OneHot(PrimitiveWithInfer):
     Outputs:
         Tensor, one-hot tensor. Tensor of shape :math:`(X_0, \ldots, X_{axis}, \text{depth} ,X_{axis+1}, \ldots, X_n)`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> indices = Tensor(np.array([0, 1, 2]), mindspore.int32)
         >>> depth, on_value, off_value = 3, Tensor(1.0, mindspore.float32), Tensor(0.0, mindspore.float32)
-        >>> onehot = P.OneHot()
-        >>> result = onehot(indices, depth, on_value, off_value)
-        [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+        >>> onehot = ops.OneHot()
+        >>> output = onehot(indices, depth, on_value, off_value)
+        >>> print(output)
+        [[1. 0. 0.]
+         [0. 1. 0.]
+         [0. 0. 1.]]
     """
 
     @prim_attr_register
@@ -2559,14 +2879,14 @@ class OneHot(PrimitiveWithInfer):
 
     def __infer__(self, indices, depth, on_value, off_value):
         # check type
-        validator.check_tensor_type_same({"indices": indices['dtype']}, (mstype.int32,), self.name)
+        validator.check_tensor_dtype_valid("indices", indices['dtype'], (mstype.int32,), self.name)
         validator.check_type_name("depth", depth['dtype'], mstype.int_type, self.name)
         args = {"on_value": on_value['dtype'], "off_value": off_value['dtype']}
-        validator.check_tensor_type_same(args, (mstype.float16, mstype.float32), self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, (mstype.float16, mstype.float32), self.name)
 
         # check shape
         indices_shp = indices['shape']
-        validator.check_int_range("axis", self.axis, -1, len(indices_shp), Rel.INC_BOTH, self.name)
+        validator.check_int_range(self.axis, -1, len(indices_shp), Rel.INC_BOTH, "axis", self.name)
         depth_val = depth['value']
         validator.check_non_negative_int(depth_val, "depth", self.name)
         # create new dimension at end if self.axis is -1
@@ -2598,10 +2918,15 @@ class Gelu(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same type and shape as input.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> tensor = Tensor(np.array([1.0, 2.0, 3.0]), mindspore.float32)
-        >>> gelu = P.Gelu()
+        >>> gelu = ops.Gelu()
         >>> result = gelu(tensor)
+        >>> print(result)
+        [0.841192  1.9545976  2.9963627]
     """
 
     @prim_attr_register
@@ -2613,7 +2938,49 @@ class Gelu(PrimitiveWithInfer):
         return input_x
 
     def infer_dtype(self, input_x):
-        validator.check_tensor_type_same({"input_x": input_x}, (mstype.float16, mstype.float32), self.name)
+        validator.check_tensor_dtype_valid("input_x", input_x, (mstype.float16, mstype.float32), self.name)
+        return input_x
+
+
+class FastGelu(PrimitiveWithInfer):
+    r"""
+    fast Gaussian Error Linear Units activation function.
+
+    FastGelu is defined as follows:
+
+    .. math::
+        \text{output} = \frac {x} {1 + \exp(-1.702 * \left| x \right|)} * \exp(0.851 * (x - \left| x \right|)),
+
+    where :math:`x` is the element of the input.
+
+    Inputs:
+        - **input_x** (Tensor) - Input to compute the FastGelu with data type of float16 or float32.
+
+    Outputs:
+        Tensor, with the same type and shape as input.
+
+    Supported Platforms:
+        ``Ascend``
+
+    Examples:
+        >>> tensor = Tensor(np.array([[-1.0, 4.0, -8.0], [2.0, -5.0, 9.0]]), mindspore.float32)
+        >>> fast_gelu = P.FastGelu()
+        >>> output = fast_gelu(tensor)
+        >>> print(output)
+        [[-1.5420423e-01  3.9955849e+00 -9.7664278e-06]
+         [ 1.9356585e+00 -1.0070159e-03  8.9999981e+00]]
+    """
+
+    @prim_attr_register
+    def __init__(self):
+        """init FastGeLU"""
+        self.init_prim_io_names(inputs=['x'], outputs=['output'])
+
+    def infer_shape(self, input_x):
+        return input_x
+
+    def infer_dtype(self, input_x):
+        validator.check_tensor_dtype_valid("input_x", input_x, (mstype.float16, mstype.float32), self.name)
         return input_x
 
 
@@ -2637,11 +3004,23 @@ class GetNext(PrimitiveWithInfer):
 
     Outputs:
         tuple[Tensor], the output of Dataset. The shape is described in `shapes`
-        and the type is described is `types`.
+        and the type is described in `types`.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Examples:
-        >>> get_next = P.GetNext([mindspore.float32, mindspore.int32], [[32, 1, 28, 28], [10]], 2, 'shared_name')
-        >>> feature, label = get_next()
+        >>> train_dataset = create_custom_dataset()
+        >>> dataset_helper = mindspore.DatasetHelper(train_dataset, dataset_sink_mode=True)
+        >>> dataset = dataset_helper.iter.dataset
+        >>> dataset_types, dataset_shapes = dataset_helper.types_shapes()
+        >>> queue_name = dataset.__transfer_dataset__.queue_name
+        >>> get_next = P.GetNext(dataset_types, dataset_shapes, len(dataset_types), queue_name)
+        >>> data, label = get_next()
+        >>> relu = P.ReLU()
+        >>> result = relu(data).asnumpy()
+        >>> print(result.shape)
+        (32, 1, 32, 32)
     """
 
     @prim_attr_register
@@ -2684,30 +3063,29 @@ class PReLU(PrimitiveWithInfer):
 
     For detailed information, please refer to `nn.PReLU`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> import mindspore
         >>> import mindspore.nn as nn
         >>> import numpy as np
         >>> from mindspore import Tensor
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.prelu = P.PReLU()
-        >>>     def construct(self, input_x, weight):
-        >>>         result = self.prelu(input_x, weight)
-        >>>         return result
-        >>>
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.prelu = ops.PReLU()
+        ...     def construct(self, input_x, weight):
+        ...         result = self.prelu(input_x, weight)
+        ...         return result
+        ...
         >>> input_x = Tensor(np.random.randint(-3, 3, (2, 3, 2)), mindspore.float32)
         >>> weight = Tensor(np.array([0.1, 0.6, -0.3]), mindspore.float32)
         >>> net = Net()
-        >>> result = net(input_x, weight)
-        [[[-0.1, 1.0],
-          [0.0, 2.0],
-          [0.0, 0.0]],
-         [[-0.2, -0.1],
-          [2.0, -1.8000001],
-          [0.6, 0.6]]]
+        >>> output = net(input_x, weight)
+        >>> print(output.shape)
+        (2, 3, 2)
     """
 
     @prim_attr_register
@@ -2732,17 +3110,45 @@ class PReLU(PrimitiveWithInfer):
         return input_x_shape
 
     def infer_dtype(self, input_x_dtype, weight_dtype):
-        valid_types = (mstype.float16, mstype.float32)
-        validator.check_tensor_type_same({"input_x": input_x_dtype}, valid_types, self.name)
-        validator.check_tensor_type_same({"weight": weight_dtype}, valid_types, self.name)
+        valid_dtypes = (mstype.float16, mstype.float32)
+        validator.check_tensor_dtype_valid("input_x", input_x_dtype, valid_dtypes, self.name)
+        validator.check_tensor_dtype_valid("weight", weight_dtype, valid_dtypes, self.name)
         return input_x_dtype
 
 
 class LSTM(PrimitiveWithInfer):
     """
-    Performs the long short term memory(LSTM) on the input.
+    Performs the Long Short-Term Memory (LSTM) on the input.
 
     For detailed information, please refer to `nn.LSTM`.
+
+    Supported Platforms:
+        ``GPU`` ``CPU``
+
+    Examples:
+        >>> input_size = 10
+        >>> hidden_size = 2
+        >>> num_layers = 1
+        >>> seq_len = 5
+        >>> batch_size = 2
+        >>>
+        >>> net = P.LSTM(input_size, hidden_size, num_layers, True, False, 0.0)
+        >>> input = Tensor(np.ones([seq_len, batch_size, input_size]).astype(np.float32))
+        >>> h0 = Tensor(np.ones([num_layers, batch_size, hidden_size]).astype(np.float32))
+        >>> c0 = Tensor(np.ones([num_layers, batch_size, hidden_size]).astype(np.float32))
+        >>> w = Tensor(np.ones([112, 1, 1]).astype(np.float32))
+        >>> output, hn, cn, _, _ = net(input, h0, c0, w)
+        >>> print(output)
+        [[[0.9640267  0.9640267 ]
+          [0.9640267  0.9640267 ]]
+         [[0.9950539  0.9950539 ]
+          [0.9950539  0.9950539 ]]
+         [[0.99932843 0.99932843]
+          [0.99932843 0.99932843]]
+         [[0.9999084  0.9999084 ]
+          [0.9999084  0.9999084 ]]
+         [[0.9999869  0.9999869 ]
+          [0.9999869  0.9999869 ]]]
     """
 
     @prim_attr_register
@@ -2753,7 +3159,7 @@ class LSTM(PrimitiveWithInfer):
         self.has_bias = validator.check_value_type("has_bias", has_bias, (bool,), self.name)
         self.bidirectional = validator.check_value_type("bidirectional", bidirectional, (bool,), self.name)
         self.dropout = validator.check_value_type("dropout", dropout, [float], self.name)
-        self.dropout = validator.check_number_range('dropout', dropout, 0, 1, Rel.INC_BOTH, self.name)
+        self.dropout = validator.check_float_range(dropout, 0, 1, Rel.INC_BOTH, 'dropout', self.name)
 
         if bidirectional:
             self.num_directions = 2
@@ -2762,17 +3168,17 @@ class LSTM(PrimitiveWithInfer):
 
     def infer_shape(self, x_shape, h_shape, c_shape, w_shape):
         # (seq, batch_size, feature)
-        validator.check_integer("x rank", len(x_shape), 3, Rel.EQ, self.name)
-        validator.check_integer("x[2]", x_shape[2], self.input_size, Rel.EQ, self.name)
+        validator.check_equal_int(len(x_shape), 3, "x rank", self.name)
+        validator.check_equal_int(x_shape[2], self.input_size, "x[2]", self.name)
 
         # h and c should be same shape
-        validator.check_integer("h rank", len(h_shape), 3, Rel.EQ, self.name)
+        validator.check_equal_int(len(h_shape), 3, "h rank", self.name)
         validator.check("h_shape", h_shape, "c_shape", c_shape, Rel.EQ, self.name)
 
         # (num_layers * num_directions, batch, hidden_size)
-        validator.check_integer("h[0]", h_shape[0], self.num_layers * self.num_directions, Rel.EQ, self.name)
-        validator.check_integer("h[1]", h_shape[1], x_shape[1], Rel.EQ, self.name)
-        validator.check_integer("h[2]", h_shape[2], self.hidden_size, Rel.EQ, self.name)
+        validator.check_int(h_shape[0], self.num_layers * self.num_directions, Rel.EQ, "h[0]", self.name)
+        validator.check_equal_int(h_shape[1], x_shape[1], "h[1]", self.name)
+        validator.check_int(h_shape[2], self.hidden_size, Rel.EQ, "h[2]", self.name)
 
         y_shape = (x_shape[0], x_shape[1], self.hidden_size * self.num_directions)
 
@@ -2805,7 +3211,7 @@ class LSTM(PrimitiveWithInfer):
 
     def infer_dtype(self, x_dtype, h_dtype, c_dtype, w_dtype):
         args = {'x': x_dtype, 'h': h_dtype, 'c': c_dtype, 'w': w_dtype}
-        validator.check_tensor_type_same(args, (mstype.float32, mstype.float16), self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, (mstype.float32, mstype.float16), self.name)
         return (x_dtype, x_dtype, x_dtype, x_dtype, x_dtype)
 
     def rnd_up(self, current_offset, page_size):
@@ -2838,11 +3244,17 @@ class SigmoidCrossEntropyWithLogits(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same shape and type as input `logits`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
-        >>> logits = Tensor(np.random.randn(2, 3).astype(np.float16))
-        >>> labels = Tensor(np.random.randn(2, 3).astype(np.float16))
-        >>> sigmoid = P.SigmoidCrossEntropyWithLogits()
-        >>> sigmoid(logits, labels)
+        >>> logits = Tensor(np.array([[-0.8, 1.2, 0.7], [-0.1, -0.4, 0.7]]).astype(np.float32))
+        >>> labels = Tensor(np.array([[0.3, 0.8, 1.2], [-0.6, 0.1, 2.2]]).astype(np.float32))
+        >>> sigmoid = ops.SigmoidCrossEntropyWithLogits()
+        >>> output = sigmoid(logits, labels)
+        >>> print(output)
+        [[ 0.6111007   0.5032824   0.26318604]
+         [ 0.58439666  0.5530153  -0.4368139 ]]
     """
 
     @prim_attr_register
@@ -2856,13 +3268,13 @@ class SigmoidCrossEntropyWithLogits(PrimitiveWithInfer):
 
     def infer_dtype(self, x_dtype, y_dtype):
         args = {"x_dtype": x_dtype, "y_dtype": y_dtype}
-        validator.check_tensor_type_same(args, mstype.number_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, mstype.number_type, self.name)
         return x_dtype
 
 
 class Pad(PrimitiveWithInfer):
     """
-    Pads input tensor according to the paddings.
+    Pads the input tensor according to the paddings.
 
     Args:
         paddings (tuple): The shape of parameter `paddings` is (N, 2). N is the rank of input data. All elements of
@@ -2876,15 +3288,19 @@ class Pad(PrimitiveWithInfer):
     Outputs:
         Tensor, the tensor after padding.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_tensor = Tensor(np.array([[-0.1, 0.3, 3.6], [0.4, 0.5, -3.2]]), mindspore.float32)
-        >>> pad_op = P.Pad(((1, 2), (2, 1)))
-        >>> output_tensor = pad_op(input_tensor)
-        >>> assert output_tensor == Tensor(np.array([[ 0. ,  0. ,  0. ,  0. ,  0. ,  0. ],
-        >>>                                          [ 0. ,  0. , -0.1,  0.3,  3.6,  0. ],
-        >>>                                          [ 0. ,  0. ,  0.4,  0.5, -3.2,  0. ],
-        >>>                                          [ 0. ,  0. ,  0. ,  0. ,  0. ,  0. ],
-        >>>                                          [ 0. ,  0. ,  0. ,  0. ,  0. ,  0. ]]), mindspore.float32)
+        >>> pad_op = ops.Pad(((1, 2), (2, 1)))
+        >>> output = pad_op(input_tensor)
+        >>> print(output)
+        [[ 0.   0.   0.   0.   0.   0. ]
+         [ 0.   0.  -0.1  0.3  3.6  0. ]
+         [ 0.   0.   0.4  0.5 -3.2  0. ]
+         [ 0.   0.   0.   0.   0.   0. ]
+         [ 0.   0.   0.   0.   0.   0. ]]
     """
 
     @prim_attr_register
@@ -2900,7 +3316,7 @@ class Pad(PrimitiveWithInfer):
 
     def infer_shape(self, x):
         paddings = np.array(self.paddings)
-        validator.check_integer('paddings.shape', paddings.size, len(x) * 2, Rel.EQ, self.name)
+        validator.check_int(paddings.size, len(x) * 2, Rel.EQ, 'paddings.shape', self.name)
         if not np.all(paddings >= 0):
             raise ValueError('All elements of paddings must be >= 0.')
         y_shape = ()
@@ -2933,28 +3349,34 @@ class MirrorPad(PrimitiveWithInfer):
         Tensor, the tensor after padding.
 
         - If `mode` is "REFLECT", it uses a way of symmetrical copying through the axis of symmetry to fill in.
-          If the `input_x` is [[1,2,3],[4,5,6],[7,8,9]] and `paddings` is [[1,1],[2,2]], then the
-          Outputs is [[6,5,4,5,6,5,4],[3,2,1,2,3,2,1],[6,5,4,5,6,5,4],[9,8,7,8,9,8,7],[6,5,4,5,6,5,4]].
+          If the `input_x` is [[1,2,3], [4,5,6], [7,8,9]] and `paddings` is [[1,1], [2,2]], then the
+          Outputs is [[6,5,4,5,6,5,4], [3,2,1,2,3,2,1], [6,5,4,5,6,5,4], [9,8,7,8,9,8,7], [6,5,4,5,6,5,4]].
         - If `mode` is "SYMMETRIC", the filling method is similar to the "REFLECT". It is also copied
           according to the symmetry axis, except that it includes the symmetry axis. If the `input_x`
-          is [[1,2,3],[4,5,6],[7,8,9]] and `paddings` is [[1,1],[2,2]], then the Outputs is
-          [[2,1,1,2,3,3,2],[2,1,1,2,3,3,2],[5,4,4,5,6,6,5],[8,7,7,8,9,9,8],[8,7,7,8,9,9,8]].
+          is [[1,2,3], [4,5,6], [7,8,9]] and `paddings` is [[1,1], [2,2]], then the Outputs is
+          [[2,1,1,2,3,3,2], [2,1,1,2,3,3,2], [5,4,4,5,6,6,5], [8,7,7,8,9,9,8], [8,7,7,8,9,9,8]].
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Examples:
         >>> from mindspore import Tensor
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> import mindspore.nn as nn
         >>> import numpy as np
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.pad = P.MirrorPad(mode="REFLECT")
-        >>>     def construct(self, x, paddings):
-        >>>         return self.pad(x, paddings)
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.pad = ops.MirrorPad(mode="REFLECT")
+        ...     def construct(self, x, paddings):
+        ...         return self.pad(x, paddings)
+        ...
         >>> x = np.random.random(size=(2, 3)).astype(np.float32)
-        >>> paddings = Tensor([[1,1],[2,2]])
+        >>> paddings = Tensor([[1, 1], [2, 2]])
         >>> pad = Net()
-        >>> ms_output = pad(Tensor(x), paddings)
+        >>> output = pad(Tensor(x), paddings)
+        >>> print(output.shape)
+        (4, 7)
     """
 
     @prim_attr_register
@@ -2970,7 +3392,7 @@ class MirrorPad(PrimitiveWithInfer):
         x_shape = list(input_x['shape'])
         paddings_value = paddings['value'].asnumpy()
         paddings_size = paddings_value.size
-        validator.check_integer('paddings.shape', paddings_size, len(x_shape) * 2, Rel.EQ, self.name)
+        validator.check_int(paddings_size, len(x_shape) * 2, Rel.EQ, 'paddings.shape', self.name)
         if not np.all(paddings_value >= 0):
             raise ValueError('All elements of paddings must be >= 0.')
         adjust = 0
@@ -2987,17 +3409,84 @@ class MirrorPad(PrimitiveWithInfer):
                 'value': None}
 
 
+class ComputeAccidentalHits(PrimitiveWithCheck):
+    """
+    Compute accidental hits of sampled classes which happen to match target classes.
+
+    When a target class matches the sample class, we call it "accidental hit".
+    The result of calculating accidental hit contains three parts (index, id, weight),
+    where index represents the row number in true_classes, and id represents the position in sampled_candidates,
+    the weight is -FLOAT_MAX.
+
+    Args:
+        num_true (int): The number of target classes per training example.
+
+    Inputs:
+        - **true_classes** (Tensor) - The target classes. With data type of int32 or int64
+          and shape [batch_size, num_true].
+        - **sampled_candidates** (Tensor) - The sampled_candidates output of CandidateSampler,
+          with data type of int32 or int64 and shape [num_sampled].
+
+    Outputs:
+        Tuple of 3 Tensors.
+
+        - **indices** (Tensor) - A Tensor with shape (num_accidental_hits,), with the same type as `true_classes`.
+        - **ids** (Tensor) - A Tensor with shape (num_accidental_hits,), with the same type as `true_classes`.
+        - **weights** (Tensor) - A Tensor with shape (num_accidental_hits,), with the type float32.
+
+    Supported Platforms:
+        ``Ascend``
+
+    Examples:
+        >>> x = np.array([[1, 2], [0, 4], [3, 3]])
+        >>> y = np.array([0, 1, 2, 3, 4])
+        >>> sampler = ops.ComputeAccidentalHits(2)
+        >>> output1, output2, output3 = sampler(Tensor(x), Tensor(y))
+        >>> print(output1, output2, output3)
+        [0 0 1 1 2 2]
+        [1 2 0 4 3 3]
+        [-3.4028235e+38 -3.4028235e+38 -3.4028235e+38 -3.4028235e+38 -3.4028235e+38 -3.4028235e+38]
+
+    """
+
+    @prim_attr_register
+    def __init__(self, num_true=1):
+        """Initialize ComputeAccidentalHits"""
+        self.init_prim_io_names(inputs=['true_classes', 'sampled_candidates'],
+                                outputs=['indices', 'ids', 'weights'])
+        validator.check_value_type("num_true", num_true, [int], self.name)
+        validator.check_number("num_true", num_true, 1, Rel.GE, self.name)
+        self.num_true = num_true
+
+    def check_shape(self, true_classes_shape, sampled_candidates_shape):
+        validator.check_int(len(true_classes_shape), 2, Rel.EQ, 'dim of true_classes', self.name)
+        validator.check_int(len(sampled_candidates_shape), 1, Rel.EQ, 'dim of sampled_candidates', self.name)
+        validator.check("true_classes shape[1]", true_classes_shape[1], "num_true", self.num_true, Rel.EQ, self.name)
+
+        indices_len = -1
+        return (indices_len,), (indices_len,), (indices_len,)
+
+    def check_dtype(self, true_classes_type, sampled_candidates_type):
+        validator.check_subclass("true_classes_type", true_classes_type, mstype.tensor, self.name)
+        validator.check_subclass("sampled_candidates_type", sampled_candidates_type, mstype.tensor, self.name)
+        valid_types = (mstype.int32, mstype.int64)
+        validator.check_tensor_dtype_valid("true_classes_type", true_classes_type, valid_types, self.name)
+        validator.check_tensor_dtype_valid("sampled_candidates_type", sampled_candidates_type, valid_types, self.name)
+        weights_type = mstype.float32
+        return true_classes_type, true_classes_type, weights_type
+
+
 class ROIAlign(PrimitiveWithInfer):
     """
-    Computes Region of Interest (RoI) Align operator.
+    Computes the Region of Interest (RoI) Align operator.
 
     The operator computes the value of each sampling point by bilinear interpolation from the nearby grid points on the
     feature map. No quantization is performed on any coordinates involved in the RoI, its bins, or the sampling
     points. The details of (RoI) Align operator are described in `Mask R-CNN <https://arxiv.org/abs/1703.06870>`_.
 
     Args:
-        pooled_height (int): The output features' height.
-        pooled_width (int): The output features' width.
+        pooled_height (int): The output features height.
+        pooled_width (int): The output features width.
         spatial_scale (float): A scaling factor that maps the raw image coordinates to the input
             feature map coordinates. Suppose the height of a RoI is `ori_h` in the raw image and `fea_h` in the
             input feature map, the `spatial_scale` must be `fea_h / ori_h`.
@@ -3016,12 +3505,17 @@ class ROIAlign(PrimitiveWithInfer):
     Outputs:
         Tensor, the shape is `(rois_n, C, pooled_height, pooled_width)`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> input_tensor = Tensor(np.array([[[[1., 2.], [3., 4.]]]]), mindspore.float32)
         >>> rois = Tensor(np.array([[0, 0.2, 0.3, 0.2, 0.3]]), mindspore.float32)
-        >>> roi_align = P.ROIAlign(2, 2, 0.5, 2)
-        >>> output_tensor = roi_align(input_tensor, rois)
-        >>> assert output_tensor == Tensor(np.array([[[[2.15]]]]), mindspore.float32)
+        >>> roi_align = ops.ROIAlign(2, 2, 0.5, 2)
+        >>> output = roi_align(input_tensor, rois)
+        >>> print(output)
+        [[[[1.775 2.025]
+           [2.275 2.525]]]]
     """
 
     @prim_attr_register
@@ -3032,7 +3526,7 @@ class ROIAlign(PrimitiveWithInfer):
         validator.check_value_type("spatial_scale", spatial_scale, [float], self.name)
         validator.check_value_type("sample_num", sample_num, [int], self.name)
         validator.check_value_type("roi_end_mode", roi_end_mode, [int], self.name)
-        validator.check_int_range("roi_end_mode", roi_end_mode, 0, 1, Rel.INC_BOTH, self.name)
+        validator.check_int_range(roi_end_mode, 0, 1, Rel.INC_BOTH, "roi_end_mode", self.name)
         self.pooled_height = pooled_height
         self.pooled_width = pooled_width
         self.spatial_scale = spatial_scale
@@ -3040,18 +3534,19 @@ class ROIAlign(PrimitiveWithInfer):
         self.roi_end_mode = roi_end_mode
 
     def infer_shape(self, inputs_shape, rois_shape):
+        validator.check("input shape rank", len(inputs_shape), "", 4, Rel.LE, self.name)
         return [rois_shape[0], inputs_shape[1], self.pooled_height, self.pooled_width]
 
     def infer_dtype(self, inputs_type, rois_type):
-        valid_types = (mstype.float16, mstype.float32)
-        validator.check_tensor_type_same({"inputs_type": inputs_type}, valid_types, self.name)
-        validator.check_tensor_type_same({"rois_type": rois_type}, valid_types, self.name)
+        valid_dtypes = (mstype.float16, mstype.float32)
+        validator.check_tensor_dtype_valid("inputs_type", inputs_type, valid_dtypes, self.name)
+        validator.check_tensor_dtype_valid("rois_type", rois_type, valid_dtypes, self.name)
         return inputs_type
 
 
 class Adam(PrimitiveWithInfer):
     r"""
-    Updates gradients by Adaptive Moment Estimation (Adam) algorithm.
+    Updates gradients by the Adaptive Moment Estimation (Adam) algorithm.
 
     The Adam algorithm is proposed in `Adam: A Method for Stochastic Optimization <https://arxiv.org/abs/1412.6980>`_.
 
@@ -3077,7 +3572,7 @@ class Adam(PrimitiveWithInfer):
             If false, the result is unpredictable. Default: False.
         use_nesterov (bool): Whether to use Nesterov Accelerated Gradient (NAG) algorithm to update the gradients.
             If true, update the gradients using NAG.
-            If true, update the gradients without using NAG. Default: False.
+            If false, update the gradients without using NAG. Default: False.
 
     Inputs:
         - **var** (Tensor) - Weights to be updated.
@@ -3099,26 +3594,40 @@ class Adam(PrimitiveWithInfer):
         - **m** (Tensor) - The same shape and data type as `m`.
         - **v** (Tensor) - The same shape and data type as `v`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.apply_adam = P.Adam()
-        >>>         self.var = Parameter(Tensor(np.ones([3, 3, 3]).astype(np.float32)), name="var")
-        >>>         self.m = Parameter(Tensor(np.ones([3, 3, 3]).astype(np.float32)), name="m")
-        >>>         self.v = Parameter(Tensor(np.ones([3, 3, 3]).astype(np.float32)), name="v")
-        >>>     def construct(self, beta1_power, beta2_power, lr, beta1, beta2, epsilon, grad):
-        >>>         out = self.apply_adam(self.var, self.m, self.v, beta1_power, beta2_power, lr, beta1, beta2,
-        >>>                               epsilon, grad)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.apply_adam = ops.Adam()
+        ...         self.var = Parameter(Tensor(np.ones([2, 2]).astype(np.float32)), name="var")
+        ...         self.m = Parameter(Tensor(np.ones([2, 2]).astype(np.float32)), name="m")
+        ...         self.v = Parameter(Tensor(np.ones([2, 2]).astype(np.float32)), name="v")
+        ...     def construct(self, beta1_power, beta2_power, lr, beta1, beta2, epsilon, grad):
+        ...         out = self.apply_adam(self.var, self.m, self.v, beta1_power, beta2_power, lr, beta1, beta2,
+        ...                               epsilon, grad)
+        ...
+        ...         return out
+        >>> np.random.seed(0)
         >>> net = Net()
-        >>> gradient = Tensor(np.random.rand(3, 3, 3).astype(np.float32))
-        >>> result = net(0.9, 0.999, 0.001, 0.9, 0.999, 1e-8, gradient)
+        >>> gradient = Tensor(np.random.rand(2, 2).astype(np.float32))
+        >>> output = net(0.9, 0.999, 0.001, 0.9, 0.999, 1e-8, gradient)
+        >>> print(output)
+        (Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 9.99697924e-01,  9.99692678e-01],
+         [ 9.99696255e-01,  9.99698043e-01]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 9.54881310e-01,  9.71518934e-01],
+         [ 9.60276306e-01,  9.54488277e-01]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 9.99301195e-01,  9.99511480e-01],
+         [ 9.99363303e-01,  9.99296904e-01]]))
     """
+
     @prim_attr_register
     def __init__(self, use_locking=False, use_nesterov=False):
         validator.check_value_type("use_locking", use_locking, [bool], self.name)
@@ -3134,17 +3643,122 @@ class Adam(PrimitiveWithInfer):
     def infer_dtype(self, var_dtype, m_dtype, v_dtype, beta1_power_dtype, beta2_power_dtype, lr_dtype,
                     beta1_dtype, beta2_dtype, epsilon_dtype, grad_dtype):
         args = {"var": var_dtype, "m": m_dtype, "v": v_dtype, "grad": grad_dtype}
-        validator.check_tensor_type_same(args, mstype.number_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, mstype.number_type, self.name)
 
         args = {"beta1_power": beta1_power_dtype, "beta2_power": beta2_power_dtype, 'lr': lr_dtype,
                 "beta1": beta1_dtype, "beta2": beta2_dtype, "epsilon": epsilon_dtype}
-        validator.check_scalar_or_tensor_type_same(args, [mstype.float16, mstype.float32], self.name, True)
+        validator.check_scalar_or_tensor_types_same(args, [mstype.float16, mstype.float32], self.name, True)
         return var_dtype, m_dtype, v_dtype
+
+
+class AdamNoUpdateParam(PrimitiveWithInfer):
+    r"""
+    Updates gradients by Adaptive Moment Estimation (Adam) algorithm. This operator do not update the parameter, but
+    calculate the value that should be added to the parameter instead.
+
+    The Adam algorithm is proposed in `Adam: A Method for Stochastic Optimization <https://arxiv.org/abs/1412.6980>`_.
+
+    The updating formulas are as follows,
+
+    .. math::
+        \begin{array}{ll} \\
+            m = \beta_1 * m + (1 - \beta_1) * g \\
+            v = \beta_2 * v + (1 - \beta_2) * g * g \\
+            l = \alpha * \frac{\sqrt{1-\beta_2^t}}{1-\beta_1^t} \\
+            \Delta{w} = - l * \frac{m}{\sqrt{v} + \epsilon}
+        \end{array}
+
+    :math:`m` represents the 1st moment vector, :math:`v` represents the 2nd moment vector, :math:`g` represents
+    `gradient`, :math:`l` represents scaling factor `lr`, :math:`\beta_1, \beta_2` represent `beta1` and `beta2`,
+    :math:`t` represents updating step while :math:`beta_1^t` and :math:`beta_2^t` represent `beta1_power` and
+    `beta2_power`, :math:`\alpha` represents `learning_rate`, :math:`w` represents the parameter to be updated,
+    :math:`\epsilon`represents `epsilon`.
+
+    Args:
+        use_locking (bool): Whether to enable a lock to protect variable tensors from being updated.
+            If true, updates of the var, m, and v tensors will be protected by a lock.
+            If false, the result is unpredictable. Default: False.
+        use_nesterov (bool): Whether to use Nesterov Accelerated Gradient (NAG) algorithm to update the gradients.
+            If true, update the gradients using NAG.
+            If false, update the gradients without using NAG. Default: False.
+
+    Inputs:
+        - **m** (Tensor) - The 1st moment vector in the updating formula. The data type must be float32.
+        - **v** (Tensor) - the 2nd moment vector in the updating formula. The shape must be the same as `m`.
+          The data type must be float32.
+        - **beta1_power** (Tensor) - :math:`beta_1^t` in the updating formula. The data type must be float32.
+        - **beta2_power** (Tensor) - :math:`beta_2^t` in the updating formula. The data type must be float32.
+        - **lr** (Tensor) - :math:`l` in the updating formula. The data type must be float32.
+        - **beta1** (Tensor) - The exponential decay rate for the 1st moment estimations. The data type must be float32.
+        - **beta2** (Tensor) - The exponential decay rate for the 2nd moment estimations. The data type must be float32.
+        - **epsilon** (Tensor) - Term added to the denominator to improve numerical stability. The data type must be
+          float32.
+        - **gradient** (Tensor) - Gradient, the shape must be the same as `m`, the data type must be float32.
+
+    Outputs:
+        Tensor, whose shape and data type are the same with `gradient`, is a value that should be added to the
+        parameter to be updated.
+
+    Supported Platforms:
+        ``CPU``
+
+    Examples:
+        >>> import numpy as np
+        >>> import mindspore as ms
+        >>> import mindspore.nn as nn
+        >>> from mindspore import Tensor, Parameter
+        >>> from mindspore.ops import operations as ops
+        >>>
+        >>> class Net(nn.Cell):
+        >>>     def __init__(self):
+        >>>         super(Net, self).__init__()
+        >>>         self.adam = ops.AdamNoUpdateParam()
+        >>>         self.m = Parameter(Tensor(np.array([[0.1, 0.1, 0.1], [0.2, 0.2, 0.2]]).astype(np.float32)),
+        >>>                            name="m")
+        >>>         self.v = Parameter(Tensor(np.array([[0.1, 0.1, 0.1], [0.2, 0.2, 0.2]]).astype(np.float32)),
+        >>>                            name="v")
+        >>>     def construct(self, beta1_power, beta2_power, lr, beta1, beta2, epsilon, grad):
+        >>>         out = self.adam(self.m, self.v, beta1_power, beta2_power, lr, beta1, beta2, epsilon, grad)
+        >>>         return out
+        >>> net = Net()
+        >>> beta1_power = Tensor(0.9, ms.float32)
+        >>> beta2_power = Tensor(0.999, ms.float32)
+        >>> lr = Tensor(0.001, ms.float32)
+        >>> beta1 = Tensor(0.9, ms.float32)
+        >>> beta2 = Tensor(0.999, ms.float32)
+        >>> epsilon = Tensor(1e-8, ms.float32)
+        >>> gradient = Tensor(np.array([[0.1, 0.1, 0.1], [0.1, 0.1, 0.1]]).astype(np.float32))
+        >>>
+        >>> result = net(beta1_power, beta2_power, lr, beta1, beta2, epsilon, gradient)
+        >>> print(result)
+        [[-0.00010004 -0.00010004 -0.00010004]
+        [-0.00013441 -0.00013441 -0.00013441]]
+
+    """
+
+    @prim_attr_register
+    def __init__(self, use_locking=False, use_nesterov=False):
+        validator.check_value_type("use_locking", use_locking, [bool], self.name)
+        validator.check_value_type("use_nesterov", use_nesterov, [bool], self.name)
+
+    def infer_shape(self, m_shape, v_shape, beta1_power_shape, beta2_power_shape, lr_shape,
+                    beta1_shape, beta2_shape, epsilon_shape, grad_shape):
+        validator.check("grad_shape", grad_shape, "m_shape", m_shape, Rel.EQ, self.name)
+        validator.check("grad_shape", grad_shape, "v_shape", v_shape, Rel.EQ, self.name)
+        return grad_shape
+
+    def infer_dtype(self, m_dtype, v_dtype, beta1_power_dtype, beta2_power_dtype, lr_dtype,
+                    beta1_dtype, beta2_dtype, epsilon_dtype, grad_dtype):
+        args = {"m": m_dtype, "v": v_dtype, "grad": grad_dtype,
+                "beta1_power": beta1_power_dtype, "beta2_power": beta2_power_dtype, 'lr': lr_dtype,
+                "beta1": beta1_dtype, "beta2": beta2_dtype, "epsilon": epsilon_dtype}
+        validator.check_tensors_dtypes_same_and_valid(args, [mstype.float32], self.name)
+        return grad_dtype
 
 
 class FusedSparseAdam(PrimitiveWithInfer):
     r"""
-    Merges the duplicate value of the gradient and then updates parameters by Adaptive Moment Estimation (Adam)
+    Merges the duplicate value of the gradient and then updates parameters by the Adaptive Moment Estimation (Adam)
     algorithm. This operator is used when the gradient is sparse.
 
     The Adam algorithm is proposed in `Adam: A Method for Stochastic Optimization <https://arxiv.org/abs/1412.6980>`_.
@@ -3176,7 +3790,7 @@ class FusedSparseAdam(PrimitiveWithInfer):
             If false, the result is unpredictable. Default: False.
         use_nesterov (bool): Whether to use Nesterov Accelerated Gradient (NAG) algorithm to update the gradients.
             If true, update the gradients using NAG.
-            If true, update the gradients without using NAG. Default: False.
+            If false, update the gradients without using NAG. Default: False.
 
     Inputs:
         - **var** (Parameter) - Parameters to be updated with float32 data type.
@@ -3200,23 +3814,27 @@ class FusedSparseAdam(PrimitiveWithInfer):
         - **m** (Tensor) - A Tensor with shape (1,).
         - **v** (Tensor) - A Tensor with shape (1,).
 
+    Supported Platforms:
+        ``CPU``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> import mindspore.common.dtype as mstype
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.sparse_apply_adam = P.FusedSparseAdam()
-        >>>         self.var = Parameter(Tensor(np.ones([3, 1, 2]).astype(np.float32)), name="var")
-        >>>         self.m = Parameter(Tensor(np.ones([3, 1, 2]).astype(np.float32)), name="m")
-        >>>         self.v = Parameter(Tensor(np.ones([3, 1, 2]).astype(np.float32)), name="v")
-        >>>     def construct(self, beta1_power, beta2_power, lr, beta1, beta2, epsilon, grad, indices):
-        >>>         out = self.sparse_apply_adam(self.var, self.m, self.v, beta1_power, beta2_power, lr, beta1, beta2,
-        >>>                                      epsilon, grad, indices)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.sparse_apply_adam = ops.FusedSparseAdam()
+        ...         self.var = Parameter(Tensor(np.ones([3, 1, 2]).astype(np.float32)), name="var")
+        ...         self.m = Parameter(Tensor(np.ones([3, 1, 2]).astype(np.float32)), name="m")
+        ...         self.v = Parameter(Tensor(np.ones([3, 1, 2]).astype(np.float32)), name="v")
+        ...     def construct(self, beta1_power, beta2_power, lr, beta1, beta2, epsilon, grad, indices):
+        ...         out = self.sparse_apply_adam(self.var, self.m, self.v, beta1_power, beta2_power, lr, beta1, beta2,
+        ...                                      epsilon, grad, indices)
+        ...         return out
+        ...
         >>> net = Net()
         >>> beta1_power = Tensor(0.9, mstype.float32)
         >>> beta2_power = Tensor(0.999, mstype.float32)
@@ -3226,7 +3844,8 @@ class FusedSparseAdam(PrimitiveWithInfer):
         >>> epsilon = Tensor(1e-8, mstype.float32)
         >>> gradient = Tensor(np.random.rand(2, 1, 2), mstype.float32)
         >>> indices = Tensor([0, 1], mstype.int32)
-        >>> result = net(beta1_power, beta2_power, lr, beta1, beta2, epsilon, gradient, indices)
+        >>> output = net(beta1_power, beta2_power, lr, beta1, beta2, epsilon, gradient, indices)
+        >>> print(output)
     """
     __mindspore_signature__ = (
         sig.make_sig('var', sig.sig_rw.RW_WRITE, dtype=sig.sig_dtype.T),
@@ -3254,7 +3873,7 @@ class FusedSparseAdam(PrimitiveWithInfer):
                     beta1_shape, beta2_shape, epsilon_shape, grad_shape, indices_shape):
         validator.check("var_shape", var_shape, "m_shape", m_shape, Rel.EQ, self.name)
         validator.check("var_shape", var_shape, "v_shape", v_shape, Rel.EQ, self.name)
-        validator.check_integer("indices rank", len(indices_shape), 1, Rel.EQ, self.name)
+        validator.check_int(len(indices_shape), 1, Rel.EQ, "indices rank", self.name)
         validator.check('grad_shape[0]', grad_shape[0], 'indices_shape[0]', indices_shape[0], Rel.EQ, self.name)
         if len(var_shape) > 1 and grad_shape != indices_shape + var_shape[1:]:
             raise ValueError(f"For '{self.name}', the shape of updates should be [] or "
@@ -3265,18 +3884,18 @@ class FusedSparseAdam(PrimitiveWithInfer):
     def infer_dtype(self, var_dtype, m_dtype, v_dtype, beta1_power_dtype, beta2_power_dtype, lr_dtype,
                     beta1_dtype, beta2_dtype, epsilon_dtype, grad_dtype, indices_dtype):
         args = {"var": var_dtype, "m": m_dtype, "v": v_dtype, "grad": grad_dtype}
-        validator.check_tensor_type_same(args, mstype.number_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, mstype.number_type, self.name)
 
         args = {"beta1_power": beta1_power_dtype, "beta2_power": beta2_power_dtype, 'lr': lr_dtype,
                 "beta1": beta1_dtype, "beta2": beta2_dtype, "epsilon": epsilon_dtype}
-        validator.check_scalar_or_tensor_type_same(args, [mstype.float16, mstype.float32], self.name, True)
-        validator.check_tensor_type_same({"indices_dtype": indices_dtype}, [mstype.int32], self.name)
+        validator.check_scalar_or_tensor_types_same(args, [mstype.float16, mstype.float32], self.name, True)
+        validator.check_tensor_dtype_valid("indices_dtype", indices_dtype, [mstype.int32], self.name)
         return var_dtype, m_dtype, v_dtype
 
 
 class FusedSparseLazyAdam(PrimitiveWithInfer):
     r"""
-    Merges the duplicate value of the gradient and then updates parameters by Adaptive Moment Estimation (Adam)
+    Merges the duplicate value of the gradient and then updates parameters by the Adaptive Moment Estimation (LazyAdam)
     algorithm. This operator is used when the gradient is sparse. The behavior is not equivalent to the
     original Adam algorithm, as only the current indices parameters will be updated.
 
@@ -3309,7 +3928,7 @@ class FusedSparseLazyAdam(PrimitiveWithInfer):
             If false, the result is unpredictable. Default: False.
         use_nesterov (bool): Whether to use Nesterov Accelerated Gradient (NAG) algorithm to update the gradients.
             If true, update the gradients using NAG.
-            If true, update the gradients without using NAG. Default: False.
+            If false, update the gradients without using NAG. Default: False.
 
     Inputs:
         - **var** (Parameter) - Parameters to be updated with float32 data type.
@@ -3333,23 +3952,27 @@ class FusedSparseLazyAdam(PrimitiveWithInfer):
         - **m** (Tensor) - A Tensor with shape (1,).
         - **v** (Tensor) - A Tensor with shape (1,).
 
+    Supported Platforms:
+        ``CPU``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> import mindspore.common.dtype as mstype
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.sparse_apply_lazyadam = P.FusedSparseLazyAdam()
-        >>>         self.var = Parameter(Tensor(np.ones([3, 1, 2]).astype(np.float32)), name="var")
-        >>>         self.m = Parameter(Tensor(np.ones([3, 1, 2]).astype(np.float32)), name="m")
-        >>>         self.v = Parameter(Tensor(np.ones([3, 1, 2]).astype(np.float32)), name="v")
-        >>>     def construct(self, beta1_power, beta2_power, lr, beta1, beta2, epsilon, grad, indices):
-        >>>         out = self.sparse_apply_lazyadam(self.var, self.m, self.v, beta1_power, beta2_power, lr, beta1,
-        >>>                                          beta2, epsilon, grad, indices)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.sparse_apply_lazyadam = ops.FusedSparseLazyAdam()
+        ...         self.var = Parameter(Tensor(np.ones([3, 1, 2]).astype(np.float32)), name="var")
+        ...         self.m = Parameter(Tensor(np.ones([3, 1, 2]).astype(np.float32)), name="m")
+        ...         self.v = Parameter(Tensor(np.ones([3, 1, 2]).astype(np.float32)), name="v")
+        ...     def construct(self, beta1_power, beta2_power, lr, beta1, beta2, epsilon, grad, indices):
+        ...         out = self.sparse_apply_lazyadam(self.var, self.m, self.v, beta1_power, beta2_power, lr, beta1,
+        ...                                          beta2, epsilon, grad, indices)
+        ...         return out
+        ...
         >>> net = Net()
         >>> beta1_power = Tensor(0.9, mstype.float32)
         >>> beta2_power = Tensor(0.999, mstype.float32)
@@ -3359,7 +3982,8 @@ class FusedSparseLazyAdam(PrimitiveWithInfer):
         >>> epsilon = Tensor(1e-8, mstype.float32)
         >>> gradient = Tensor(np.random.rand(2, 1, 2), mstype.float32)
         >>> indices = Tensor([0, 1], mstype.int32)
-        >>> result = net(beta1_power, beta2_power, lr, beta1, beta2, epsilon, gradient, indices)
+        >>> output = net(beta1_power, beta2_power, lr, beta1, beta2, epsilon, gradient, indices)
+        >>> print(output)
     """
     __mindspore_signature__ = (
         sig.make_sig('var', sig.sig_rw.RW_WRITE, dtype=sig.sig_dtype.T),
@@ -3387,7 +4011,7 @@ class FusedSparseLazyAdam(PrimitiveWithInfer):
                     beta1_shape, beta2_shape, epsilon_shape, grad_shape, indices_shape):
         validator.check("var_shape", var_shape, "m_shape", m_shape, Rel.EQ, self.name)
         validator.check("var_shape", var_shape, "v_shape", v_shape, Rel.EQ, self.name)
-        validator.check_integer("indices rank", len(indices_shape), 1, Rel.EQ, self.name)
+        validator.check_int(len(indices_shape), 1, Rel.EQ, "indices rank", self.name)
         validator.check('grad_shape[0]', grad_shape[0], 'indices_shape[0]', indices_shape[0], Rel.EQ, self.name)
         if len(var_shape) > 1 and grad_shape != indices_shape + var_shape[1:]:
             raise ValueError(f"For '{self.name}', the shape of updates should be [] or "
@@ -3398,13 +4022,13 @@ class FusedSparseLazyAdam(PrimitiveWithInfer):
     def infer_dtype(self, var_dtype, m_dtype, v_dtype, beta1_power_dtype, beta2_power_dtype, lr_dtype,
                     beta1_dtype, beta2_dtype, epsilon_dtype, grad_dtype, indices_dtype):
         args = {"var": var_dtype, "m": m_dtype, "v": v_dtype, "grad": grad_dtype}
-        validator.check_tensor_type_same(args, mstype.number_type, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, mstype.number_type, self.name)
 
         args = {"beta1_power": beta1_power_dtype, "beta2_power": beta2_power_dtype, 'lr': lr_dtype,
                 "beta1": beta1_dtype, "beta2": beta2_dtype, "epsilon": epsilon_dtype}
-        validator.check_scalar_or_tensor_type_same(args, [mstype.float16, mstype.float32], self.name, True)
+        validator.check_scalar_or_tensor_types_same(args, [mstype.float16, mstype.float32], self.name, True)
 
-        validator.check_tensor_type_same({"indices_dtype": indices_dtype}, [mstype.int32], self.name)
+        validator.check_tensor_dtype_valid("indices_dtype", indices_dtype, [mstype.int32], self.name)
         return var_dtype, m_dtype, v_dtype
 
 
@@ -3440,29 +4064,36 @@ class FusedSparseFtrl(PrimitiveWithInfer):
         - **accum** (Tensor) - A Tensor with shape (1,).
         - **linear** (Tensor) - A Tensor with shape (1,).
 
+    Supported Platforms:
+        ``Ascend`` ``CPU``
+
     Examples:
         >>> import mindspore
         >>> import mindspore.nn as nn
         >>> import numpy as np
         >>> from mindspore import Parameter
         >>> from mindspore import Tensor
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class SparseApplyFtrlNet(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(SparseApplyFtrlNet, self).__init__()
-        >>>         self.sparse_apply_ftrl = P.FusedSparseFtrl(lr=0.01, l1=0.0, l2=0.0, lr_power=-0.5)
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 1, 2).astype(np.float32)), name="var")
-        >>>         self.accum = Parameter(Tensor(np.random.rand(3, 1, 2).astype(np.float32)), name="accum")
-        >>>         self.linear = Parameter(Tensor(np.random.rand(3, 1, 2).astype(np.float32)), name="linear")
-        >>>
-        >>>     def construct(self, grad, indices):
-        >>>         out = self.sparse_apply_ftrl(self.var, self.accum, self.linear, grad, indices)
-        >>>         return out
-        >>>
+        ...     def __init__(self):
+        ...         super(SparseApplyFtrlNet, self).__init__()
+        ...         self.sparse_apply_ftrl = ops.FusedSparseFtrl(lr=0.01, l1=0.0, l2=0.0, lr_power=-0.5)
+        ...         self.var = Parameter(Tensor(np.random.rand(3, 1, 2).astype(np.float32)), name="var")
+        ...         self.accum = Parameter(Tensor(np.random.rand(3, 1, 2).astype(np.float32)), name="accum")
+        ...         self.linear = Parameter(Tensor(np.random.rand(3, 1, 2).astype(np.float32)), name="linear")
+        ...
+        ...     def construct(self, grad, indices):
+        ...         out = self.sparse_apply_ftrl(self.var, self.accum, self.linear, grad, indices)
+        ...         return out
+        ...
         >>> net = SparseApplyFtrlNet()
         >>> grad = Tensor(np.random.rand(2, 1, 2).astype(np.float32))
         >>> indices = Tensor(np.array([0, 1]).astype(np.int32))
         >>> output = net(grad, indices)
+        >>> print(output)
+        (Tensor(shape=[1], dtype=Float32, value= [0.00000000e+00]),
+         Tensor(shape=[1], dtype=Float32, value= [0.00000000e+00]),
+         Tensor(shape=[1], dtype=Float32, value= [0.00000000e+00]))
     """
     __mindspore_signature__ = (
         sig.make_sig('var', sig.sig_rw.RW_WRITE, dtype=sig.sig_dtype.T),
@@ -3480,9 +4111,9 @@ class FusedSparseFtrl(PrimitiveWithInfer):
         validator.check_value_type("l1", l1, [float], self.name)
         validator.check_value_type("l2", l2, [float], self.name)
         validator.check_value_type("lr_power", lr_power, [float], self.name)
-        self.lr = validator.check_number_range("lr", lr, 0.0, float("inf"), Rel.INC_NEITHER, self.name)
-        self.l1 = validator.check_number_range("l1", l1, 0.0, float("inf"), Rel.INC_LEFT, self.name)
-        self.l2 = validator.check_number_range("l2", l2, 0.0, float("inf"), Rel.INC_LEFT, self.name)
+        self.lr = validator.check_positive_float(lr, "lr", self.name)
+        self.l1 = validator.check_non_negative_float(l1, "l1", self.name)
+        self.l2 = validator.check_non_negative_float(l2, "l2", self.name)
         self.lr_power = validator.check_number("lr_power", lr_power, 0, Rel.LE, self.name)
         self.use_locking = validator.check_value_type("use_locking", use_locking, [bool], self.name)
 
@@ -3491,15 +4122,15 @@ class FusedSparseFtrl(PrimitiveWithInfer):
         validator.check('var shape', var_shape, 'linear shape', linear_shape, Rel.EQ, self.name)
         if len(var_shape) > 1:
             validator.check('var_shape[1:]', var_shape[1:], 'grad_shape[1:]', grad_shape[1:], Rel.EQ, self.name)
-        validator.check_integer("indices rank", len(indices_shape), 1, Rel.EQ, self.name)
+        validator.check_int(len(indices_shape), 1, Rel.EQ, "indices rank", self.name)
         validator.check('grad_shape[0]', grad_shape[0], 'indices_shape[0]', indices_shape[0], Rel.EQ, self.name)
         return [1], [1], [1]
 
     def infer_dtype(self, var_dtype, accum_dtype, linear_dtype, grad_dtype, indices_dtype):
         args = {"var_dtype": var_dtype, "accum_dtype": accum_dtype,
                 "linear_dtype": linear_dtype, "grad_dtype": grad_dtype}
-        validator.check_tensor_type_same(args, [mstype.float32], self.name)
-        validator.check_tensor_type_same({"indices_dtype": indices_dtype}, [mstype.int32], self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, [mstype.float32], self.name)
+        validator.check_tensor_dtype_valid("indices_dtype", indices_dtype, [mstype.int32], self.name)
         return var_dtype, accum_dtype, linear_dtype
 
 
@@ -3540,28 +4171,36 @@ class FusedSparseProximalAdagrad(PrimitiveWithInfer):
         - **var** (Tensor) - A Tensor with shape (1,).
         - **accum** (Tensor) - A Tensor with shape (1,).
 
+    Supported Platforms:
+        ``CPU``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
+        >>> import mindspore.common.dtype as mstype
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.sparse_apply_proximal_adagrad = P.FusedSparseProximalAdagrad()
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 1, 2).astype(np.float32)), name="var")
-        >>>         self.accum = Parameter(Tensor(np.random.rand(3, 1, 2).astype(np.float32)), name="accum")
-        >>>         self.lr = Tensor(0.01, mstype.float32)
-        >>>         self.l1 = Tensor(0.0, mstype.float32)
-        >>>         self.l2 = Tensor(0.0, mstype.float32)
-        >>>     def construct(self, grad, indices):
-        >>>         out = self.sparse_apply_proximal_adagrad(self.var, self.accum, self.lr, self.l1,
-        >>>                                                  self.l2, grad, indices)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.sparse_apply_proximal_adagrad = ops.FusedSparseProximalAdagrad()
+        ...         self.var = Parameter(Tensor(np.random.rand(3, 1, 2).astype(np.float32)), name="var")
+        ...         self.accum = Parameter(Tensor(np.random.rand(3, 1, 2).astype(np.float32)), name="accum")
+        ...         self.lr = Tensor(0.01, mstype.float32)
+        ...         self.l1 = Tensor(0.0, mstype.float32)
+        ...         self.l2 = Tensor(0.0, mstype.float32)
+        ...     def construct(self, grad, indices):
+        ...         out = self.sparse_apply_proximal_adagrad(self.var, self.accum, self.lr, self.l1,
+        ...                                                  self.l2, grad, indices)
+        ...         return out
+        ...
         >>> net = Net()
         >>> grad = Tensor(np.random.rand(2, 1, 2).astype(np.float32))
         >>> indices = Tensor(np.array([0, 1]).astype(np.int32))
         >>> output = net(grad, indices)
+        >>> print(output)
+        (Tensor(shape=[1], dtype=Float32, value= [0.00000000e+00]),
+         Tensor(shape=[1], dtype=Float32, value= [0.00000000e+00]))
     """
     __mindspore_signature__ = (
         sig.make_sig('var', sig.sig_rw.RW_WRITE, dtype=sig.sig_dtype.T),
@@ -3580,18 +4219,18 @@ class FusedSparseProximalAdagrad(PrimitiveWithInfer):
         self.use_locking = validator.check_value_type("use_locking", use_locking, [bool], self.name)
 
     def infer_shape(self, var_shape, accum_shape, lr_shape, l1_shape, l2_shape, grad_shape, indices_shape):
-        validator.check_integer("indices rank", len(indices_shape), 1, Rel.EQ, self.name)
+        validator.check_int(len(indices_shape), 1, Rel.EQ, "indices rank", self.name)
         return [1], [1]
 
     def infer_dtype(self, var_dtype, accum_dtype, lr_dtype, l1_dtype, l2_dtype, grad_dtype, indices_dtype):
         args = {'var': var_dtype, 'accum': accum_dtype, 'grad': grad_dtype}
-        validator.check_tensor_type_same(args, [mstype.float32], self.name)
-        validator.check_scalar_or_tensor_type_same({"lr": lr_dtype}, [mstype.float32], self.name)
-        validator.check_scalar_or_tensor_type_same({"l1": l1_dtype}, [mstype.float32], self.name)
-        validator.check_scalar_or_tensor_type_same({"l2": l2_dtype}, [mstype.float32], self.name)
-        valid_types = [mstype.int16, mstype.int32, mstype.int64,
-                       mstype.uint16, mstype.uint32, mstype.uint64]
-        validator.check_tensor_type_same({'indices': indices_dtype}, valid_types, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, [mstype.float32], self.name)
+        validator.check_scalar_or_tensor_types_same({"lr": lr_dtype}, [mstype.float32], self.name)
+        validator.check_scalar_or_tensor_types_same({"l1": l1_dtype}, [mstype.float32], self.name)
+        validator.check_scalar_or_tensor_types_same({"l2": l2_dtype}, [mstype.float32], self.name)
+        valid_dtypes = [mstype.int16, mstype.int32, mstype.int64,
+                        mstype.uint16, mstype.uint32, mstype.uint64]
+        validator.check_tensor_dtype_valid('indices', indices_dtype, valid_dtypes, self.name)
         return var_dtype, accum_dtype
 
 
@@ -3611,9 +4250,9 @@ class KLDivLoss(PrimitiveWithInfer):
 
         .. math::
             \ell(x, y) = \begin{cases}
-            L, & \text{if reduction} = \text{`none';}\\
-            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
+            L, & \text{if reduction} = \text{'none';}\\
+            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
             \end{cases}
 
     Args:
@@ -3628,24 +4267,29 @@ class KLDivLoss(PrimitiveWithInfer):
         Tensor or Scalar, if `reduction` is 'none', then output is a tensor and has the same shape as `input_x`.
         Otherwise it is a scalar.
 
+    Supported Platforms:
+        ``GPU``
+
     Examples:
         >>> import mindspore
         >>> import mindspore.nn as nn
         >>> import numpy as np
         >>> from mindspore import Tensor
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.kldiv_loss = P.KLDivLoss()
-        >>>     def construct(self, x, y):
-        >>>         result = self.kldiv_loss(x, y)
-        >>>         return result
-        >>>
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.kldiv_loss = ops.KLDivLoss()
+        ...     def construct(self, x, y):
+        ...         result = self.kldiv_loss(x, y)
+        ...         return result
+        ...
         >>> net = Net()
         >>> input_x = Tensor(np.array([0.2, 0.7, 0.1]), mindspore.float32)
         >>> input_y = Tensor(np.array([0., 1., 0.]), mindspore.float32)
-        >>> result = net(input_x, input_y)
+        >>> output = net(input_x, input_y)
+        >>> print(output)
+        -0.23333333
     """
 
     @prim_attr_register
@@ -3662,14 +4306,14 @@ class KLDivLoss(PrimitiveWithInfer):
 
     def infer_dtype(self, x_type, y_type):
         args = {'x': x_type, 'y': y_type}
-        valid_types = (mstype.float16, mstype.float32)
-        validator.check_tensor_type_same(args, valid_types, self.name)
+        valid_dtypes = (mstype.float16, mstype.float32)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
         return x_type
 
 
 class BinaryCrossEntropy(PrimitiveWithInfer):
     r"""
-    Computes the Binary Cross Entropy between the target and the output.
+    Computes the binary cross entropy between the target and the output.
 
     Note:
         Sets input as :math:`x`, input label as :math:`y`, output as :math:`\ell(x, y)`.
@@ -3683,9 +4327,9 @@ class BinaryCrossEntropy(PrimitiveWithInfer):
 
         .. math::
             \ell(x, y) = \begin{cases}
-            L, & \text{if reduction} = \text{`none';}\\
-            \operatorname{mean}(L), & \text{if reduction} = \text{`mean';}\\
-            \operatorname{sum}(L),  & \text{if reduction} = \text{`sum'.}
+            L, & \text{if reduction} = \text{'none';}\\
+            \operatorname{mean}(L), & \text{if reduction} = \text{'mean';}\\
+            \operatorname{sum}(L),  & \text{if reduction} = \text{'sum'.}
             \end{cases}
 
     Args:
@@ -3702,25 +4346,29 @@ class BinaryCrossEntropy(PrimitiveWithInfer):
         Tensor or Scalar, if `reduction` is 'none', then output is a tensor and has the same shape as `input_x`.
         Otherwise, the output is a scalar.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> import mindspore
         >>> import mindspore.nn as nn
         >>> import numpy as np
         >>> from mindspore import Tensor
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.binary_cross_entropy = P.BinaryCrossEntropy()
-        >>>     def construct(self, x, y, weight):
-        >>>         result = self.binary_cross_entropy(x, y, weight)
-        >>>         return result
-        >>>
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.binary_cross_entropy = ops.BinaryCrossEntropy()
+        ...     def construct(self, x, y, weight):
+        ...         result = self.binary_cross_entropy(x, y, weight)
+        ...         return result
+        ...
         >>> net = Net()
         >>> input_x = Tensor(np.array([0.2, 0.7, 0.1]), mindspore.float32)
         >>> input_y = Tensor(np.array([0., 1., 0.]), mindspore.float32)
         >>> weight = Tensor(np.array([1, 2, 2]), mindspore.float32)
-        >>> result = net(input_x, input_y, weight)
+        >>> output = net(input_x, input_y, weight)
+        >>> print(output)
         0.38240486
     """
 
@@ -3740,10 +4388,10 @@ class BinaryCrossEntropy(PrimitiveWithInfer):
 
     def infer_dtype(self, x_type, y_type, weight_type):
         args = {'x': x_type, 'y': y_type}
-        valid_types = (mstype.float16, mstype.float32)
-        validator.check_tensor_type_same(args, valid_types, self.name)
+        valid_dtypes = (mstype.float16, mstype.float32)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
         if weight_type:
-            validator.check_tensor_type_same({'x': x_type, 'weight': weight_type}, valid_types, self.name)
+            validator.check_tensors_dtypes_same_and_valid({'x': x_type, 'weight': weight_type}, valid_dtypes, self.name)
         return x_type
 
 
@@ -3799,30 +4447,43 @@ class ApplyAdaMax(PrimitiveWithInfer):
         - **m** (Tensor) - The same shape and data type as `m`.
         - **v** (Tensor) - The same shape and data type as `v`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> import mindspore.common.dtype as mstype
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.apply_ada_max = P.ApplyAdaMax()
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="var")
-        >>>         self.m = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="m")
-        >>>         self.v = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="v")
-        >>>     def construct(self, beta1_power, lr, beta1, beta2, epsilon, grad):
-        >>>         out = self.apply_ada_max(self.var, self.m, self.v, beta1_power, lr, beta1, beta2, epsilon, grad)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.apply_ada_max = ops.ApplyAdaMax()
+        ...         self.var = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="var")
+        ...         self.m = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="m")
+        ...         self.v = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="v")
+        ...     def construct(self, beta1_power, lr, beta1, beta2, epsilon, grad):
+        ...         out = self.apply_ada_max(self.var, self.m, self.v, beta1_power, lr, beta1, beta2, epsilon, grad)
+        ...         return out
+        ...
+        >>> np.random.seed(0)
         >>> net = Net()
         >>> beta1_power =Tensor(0.9, mstype.float32)
         >>> lr = Tensor(0.001, mstype.float32)
         >>> beta1 = Tensor(0.9, mstype.float32)
         >>> beta2 = Tensor(0.99, mstype.float32)
         >>> epsilon = Tensor(1e-10, mstype.float32)
-        >>> grad = Tensor(np.random.rand(3, 3).astype(np.float32))
-        >>> result = net(beta1_power, lr, beta1, beta2, epsilon, grad)
+        >>> grad = Tensor(np.random.rand(2, 2).astype(np.float32))
+        >>> output = net(beta1_power, lr, beta1, beta2, epsilon, grad)
+        >>> print(output)
+        (Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 5.44221461e-01,  7.07908988e-01],
+         [ 5.97648144e-01,  5.29388547e-01]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 4.38093781e-01,  6.73864365e-01],
+         [ 4.00932074e-01,  8.11308622e-01]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 9.54026103e-01,  9.25596654e-01],
+         [ 7.83807814e-01,  5.23605943e-01]]))
     """
 
     __mindspore_signature__ = (
@@ -3847,37 +4508,37 @@ class ApplyAdaMax(PrimitiveWithInfer):
         validator.check("v_shape", v_shape, "var_shape", var_shape, Rel.EQ, self.name)
         validator.check("grad_shape", grad_shape, "var_shape", var_shape, Rel.EQ, self.name)
         beta1_power_shp_len = len(beta1_power_shape)
-        validator.check_integer("beta1 power's rank", beta1_power_shp_len, 1, Rel.LE, self.name)
+        validator.check_int(beta1_power_shp_len, 1, Rel.LE, "beta1 power's rank", self.name)
         if beta1_power_shp_len == 1:
-            validator.check_integer("beta1_power_shape[0]", beta1_power_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(beta1_power_shape[0], 1, Rel.EQ, "beta1_power_shape[0]", self.name)
         lr_shp_len = len(lr_shape)
-        validator.check_integer("lr's rank", lr_shp_len, 1, Rel.LE, self.name)
+        validator.check_int(lr_shp_len, 1, Rel.LE, "lr's rank", self.name)
         if lr_shp_len == 1:
-            validator.check_integer("lr_shape[0]", lr_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(lr_shape[0], 1, Rel.EQ, "lr_shape[0]", self.name)
         beta1_shp_len = len(beta1_shape)
-        validator.check_integer("beta1's rank", beta1_shp_len, 1, Rel.LE, self.name)
+        validator.check_int(beta1_shp_len, 1, Rel.LE, "beta1's rank", self.name)
         if beta1_shp_len == 1:
-            validator.check_integer("beta1_shape[0]", beta1_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(beta1_shape[0], 1, Rel.EQ, "beta1_shape[0]", self.name)
         beta2_shp_len = len(beta2_shape)
-        validator.check_integer("beta2's rank", beta2_shp_len, 1, Rel.LE, self.name)
+        validator.check_int(beta2_shp_len, 1, Rel.LE, "beta2's rank", self.name)
         if beta2_shp_len == 1:
-            validator.check_integer("beta2_shape[0]", beta2_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(beta2_shape[0], 1, Rel.EQ, "beta2_shape[0]", self.name)
         epsilon_shp_len = len(epsilon_shape)
-        validator.check_integer("epsilon's rank", epsilon_shp_len, 1, Rel.LE, self.name)
+        validator.check_int(epsilon_shp_len, 1, Rel.LE, "epsilon's rank", self.name)
         if epsilon_shp_len == 1:
-            validator.check_integer("epsilon_shape[0]", epsilon_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(epsilon_shape[0], 1, Rel.EQ, "epsilon_shape[0]", self.name)
         return var_shape, m_shape, v_shape
 
     def infer_dtype(self, var_dtype, m_dtype, v_dtype, beta1_power_dtype, lr_dtype,
                     beta1_dtype, beta2_dtype, epsilon_dtype, grad_dtype):
-        valid_types = [mstype.float16, mstype.float32]
+        valid_dtypes = [mstype.float16, mstype.float32]
         args = {"var": var_dtype, "m": m_dtype, "v": v_dtype, "grad": grad_dtype}
-        validator.check_tensor_type_same(args, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"beta1_power": beta1_power_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"lr": lr_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"beta1": beta1_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"beta2": beta2_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"epsilon": epsilon_dtype}, valid_types, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"beta1_power": beta1_power_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"lr": lr_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"beta1": beta1_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"beta2": beta2_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"epsilon": epsilon_dtype}, valid_dtypes, self.name)
         return var_dtype, m_dtype, v_dtype
 
 
@@ -3919,28 +4580,41 @@ class ApplyAdadelta(PrimitiveWithInfer):
         - **accum** (Tensor) - The same shape and data type as `accum`.
         - **accum_update** (Tensor) - The same shape and data type as `accum_update`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> import mindspore.common.dtype as mstype
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.apply_adadelta = P.ApplyAdadelta()
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="var")
-        >>>         self.accum = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="accum")
-        >>>         self.accum_update = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="accum_update")
-        >>>     def construct(self, lr, rho, epsilon, grad):
-        >>>         out = self.apply_adadelta(self.var, self.accum, self.accum_update, lr, rho, epsilon, grad)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.apply_adadelta = ops.ApplyAdadelta()
+        ...         self.var = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="var")
+        ...         self.accum = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="accum")
+        ...         self.accum_update = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="accum_update")
+        ...     def construct(self, lr, rho, epsilon, grad):
+        ...         out = self.apply_adadelta(self.var, self.accum, self.accum_update, lr, rho, epsilon, grad)
+        ...         return out
+        ...
+        >>> np.random.seed(0)
         >>> net = Net()
         >>> lr = Tensor(0.001, mstype.float32)
         >>> rho = Tensor(0.0, mstype.float32)
         >>> epsilon = Tensor(1e-6, mstype.float32)
-        >>> grad = Tensor(np.random.rand(3, 3).astype(np.float32))
-        >>> result = net(lr, rho, epsilon, grad)
+        >>> grad = Tensor(np.random.rand(2, 2).astype(np.float32))
+        >>> output = net(lr, rho, epsilon, grad)
+        >>> print(output)
+        (Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 5.47831833e-01,  7.14570105e-01],
+         [ 6.01873636e-01,  5.44156015e-01]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 3.22674602e-01,  8.56729150e-01],
+         [ 5.04612131e-03,  7.59151531e-03]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 9.63660717e-01,  3.83442074e-01],
+         [ 7.91569054e-01,  5.28826237e-01]]))
     """
 
     __mindspore_signature__ = (
@@ -3963,27 +4637,27 @@ class ApplyAdadelta(PrimitiveWithInfer):
         validator.check("accum_update_shape", accum_update_shape, "var_shape", var_shape, Rel.EQ, self.name)
         validator.check("grad_shape", grad_shape, "var_shape", var_shape, Rel.EQ, self.name)
         lr_shp_len = len(lr_shape)
-        validator.check_integer("lr's rank", lr_shp_len, 1, Rel.LE, self.name)
+        validator.check_int(lr_shp_len, 1, Rel.LE, "lr's rank", self.name)
         if lr_shp_len == 1:
-            validator.check_integer("lr_shape[0]", lr_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(lr_shape[0], 1, Rel.EQ, "lr_shape[0]", self.name)
         rho_shp_len = len(rho_shape)
-        validator.check_integer("rho's rank", rho_shp_len, 1, Rel.LE, self.name)
+        validator.check_int(rho_shp_len, 1, Rel.LE, "rho's rank", self.name)
         if rho_shp_len == 1:
-            validator.check_integer("rho_shape[0]", rho_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(rho_shape[0], 1, Rel.EQ, "rho_shape[0]", self.name)
         epsilon_shp_len = len(epsilon_shape)
-        validator.check_integer("lepsilon's rank", epsilon_shp_len, 1, Rel.LE, self.name)
+        validator.check_int(epsilon_shp_len, 1, Rel.LE, "lepsilon's rank", self.name)
         if epsilon_shp_len == 1:
-            validator.check_integer("epsilon_shape[0]", epsilon_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(epsilon_shape[0], 1, Rel.EQ, "epsilon_shape[0]", self.name)
         return var_shape, accum_shape, accum_update_shape
 
     def infer_dtype(self, var_dtype, accum_dtype, accum_update_dtype, lr_dtype, rho_dtype,
                     epsilon_dtype, grad_dtype):
-        valid_types = [mstype.float16, mstype.float32]
+        valid_dtypes = [mstype.float16, mstype.float32]
         args = {"var": var_dtype, "accum": accum_dtype, "accum_update": accum_update_dtype, "grad": grad_dtype}
-        validator.check_tensor_type_same(args, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"lr": lr_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"rho": rho_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"epsilon": epsilon_dtype}, valid_types, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"lr": lr_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"rho": rho_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"epsilon": epsilon_dtype}, valid_dtypes, self.name)
         return var_dtype, accum_dtype, accum_update_dtype
 
 
@@ -4019,25 +4693,36 @@ class ApplyAdagrad(PrimitiveWithInfer):
         - **var** (Tensor) - The same shape and data type as `var`.
         - **accum** (Tensor) - The same shape and data type as `accum`.
 
+    Supported Platforms:
+        ``Ascend`` ``CPU`` ``GPU``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> import mindspore.common.dtype as mstype
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.apply_adagrad = P.ApplyAdagrad()
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="var")
-        >>>         self.accum = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="accum")
-        >>>     def construct(self, lr, grad):
-        >>>         out = self.apply_adagrad(self.var, self.accum, lr, grad)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.apply_adagrad = ops.ApplyAdagrad()
+        ...         self.var = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="var")
+        ...         self.accum = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="accum")
+        ...     def construct(self, lr, grad):
+        ...         out = self.apply_adagrad(self.var, self.accum, lr, grad)
+        ...         return out
+        ...
+        >>> np.random.seed(0)
         >>> net = Net()
         >>> lr = Tensor(0.001, mstype.float32)
-        >>> grad = Tensor(np.random.rand(3, 3).astype(np.float32))
-        >>> result = net(lr, grad)
+        >>> grad = Tensor(np.random.rand(2, 2).astype(np.float32))
+        >>> output = net(lr, grad)
+        >>> print(output)
+        (Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 5.47984838e-01,  7.14758754e-01],
+         [ 6.01995945e-01,  5.44394553e-01]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 1.35230064e+00,  7.92921484e-01],
+         [ 1.06441569e+00,  1.17150283e+00]]))
     """
 
     __mindspore_signature__ = (
@@ -4055,16 +4740,16 @@ class ApplyAdagrad(PrimitiveWithInfer):
         validator.check('accum shape', accum_shape, 'var shape', var_shape, Rel.EQ, self.name)
         validator.check('grad shape', grad_shape, 'var shape', var_shape, Rel.EQ, self.name)
         lr_shp_len = len(lr_shape)
-        validator.check_integer("lr's rank", lr_shp_len, 1, Rel.LE, self.name)
+        validator.check_int(lr_shp_len, 1, Rel.LE, "lr's rank", self.name)
         if lr_shp_len == 1:
-            validator.check_integer("lr_shape[0]", lr_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(lr_shape[0], 1, Rel.EQ, "lr_shape[0]", self.name)
         return var_shape, accum_shape
 
     def infer_dtype(self, var_dtype, accum_dtype, lr_dtype, grad_dtype):
         args = {'var': var_dtype, 'accum': accum_dtype, 'grad': grad_dtype}
-        valid_types = [mstype.float16, mstype.float32]
-        validator.check_tensor_type_same(args, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({'lr': lr_dtype}, valid_types, self.name)
+        valid_dtypes = [mstype.float16, mstype.float32]
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({'lr': lr_dtype}, valid_dtypes, self.name)
         return var_dtype, accum_dtype
 
 
@@ -4102,25 +4787,36 @@ class ApplyAdagradV2(PrimitiveWithInfer):
         - **var** (Tensor) - The same shape and data type as `var`.
         - **accum** (Tensor) - The same shape and data type as `m`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> import mindspore.common.dtype as mstype
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.apply_adagrad_v2 = P.ApplyAdagradV2(epsilon=1e-6)
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="var")
-        >>>         self.accum = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="accum")
-        >>>     def construct(self, lr, grad):
-        >>>         out = self.apply_adagrad_v2(self.var, self.accum, lr, grad)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.apply_adagrad_v2 = ops.ApplyAdagradV2(epsilon=1e-6)
+        ...         self.var = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="var")
+        ...         self.accum = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="accum")
+        ...     def construct(self, lr, grad):
+        ...         out = self.apply_adagrad_v2(self.var, self.accum, lr, grad)
+        ...         return out
+        ...
+        >>> np.random.seed(0)
         >>> net = Net()
         >>> lr = Tensor(0.001, mstype.float32)
-        >>> grad = Tensor(np.random.rand(3, 3).astype(np.float32))
-        >>> result = net(lr, grad)
+        >>> grad = Tensor(np.random.rand(2, 2).astype(np.float32))
+        >>> output = net(lr, grad)
+        >>> print(output)
+        (Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 5.47984838e-01,  7.14758754e-01],
+         [ 6.01995945e-01,  5.44394553e-01]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 1.35230064e+00,  7.92921484e-01],
+         [ 1.06441569e+00,  1.17150283e+00]]))
     """
 
     __mindspore_signature__ = (
@@ -4139,15 +4835,15 @@ class ApplyAdagradV2(PrimitiveWithInfer):
         validator.check('var shape', var_shape, 'accum shape', accum_shape, Rel.EQ, self.name)
         validator.check('var shape', var_shape, 'grad shape', grad_shape, Rel.EQ, self.name)
         lr_shp_len = len(lr_shape)
-        validator.check_integer("lr's rank", lr_shp_len, 1, Rel.LE, self.name)
+        validator.check_int(lr_shp_len, 1, Rel.LE, "lr's rank", self.name)
         if lr_shp_len == 1:
-            validator.check_integer("lr_shape[0]", lr_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(lr_shape[0], 1, Rel.EQ, "lr_shape[0]", self.name)
         return var_shape, accum_shape
 
     def infer_dtype(self, var_dtype, accum_dtype, lr_dtype, grad_dtype):
         args = {'var': var_dtype, 'accum': accum_dtype, 'grad': grad_dtype}
-        validator.check_tensor_type_same(args, [mstype.float16, mstype.float32], self.name)
-        validator.check_scalar_or_tensor_type_same({'lr': lr_dtype}, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, [mstype.float16, mstype.float32], self.name)
+        validator.check_scalar_or_tensor_types_same({'lr': lr_dtype}, [mstype.float16, mstype.float32], self.name)
         return var_dtype, accum_dtype
 
 
@@ -4186,25 +4882,34 @@ class SparseApplyAdagrad(PrimitiveWithInfer):
         - **var** (Tensor) - The same shape and data type as `var`.
         - **accum** (Tensor) - The same shape and data type as `accum`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> import mindspore.common.dtype as mstype
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.sparse_apply_adagrad = P.SparseApplyAdagrad(lr=1e-8)
-        >>>         self.var = Parameter(Tensor(np.ones([3, 3, 3]).astype(np.float32)), name="var")
-        >>>         self.accum = Parameter(Tensor(np.ones([3, 3, 3]).astype(np.float32)), name="accum")
-        >>>     def construct(self, grad, indices):
-        >>>         out = self.sparse_apply_adagrad(self.var, self.accum, grad, indices)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.sparse_apply_adagrad = ops.SparseApplyAdagrad(lr=1e-8)
+        ...         self.var = Parameter(Tensor(np.ones([1, 1, 1]).astype(np.float32)), name="var")
+        ...         self.accum = Parameter(Tensor(np.ones([1, 1, 1]).astype(np.float32)), name="accum")
+        ...     def construct(self, grad, indices):
+        ...         out = self.sparse_apply_adagrad(self.var, self.accum, grad, indices)
+        ...         return out
+        ...
+        >>> np.random.seed(0)
         >>> net = Net()
-        >>> grad = Tensor(np.random.rand(3, 3, 3).astype(np.float32))
-        >>> indices = Tensor([0, 1, 2], mstype.int32)
-        >>> result = net(grad, indices)
+        >>> grad = Tensor(np.random.rand(1, 1, 1).astype(np.float32))
+        >>> indices = Tensor([0], mstype.int32)
+        >>> output = net(grad, indices)
+        >>> print(output)
+        (Tensor(shape=[1, 1, 1], dtype=Float32, value=
+        [[[1.00000000e+00]]]), Tensor(shape=[1, 1, 1], dtype=Float32, value=
+        [[[1.00000000e+00]]]))
     """
 
     __mindspore_signature__ = (
@@ -4217,7 +4922,7 @@ class SparseApplyAdagrad(PrimitiveWithInfer):
     @prim_attr_register
     def __init__(self, lr, update_slots=True, use_locking=False):
         validator.check_value_type("lr", lr, [float], self.name)
-        validator.check_number_range("lr", lr, float("-inf"), float("inf"), Rel.INC_NEITHER, self.name)
+        validator.check_is_float(lr, "lr", self.name)
         validator.check_value_type("update_slots", update_slots, [bool], self.name)
         validator.check_value_type("use_locking", use_locking, [bool], self.name)
 
@@ -4226,20 +4931,20 @@ class SparseApplyAdagrad(PrimitiveWithInfer):
         validator.check('len of var shape', len(var_shape), 'len of grad shape', len(grad_shape), Rel.EQ, self.name)
         if len(var_shape) > 1:
             validator.check('var_shape[1:]', var_shape[1:], 'grad_shape[1:]', grad_shape[1:], Rel.EQ, self.name)
-        validator.check_integer("indices rank", len(indices_shape), 1, Rel.EQ, self.name)
+        validator.check_int(len(indices_shape), 1, Rel.EQ, "indices rank", self.name)
         validator.check('grad_shape[0]', grad_shape[0], 'indices_shape[0]', indices_shape[0], Rel.EQ, self.name)
         return var_shape, accum_shape
 
     def infer_dtype(self, var_type, accum_type, grad_type, indices_type):
         args = {'var': var_type, 'accum': accum_type, 'grad': grad_type}
-        validator.check_tensor_type_same(args, [mstype.float16, mstype.float32], self.name)
-        validator.check_tensor_type_same({'indices': indices_type}, [mstype.int32], self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid('indices', indices_type, [mstype.int32], self.name)
         return var_type, accum_type
 
 
 class SparseApplyAdagradV2(PrimitiveWithInfer):
     r"""
-    Updates relevant entries according to the adagrad scheme.
+    Updates relevant entries according to the adagrad scheme, one more epsilon attribute than SparseApplyAdagrad.
 
     .. math::
             accum += grad * grad
@@ -4273,26 +4978,35 @@ class SparseApplyAdagradV2(PrimitiveWithInfer):
         - **var** (Tensor) - The same shape and data type as `var`.
         - **accum** (Tensor) - The same shape and data type as `accum`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> import mindspore.common.dtype as mstype
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.sparse_apply_adagrad_v2 = P.SparseApplyAdagradV2(lr=1e-8, epsilon=1e-6)
-        >>>         self.var = Parameter(Tensor(np.ones([3, 3, 3]).astype(np.float32)), name="var")
-        >>>         self.accum = Parameter(Tensor(np.ones([3, 3, 3]).astype(np.float32)), name="accum")
-        >>>
-        >>>     def construct(self, grad, indices):
-        >>>         out = self.sparse_apply_adagrad_v2(self.var, self.accum, grad, indices)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.sparse_apply_adagrad_v2 = ops.SparseApplyAdagradV2(lr=1e-8, epsilon=1e-6)
+        ...         self.var = Parameter(Tensor(np.ones([1, 1, 1]).astype(np.float32)), name="var")
+        ...         self.accum = Parameter(Tensor(np.ones([1, 1, 1]).astype(np.float32)), name="accum")
+        ...
+        ...     def construct(self, grad, indices):
+        ...         out = self.sparse_apply_adagrad_v2(self.var, self.accum, grad, indices)
+        ...         return out
+        ...
+        >>> np.random.seed(0)
         >>> net = Net()
-        >>> grad = Tensor(np.random.rand(3, 3, 3).astype(np.float32))
-        >>> indices = Tensor([0, 1, 2], mstype.int32)
-        >>> result = net(grad, indices)
+        >>> grad = Tensor(np.random.rand(1, 1, 1).astype(np.float32))
+        >>> indices = Tensor([0], mstype.int32)
+        >>> output = net(grad, indices)
+        >>> print(output)
+        (Tensor(shape=[1, 1, 1], dtype=Float32, value=
+        [[[1.00000000e+00]]]), Tensor(shape=[1, 1, 1], dtype=Float32, value=
+        [[[1.30119634e+00]]]))
     """
 
     __mindspore_signature__ = (
@@ -4314,14 +5028,14 @@ class SparseApplyAdagradV2(PrimitiveWithInfer):
         validator.check('len of var shape', len(var_shape), 'len of grad shape', len(grad_shape), Rel.EQ, self.name)
         if len(var_shape) > 1:
             validator.check('var_shape[1:]', var_shape[1:], 'grad_shape[1:]', grad_shape[1:], Rel.EQ, self.name)
-        validator.check_integer("indices rank", len(indices_shape), 1, Rel.EQ, self.name)
+        validator.check_int(len(indices_shape), 1, Rel.EQ, "indices rank", self.name)
         validator.check('grad_shape[0]', grad_shape[0], 'indices_shape[0]', indices_shape[0], Rel.EQ, self.name)
         return var_shape, accum_shape
 
     def infer_dtype(self, var_type, accum_type, grad_type, indices_type):
         args = {'var': var_type, 'accum': accum_type, 'grad': grad_type}
-        validator.check_tensor_type_same(args, [mstype.float16, mstype.float32], self.name)
-        validator.check_tensor_type_same({'indices': indices_type}, [mstype.int32], self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid('indices', indices_type, [mstype.int32], self.name)
         return var_type, accum_type
 
 
@@ -4363,26 +5077,37 @@ class ApplyProximalAdagrad(PrimitiveWithInfer):
         - **var** (Tensor) - The same shape and data type as `var`.
         - **accum** (Tensor) - The same shape and data type as `accum`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.apply_proximal_adagrad = P.ApplyProximalAdagrad()
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="var")
-        >>>         self.accum = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="accum")
-        >>>         self.lr = 0.01
-        >>>         self.l1 = 0.0
-        >>>         self.l2 = 0.0
-        >>>     def construct(self, grad):
-        >>>         out = self.apply_proximal_adagrad(self.var, self.accum, self.lr, self.l1, self.l2, grad)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.apply_proximal_adagrad = ops.ApplyProximalAdagrad()
+        ...         self.var = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="var")
+        ...         self.accum = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="accum")
+        ...         self.lr = 0.01
+        ...         self.l1 = 0.0
+        ...         self.l2 = 0.0
+        ...     def construct(self, grad):
+        ...         out = self.apply_proximal_adagrad(self.var, self.accum, self.lr, self.l1, self.l2, grad)
+        ...         return out
+        ...
+        >>> np.random.seed(0)
         >>> net = Net()
-        >>> grad = Tensor(np.random.rand(3, 3).astype(np.float32))
+        >>> grad = Tensor(np.random.rand(2, 2).astype(np.float32))
         >>> output = net(grad)
+        >>> print(output)
+        (Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 5.40526688e-01,  7.10883260e-01],
+         [ 5.95089436e-01,  5.39996684e-01]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 1.35230064e+00,  7.92921484e-01],
+         [ 1.06441569e+00,  1.17150283e+00]]))
     """
 
     __mindspore_signature__ = (
@@ -4404,26 +5129,26 @@ class ApplyProximalAdagrad(PrimitiveWithInfer):
         validator.check('accum shape', accum_shape, 'var shape', var_shape, Rel.EQ, self.name)
         validator.check('grad shape', grad_shape, 'var shape', var_shape, Rel.EQ, self.name)
         lr_shp_len = len(lr_shape)
-        validator.check_integer("lr's rank", lr_shp_len, 1, Rel.LE, self.name)
+        validator.check_int(lr_shp_len, 1, Rel.LE, "lr's rank", self.name)
         if lr_shp_len == 1:
-            validator.check_integer("lr_shape[0]", lr_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(lr_shape[0], 1, Rel.EQ, "lr_shape[0]", self.name)
         l1_shp_len = len(l1_shape)
-        validator.check_integer("l1's rank", l1_shp_len, 1, Rel.LE, self.name)
+        validator.check_int(l1_shp_len, 1, Rel.LE, "l1's rank", self.name)
         if l1_shp_len == 1:
-            validator.check_integer("l1_shape[0]", l1_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(l1_shape[0], 1, Rel.EQ, "l1_shape[0]", self.name)
         l2_shp_len = len(l2_shape)
-        validator.check_integer("l2's rank", l2_shp_len, 1, Rel.LE, self.name)
+        validator.check_int(l2_shp_len, 1, Rel.LE, "l2's rank", self.name)
         if l2_shp_len == 1:
-            validator.check_integer("l2_shape[0]", l2_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(l2_shape[0], 1, Rel.EQ, "l2_shape[0]", self.name)
         return var_shape, accum_shape
 
     def infer_dtype(self, var_dtype, accum_dtype, lr_dtype, l1_dtype, l2_dtype, grad_dtype):
-        valid_types = [mstype.float16, mstype.float32]
+        valid_dtypes = [mstype.float16, mstype.float32]
         args = {'var': var_dtype, 'accum': accum_dtype, 'grad': grad_dtype}
-        validator.check_tensor_type_same(args, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"lr": lr_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"l1": l1_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"l2": l2_dtype}, valid_types, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"lr": lr_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"l1": l1_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"l2": l2_dtype}, valid_dtypes, self.name)
         return var_dtype, accum_dtype
 
 
@@ -4459,7 +5184,9 @@ class SparseApplyProximalAdagrad(PrimitiveWithCheck):
         - **l2** (Union[Number, Tensor]) - l2 regularization strength, must be a float number or
           a scalar tensor with float16 or float32 data type..
         - **grad** (Tensor) - A tensor of the same type as `var`, for the gradient.
-        - **indices** (Tensor) - A vector of indices in the first dimension of `var` and `accum`.
+        - **indices** (Tensor) - A tensor of indices in the first dimension of `var` and `accum`.
+          If there are duplicates in `indices`, the behavior is undefined. Must be one of the
+          following types: int16, int32, int64, uint16, uint32, uint64.
 
     Outputs:
         Tuple of 2 tensors, the updated parameters.
@@ -4467,28 +5194,37 @@ class SparseApplyProximalAdagrad(PrimitiveWithCheck):
         - **var** (Tensor) - The same shape and data type as `var`.
         - **accum** (Tensor) - The same shape and data type as `accum`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.sparse_apply_proximal_adagrad = P.SparseApplyProximalAdagrad()
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="var")
-        >>>         self.accum = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="accum")
-        >>>         self.lr = 0.01
-        >>>         self.l1 = 0.0
-        >>>         self.l2 = 0.0
-        >>>     def construct(self, grad, indices):
-        >>>         out = self.sparse_apply_proximal_adagrad(self.var, self.accum, self.lr, self.l1,
-                                                             self.l2, grad, indices)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.sparse_apply_proximal_adagrad = ops.SparseApplyProximalAdagrad()
+        ...         self.var = Parameter(Tensor(np.random.rand(1, 2).astype(np.float32)), name="var")
+        ...         self.accum = Parameter(Tensor(np.random.rand(1, 2).astype(np.float32)), name="accum")
+        ...         self.lr = 0.01
+        ...         self.l1 = 0.0
+        ...         self.l2 = 0.0
+        ...     def construct(self, grad, indices):
+        ...         out = self.sparse_apply_proximal_adagrad(self.var, self.accum, self.lr, self.l1,
+        ...                                                  self.l2, grad, indices)
+        ...         return out
+        ...
+        >>> np.random.seed(0)
         >>> net = Net()
-        >>> grad = Tensor(np.random.rand(3, 3).astype(np.float32))
-        >>> indices = Tensor(np.ones((3,), np.int32))
+        >>> grad = Tensor(np.random.rand(1, 2).astype(np.float32))
+        >>> indices = Tensor(np.ones((1,), np.int32))
         >>> output = net(grad, indices)
+        >>> print(output)
+        (Tensor(shape=[1, 2], dtype=Float32, value=
+        [[ 5.48813522e-01,  7.15189338e-01]]), Tensor(shape=[1, 2], dtype=Float32, value=
+        [[ 6.02763355e-01,  5.44883192e-01]]))
     """
 
     __mindspore_signature__ = (
@@ -4508,17 +5244,17 @@ class SparseApplyProximalAdagrad(PrimitiveWithCheck):
         self.use_locking = validator.check_value_type("use_locking", use_locking, [bool], self.name)
 
     def check_shape(self, var_shape, accum_shape, lr_shape, l1_shape, l2_shape, grad_shape, indices_shape):
-        validator.check_integer("indices rank", len(indices_shape), 1, Rel.EQ, self.name)
+        validator.check_int(len(indices_shape), 1, Rel.EQ, "indices rank", self.name)
 
     def check_dtype(self, var_dtype, accum_dtype, lr_dtype, l1_dtype, l2_dtype, grad_dtype, indices_dtype):
         args = {'var': var_dtype, 'accum': accum_dtype, 'grad': grad_dtype}
-        validator.check_tensor_type_same(args, [mstype.float16, mstype.float32], self.name)
-        validator.check_scalar_or_tensor_type_same({"lr": lr_dtype}, [mstype.float16, mstype.float32], self.name)
-        validator.check_scalar_or_tensor_type_same({"l1": l1_dtype}, [mstype.float16, mstype.float32], self.name)
-        validator.check_scalar_or_tensor_type_same({"l2": l2_dtype}, [mstype.float16, mstype.float32], self.name)
-        valid_types = [mstype.int16, mstype.int32, mstype.int64,
-                       mstype.uint16, mstype.uint32, mstype.uint64]
-        validator.check_tensor_type_same({'indices': indices_dtype}, valid_types, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, [mstype.float16, mstype.float32], self.name)
+        validator.check_scalar_or_tensor_types_same({"lr": lr_dtype}, [mstype.float16, mstype.float32], self.name)
+        validator.check_scalar_or_tensor_types_same({"l1": l1_dtype}, [mstype.float16, mstype.float32], self.name)
+        validator.check_scalar_or_tensor_types_same({"l2": l2_dtype}, [mstype.float16, mstype.float32], self.name)
+        valid_dtypes = [mstype.int16, mstype.int32, mstype.int64,
+                        mstype.uint16, mstype.uint32, mstype.uint64]
+        validator.check_tensor_dtype_valid('indices', indices_dtype, valid_dtypes, self.name)
 
 
 class ApplyAddSign(PrimitiveWithInfer):
@@ -4558,27 +5294,38 @@ class ApplyAddSign(PrimitiveWithInfer):
         - **var** (Tensor) - The same shape and data type as `var`.
         - **m** (Tensor) - The same shape and data type as `m`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.apply_add_sign = P.ApplyAddSign()
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="var")
-        >>>         self.m = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="m")
-        >>>         self.lr = 0.001
-        >>>         self.alpha = 1.0
-        >>>         self.sign_decay = 0.99
-        >>>         self.beta = 0.9
-        >>>     def construct(self, grad):
-        >>>         out = self.apply_add_sign(self.var, self.m, self.lr, self.alpha, self.sign_decay, self.beta, grad)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.apply_add_sign = ops.ApplyAddSign()
+        ...         self.var = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="var")
+        ...         self.m = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="m")
+        ...         self.lr = 0.001
+        ...         self.alpha = 1.0
+        ...         self.sign_decay = 0.99
+        ...         self.beta = 0.9
+        ...     def construct(self, grad):
+        ...         out = self.apply_add_sign(self.var, self.m, self.lr, self.alpha, self.sign_decay, self.beta, grad)
+        ...         return out
+        ...
+        >>> np.random.seed(0)
         >>> net = Net()
-        >>> grad = Tensor(np.random.rand(3, 3).astype(np.float32))
+        >>> grad = Tensor(np.random.rand(2, 2).astype(np.float32))
         >>> output = net(grad)
+        >>> print(output)
+        (Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 5.46895862e-01,  7.14426279e-01],
+         [ 6.01187825e-01,  5.43830693e-01]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 4.77655590e-01,  6.19648814e-01],
+         [ 4.73001003e-01,  8.55485201e-01]]))
     """
 
     __mindspore_signature__ = (
@@ -4599,31 +5346,31 @@ class ApplyAddSign(PrimitiveWithInfer):
         validator.check('m_shape', m_shape, 'var_shape', var_shape, Rel.EQ, self.name)
         validator.check('grad_shape', grad_shape, 'var_shape', var_shape, Rel.EQ, self.name)
         lr_shape_len = len(lr_shape)
-        validator.check_integer("lr's rank", lr_shape_len, 1, Rel.LE, self.name)
+        validator.check_int(lr_shape_len, 1, Rel.LE, "lr's rank", self.name)
         if lr_shape_len == 1:
-            validator.check_integer("lr_shape[0]", lr_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(lr_shape[0], 1, Rel.EQ, "lr_shape[0]", self.name)
         alpha_shape_len = len(alpha_shape)
-        validator.check_integer("alpha's rank", alpha_shape_len, 1, Rel.LE, self.name)
+        validator.check_int(alpha_shape_len, 1, Rel.LE, "alpha's rank", self.name)
         if alpha_shape_len == 1:
-            validator.check_integer("alpha_shape[0]", alpha_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(alpha_shape[0], 1, Rel.EQ, "alpha_shape[0]", self.name)
         sign_decay_shape_len = len(sign_decay_shape)
-        validator.check_integer("sign_decay's rank", sign_decay_shape_len, 1, Rel.LE, self.name)
+        validator.check_int(sign_decay_shape_len, 1, Rel.LE, "sign_decay's rank", self.name)
         if sign_decay_shape_len == 1:
-            validator.check_integer("sign_decay_shape[0]", sign_decay_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(sign_decay_shape[0], 1, Rel.EQ, "sign_decay_shape[0]", self.name)
         beta_shape_len = len(beta_shape)
-        validator.check_integer("beta's rank", beta_shape_len, 1, Rel.LE, self.name)
+        validator.check_int(beta_shape_len, 1, Rel.LE, "beta's rank", self.name)
         if beta_shape_len == 1:
-            validator.check_integer("beta_shape[0]", beta_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(beta_shape[0], 1, Rel.EQ, "beta_shape[0]", self.name)
         return var_shape, m_shape
 
     def infer_dtype(self, var_dtype, m_dtype, lr_dtype, alpha_dtype, sign_decay_dtype, beta_dtype, grad_dtype):
-        valid_types = [mstype.float16, mstype.float32]
+        valid_dtypes = [mstype.float16, mstype.float32]
         args = {'var': var_dtype, 'm': m_dtype, 'grad': grad_dtype}
-        validator.check_tensor_type_same(args, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"lr": lr_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"alpha": alpha_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"sign_decay": sign_decay_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"beta": beta_dtype}, valid_types, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"lr": lr_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"alpha": alpha_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"sign_decay": sign_decay_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"beta": beta_dtype}, valid_dtypes, self.name)
         return var_dtype, m_dtype
 
 
@@ -4666,28 +5413,39 @@ class ApplyPowerSign(PrimitiveWithInfer):
         - **var** (Tensor) - The same shape and data type as `var`.
         - **m** (Tensor) - The same shape and data type as `m`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.apply_power_sign = P.ApplyPowerSign()
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="var")
-        >>>         self.m = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="m")
-        >>>         self.lr = 0.001
-        >>>         self.logbase = np.e
-        >>>         self.sign_decay = 0.99
-        >>>         self.beta = 0.9
-        >>>     def construct(self, grad):
-        >>>         out = self.apply_power_sign(self.var, self.m, self.lr, self.logbase,
-                                                self.sign_decay, self.beta, grad)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.apply_power_sign = ops.ApplyPowerSign()
+        ...         self.var = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="var")
+        ...         self.m = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="m")
+        ...         self.lr = 0.001
+        ...         self.logbase = np.e
+        ...         self.sign_decay = 0.99
+        ...         self.beta = 0.9
+        ...     def construct(self, grad):
+        ...         out = self.apply_power_sign(self.var, self.m, self.lr, self.logbase,
+        ...                                        self.sign_decay, self.beta, grad)
+        ...         return out
+        ...
+        >>> np.random.seed(0)
         >>> net = Net()
-        >>> grad = Tensor(np.random.rand(3, 3).astype(np.float32))
+        >>> grad = Tensor(np.random.rand(2, 2).astype(np.float32))
         >>> output = net(grad)
+        >>> print(output)
+        (Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 5.34601569e-01,  7.09534407e-01],
+         [ 5.91087103e-01,  5.37083089e-01]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 4.77655590e-01,  6.19648814e-01],
+         [ 4.73001003e-01,  8.55485201e-01]]))
     """
 
     __mindspore_signature__ = (
@@ -4708,37 +5466,37 @@ class ApplyPowerSign(PrimitiveWithInfer):
         validator.check('m_shape', m_shape, 'var_shape', var_shape, Rel.EQ, self.name)
         validator.check('grad_shape', grad_shape, 'var_shape', var_shape, Rel.EQ, self.name)
         lr_shape_len = len(lr_shape)
-        validator.check_integer("lr's rank", lr_shape_len, 1, Rel.LE, self.name)
+        validator.check_int(lr_shape_len, 1, Rel.LE, "lr's rank", self.name)
         if lr_shape_len == 1:
-            validator.check_integer("lr_shape[0]", lr_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(lr_shape[0], 1, Rel.EQ, "lr_shape[0]", self.name)
         logbase_shape_len = len(logbase_shape)
-        validator.check_integer("logbase's rank", logbase_shape_len, 1, Rel.LE, self.name)
+        validator.check_int(logbase_shape_len, 1, Rel.LE, "logbase's rank", self.name)
         if logbase_shape_len == 1:
-            validator.check_integer("logbase_shape[0]", logbase_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(logbase_shape[0], 1, Rel.EQ, "logbase_shape[0]", self.name)
         sign_decay_shape_len = len(sign_decay_shape)
-        validator.check_integer("sign_decay's rank", sign_decay_shape_len, 1, Rel.LE, self.name)
+        validator.check_int(sign_decay_shape_len, 1, Rel.LE, "sign_decay's rank", self.name)
         if sign_decay_shape_len == 1:
-            validator.check_integer("sign_decay_shape[0]", sign_decay_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(sign_decay_shape[0], 1, Rel.EQ, "sign_decay_shape[0]", self.name)
         beta_shape_len = len(beta_shape)
-        validator.check_integer("beta's rank", beta_shape_len, 1, Rel.LE, self.name)
+        validator.check_int(beta_shape_len, 1, Rel.LE, "beta's rank", self.name)
         if beta_shape_len == 1:
-            validator.check_integer("beta_shape[0]", beta_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(beta_shape[0], 1, Rel.EQ, "beta_shape[0]", self.name)
         return var_shape, m_shape
 
     def infer_dtype(self, var_dtype, m_dtype, lr_dtype, logbase_dtype, sign_decay_dtype, beta_dtype, grad_dtype):
-        valid_types = [mstype.float16, mstype.float32]
+        valid_dtypes = [mstype.float16, mstype.float32]
         args = {'var': var_dtype, 'm': m_dtype, 'grad': grad_dtype}
-        validator.check_tensor_type_same(args, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"lr": lr_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"logbase": logbase_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"sign_decay": sign_decay_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"beta": beta_dtype}, valid_types, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"lr": lr_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"logbase": logbase_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"sign_decay": sign_decay_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"beta": beta_dtype}, valid_dtypes, self.name)
         return var_dtype, m_dtype
 
 
 class ApplyGradientDescent(PrimitiveWithInfer):
     r"""
-    Updates relevant entries according to the following formula.
+    Updates relevant entries according to the following.
 
     .. math::
         var = var - \alpha * \delta
@@ -4756,23 +5514,29 @@ class ApplyGradientDescent(PrimitiveWithInfer):
     Outputs:
         Tensor, represents the updated `var`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.apply_gradient_descent = P.ApplyGradientDescent()
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="var")
-        >>>         self.alpha = 0.001
-        >>>     def construct(self, delta):
-        >>>         out = self.apply_gradient_descent(self.var, self.alpha, delta)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.apply_gradient_descent = ops.ApplyGradientDescent()
+        ...         self.var = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="var")
+        ...         self.alpha = 0.001
+        ...     def construct(self, delta):
+        ...         out = self.apply_gradient_descent(self.var, self.alpha, delta)
+        ...         return out
+        ...
         >>> net = Net()
-        >>> delta = Tensor(np.random.rand(3, 3).astype(np.float32))
+        >>> delta = Tensor(np.random.rand(2, 2).astype(np.float32))
         >>> output = net(delta)
+        >>> print(output.shape)
+        (2, 2)
     """
 
     __mindspore_signature__ = (
@@ -4788,16 +5552,16 @@ class ApplyGradientDescent(PrimitiveWithInfer):
     def infer_shape(self, var_shape, alpha_shape, delta_shape):
         validator.check('delta shape', delta_shape, 'var shape', var_shape, Rel.EQ, self.name)
         alpha_shape_len = len(alpha_shape)
-        validator.check_integer("alpha's rank", alpha_shape_len, 1, Rel.LE, self.name)
+        validator.check_int(alpha_shape_len, 1, Rel.LE, "alpha's rank", self.name)
         if alpha_shape_len == 1:
-            validator.check_integer("alpha_shape[0]", alpha_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(alpha_shape[0], 1, Rel.EQ, "alpha_shape[0]", self.name)
         return var_shape
 
     def infer_dtype(self, var_dtype, alpha_dtype, delta_dtype):
-        valid_types = [mstype.float16, mstype.float32]
+        valid_dtypes = [mstype.float16, mstype.float32]
         args = {'var': var_dtype, 'delta': delta_dtype}
-        validator.check_tensor_type_same(args, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"alpha": alpha_dtype}, valid_types, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"alpha": alpha_dtype}, valid_dtypes, self.name)
         return var_dtype
 
 
@@ -4827,25 +5591,31 @@ class ApplyProximalGradientDescent(PrimitiveWithInfer):
     Outputs:
         Tensor, represents the updated `var`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> import numpy as np
         >>> import mindspore.nn as nn
         >>> from mindspore import Tensor, Parameter
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.apply_proximal_gradient_descent = P.ApplyProximalGradientDescent()
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="var")
-        >>>         self.alpha = 0.001
-        >>>         self.l1 = 0.0
-        >>>         self.l2 = 0.0
-        >>>     def construct(self, delta):
-        >>>         out = self.apply_proximal_gradient_descent(self.var, self.alpha, self.l1, self.l2, delta)
-        >>>         return out
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.apply_proximal_gradient_descent = ops.ApplyProximalGradientDescent()
+        ...         self.var = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="var")
+        ...         self.alpha = 0.001
+        ...         self.l1 = 0.0
+        ...         self.l2 = 0.0
+        ...     def construct(self, delta):
+        ...         out = self.apply_proximal_gradient_descent(self.var, self.alpha, self.l1, self.l2, delta)
+        ...         return out
+        ...
         >>> net = Net()
-        >>> delta = Tensor(np.random.rand(3, 3).astype(np.float32))
+        >>> delta = Tensor(np.random.rand(2, 2).astype(np.float32))
         >>> output = net(delta)
+        >>> print(output.shape)
+        (2, 2)
     """
 
     __mindspore_signature__ = (
@@ -4863,32 +5633,32 @@ class ApplyProximalGradientDescent(PrimitiveWithInfer):
     def infer_shape(self, var_shape, alpha_shape, l1_shape, l2_shape, delta_shape):
         validator.check('delta shape', delta_shape, 'var shape', var_shape, Rel.EQ, self.name)
         alpha_shape_len = len(alpha_shape)
-        validator.check_integer("alpha's rank", alpha_shape_len, 1, Rel.LE, self.name)
+        validator.check_int(alpha_shape_len, 1, Rel.LE, "alpha's rank", self.name)
         if alpha_shape_len == 1:
-            validator.check_integer("alpha_shape[0]", alpha_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(alpha_shape[0], 1, Rel.EQ, "alpha_shape[0]", self.name)
         l1_shape_len = len(l1_shape)
-        validator.check_integer("l1's rank", l1_shape_len, 1, Rel.LE, self.name)
+        validator.check_int(l1_shape_len, 1, Rel.LE, "l1's rank", self.name)
         if l1_shape_len == 1:
-            validator.check_integer("l1_shape[0]", l1_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(l1_shape[0], 1, Rel.EQ, "l1_shape[0]", self.name)
         l2_shape_len = len(l2_shape)
-        validator.check_integer("l2's rank", l2_shape_len, 1, Rel.LE, self.name)
+        validator.check_int(l2_shape_len, 1, Rel.LE, "l2's rank", self.name)
         if l2_shape_len == 1:
-            validator.check_integer("l2_shape[0]", l2_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(l2_shape[0], 1, Rel.EQ, "l2_shape[0]", self.name)
         return var_shape
 
     def infer_dtype(self, var_dtype, alpha_dtype, l1_dtype, l2_dtype, delta_dtype):
-        valid_types = [mstype.float16, mstype.float32]
+        valid_dtypes = [mstype.float16, mstype.float32]
         args = {'var': var_dtype, 'delta': delta_dtype}
-        validator.check_tensor_type_same(args, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"alpha": alpha_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"l1": l1_dtype}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"l2": l2_dtype}, valid_types, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"alpha": alpha_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"l1": l1_dtype}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"l2": l2_dtype}, valid_dtypes, self.name)
         return var_dtype
 
 
 class LARSUpdate(PrimitiveWithInfer):
     """
-    Conducts lars (layer-wise adaptive rate scaling) update on the sum of squares of gradient.
+    Conducts LARS (layer-wise adaptive rate scaling) update on the sum of squares of gradient.
 
     Args:
         epsilon (float): Term added to the denominator to improve numerical stability. Default: 1e-05.
@@ -4906,26 +5676,34 @@ class LARSUpdate(PrimitiveWithInfer):
     Outputs:
         Tensor, represents the new gradient.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> from mindspore import Tensor
-        >>> from mindspore.ops import operations as P
-        >>> from mindspore.ops import functional as F
+        >>> from mindspore.ops import operations as ops
         >>> import mindspore.nn as nn
         >>> import numpy as np
         >>> class Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(Net, self).__init__()
-        >>>         self.lars = P.LARSUpdate()
-        >>>         self.reduce = P.ReduceSum()
-        >>>     def construct(self, weight, gradient):
-        >>>         w_square_sum = self.reduce(F.square(weight))
-        >>>         grad_square_sum = self.reduce(F.square(gradient))
-        >>>         grad_t = self.lars(weight, gradient, w_square_sum, grad_square_sum, 0.0, 1.0)
-        >>>         return grad_t
+        ...     def __init__(self):
+        ...         super(Net, self).__init__()
+        ...         self.lars = ops.LARSUpdate()
+        ...         self.reduce = ops.ReduceSum()
+        ...         self.square = ops.Square()
+        ...     def construct(self, weight, gradient):
+        ...         w_square_sum = self.reduce(self.square(weight))
+        ...         grad_square_sum = self.reduce(self.square(gradient))
+        ...         grad_t = self.lars(weight, gradient, w_square_sum, grad_square_sum, 0.0, 1.0)
+        ...         return grad_t
+        ...
+        >>> np.random.seed(0)
         >>> weight = np.random.random(size=(2, 3)).astype(np.float32)
         >>> gradient = np.random.random(size=(2, 3)).astype(np.float32)
         >>> net = Net()
-        >>> ms_output = net(Tensor(weight), Tensor(gradient))
+        >>> output = net(Tensor(weight), Tensor(gradient))
+        >>> print(output)
+        [[0.00036534 0.00074454 0.00080456]
+         [0.00032014 0.00066101 0.00044157]]
     """
 
     @prim_attr_register
@@ -4941,24 +5719,26 @@ class LARSUpdate(PrimitiveWithInfer):
         validator.check("norm weight shape", norm_weight_shape, "norm gradient shape", norm_gradient_shape, Rel.EQ,
                         self.name)
         shp_len = len(weight_decay_shape)
-        validator.check_integer("weight decay's rank", shp_len, 1, Rel.LE, self.name)
+        validator.check_int(shp_len, 1, Rel.LE, "weight decay's rank", self.name)
         if shp_len == 1:
-            validator.check_integer("weight_decay_shape[0]", weight_decay_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(weight_decay_shape[0], 1, Rel.EQ, "weight_decay_shape[0]", self.name)
         shp_len = len(learning_rate_shape)
-        validator.check_integer("learning rate's rank", shp_len, 1, Rel.LE, self.name)
+        validator.check_int(shp_len, 1, Rel.LE, "learning rate's rank", self.name)
         if shp_len == 1:
-            validator.check_integer("learning_rate_shape[0]", learning_rate_shape[0], 1, Rel.EQ, self.name)
+            validator.check_int(learning_rate_shape[0], 1, Rel.EQ, "learning_rate_shape[0]", self.name)
         return weight_shape
 
     def infer_dtype(self, weight_dtype, gradient_dtype, norm_weight_dtype, norm_gradient_dtype,
                     weight_decay_dtype, learning_rate_dtype):
         args = {"Weight dtype": weight_dtype, "gradient dtype": gradient_dtype, "norm weight dtype": norm_weight_dtype,
                 "norm gradient dtype": norm_gradient_dtype}
-        validator.check_tensor_type_same(args, [mstype.float16, mstype.float32, mstype.int16, mstype.int32], self.name)
-        validator.check_scalar_or_tensor_type_same({"weight_decay": weight_decay_dtype},
-                                                   [mstype.float16, mstype.float32, mstype.float64], self.name)
-        validator.check_scalar_or_tensor_type_same({"learning_rate": learning_rate_dtype},
-                                                   [mstype.float16, mstype.float32, mstype.float64], self.name)
+        validator.check_tensors_dtypes_same_and_valid(args,
+                                                      [mstype.float16, mstype.float32, mstype.int16, mstype.int32],
+                                                      self.name)
+        validator.check_scalar_or_tensor_types_same({"weight_decay": weight_decay_dtype},
+                                                    [mstype.float16, mstype.float32, mstype.float64], self.name)
+        validator.check_scalar_or_tensor_types_same({"learning_rate": learning_rate_dtype},
+                                                    [mstype.float16, mstype.float32, mstype.float64], self.name)
         return weight_dtype
 
 
@@ -4985,38 +5765,67 @@ class ApplyFtrl(PrimitiveWithInfer):
           Default: -0.5. It must be a float number or a scalar tensor with float16 or float32 data type.
 
     Outputs:
-        Tensor, represents the updated `var`.
+        There are three outputs for Ascend environment.
+
+        - **var** (Tensor) - represents the updated `var`.
+        - **accum** (Tensor) - represents the updated `accum`.
+        - **linear** (Tensor) - represents the updated `linear`.
+
+        There is only one output for GPU environment.
+
+        - **var** (Tensor) - This value is alwalys zero and the input parameters has been updated in-place.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Examples:
         >>> import mindspore
         >>> import mindspore.nn as nn
         >>> import numpy as np
-        >>> from mindspore import Parameter
-        >>> from mindspore import Tensor
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore import Parameter, Tensor
+        >>> import mindspore.context as context
+        >>> from mindspore.ops import operations as ops
         >>> class ApplyFtrlNet(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(ApplyFtrlNet, self).__init__()
-        >>>         self.apply_ftrl = P.ApplyFtrl()
-        >>>         self.lr = 0.001
-        >>>         self.l1 = 0.0
-        >>>         self.l2 = 0.0
-        >>>         self.lr_power = -0.5
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="var")
-        >>>         self.accum = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="accum")
-        >>>         self.linear = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="linear")
-        >>>
-        >>>     def construct(self, grad):
-        >>>         out = self.apply_ftrl(self.var, self.accum, self.linear, grad, self.lr, self.l1, self.l2,
-        >>>                               self.lr_power)
-        >>>         return out
-        >>>
+        ...     def __init__(self):
+        ...         super(ApplyFtrlNet, self).__init__()
+        ...         self.apply_ftrl = ops.ApplyFtrl()
+        ...         self.lr = 0.001
+        ...         self.l1 = 0.0
+        ...         self.l2 = 0.0
+        ...         self.lr_power = -0.5
+        ...         self.var = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="var")
+        ...         self.accum = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="accum")
+        ...         self.linear = Parameter(Tensor(np.random.rand(2, 2).astype(np.float32)), name="linear")
+        ...
+        ...     def construct(self, grad):
+        ...         out = self.apply_ftrl(self.var, self.accum, self.linear, grad, self.lr, self.l1, self.l2,
+        ...                               self.lr_power)
+        ...         return out
+        ...
+        >>> np.random.seed(0)
         >>> net = ApplyFtrlNet()
-        >>> input_x = Tensor(np.random.randint(-4, 4, (3, 3)), mindspore.float32)
-        >>> result = net(input_x)
-        [[0.67455846   0.14630564   0.160499  ]
-         [0.16329421   0.00415689   0.05202988]
-         [0.18672481   0.17418946   0.36420345]]
+        >>> input_x = Tensor(np.random.randint(-4, 4, (2, 2)), mindspore.float32)
+        >>> output = net(input_x)
+        >>> is_tbe = context.get_context("device_target") == "Ascend"
+        >>> if is_tbe:
+        ...     print(output)
+        (Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 4.61418092e-01,  5.30964255e-01],
+         [ 2.68715084e-01,  3.82065028e-01]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[ 1.64236546e+01,  9.64589405e+00],
+         [ 1.43758726e+00,  9.89177322e+00]]), Tensor(shape=[2, 2], dtype=Float32, value=
+        [[-1.86994812e+03, -1.64906018e+03],
+         [-3.22187836e+02, -1.20163989e+03]]))
+         >>> else:
+         ...    print(net.var.asnumpy())
+         [[0.4614181  0.5309642 ]
+          [0.2687151  0.38206503]]
+         ...    print(net.accum.asnumpy())
+         [[16.423655  9.645894 ]
+          [ 1.4375873 9.891773 ]]
+         ...    print(net.linear.asnumpy())
+         [[-1869.9479 -1649.0599]
+          [ -322.1879 -1201.6399]]
     """
 
     @prim_attr_register
@@ -5035,14 +5844,14 @@ class ApplyFtrl(PrimitiveWithInfer):
         return var_shape
 
     def infer_dtype(self, var_type, accum_type, linear_type, grad_type, lr_type, l1_type, l2_type, lr_power_type):
-        valid_types = [mstype.float16, mstype.float32]
+        valid_dtypes = [mstype.float16, mstype.float32]
         args = {'var': var_type, 'accum': accum_type, 'linear': linear_type, 'grad': grad_type}
-        validator.check_tensor_type_same(args, valid_types, self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
 
-        validator.check_scalar_or_tensor_type_same({"lr": lr_type}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"l1": l1_type}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"l2": l2_type}, valid_types, self.name)
-        validator.check_scalar_or_tensor_type_same({"lr_power": lr_power_type}, valid_types, self.name)
+        validator.check_scalar_or_tensor_types_same({"lr": lr_type}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"l1": l1_type}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"l2": l2_type}, valid_dtypes, self.name)
+        validator.check_scalar_or_tensor_types_same({"lr_power": lr_power_type}, valid_dtypes, self.name)
         if self.is_tbe:
             return var_type, var_type, var_type
         return var_type
@@ -5070,13 +5879,17 @@ class SparseApplyFtrl(PrimitiveWithCheck):
         - **accum** (Parameter) - The accumulation to be updated, must be same data type and shape as `var`.
         - **linear** (Parameter) - the linear coefficient to be updated, must be the same data type and shape as `var`.
         - **grad** (Tensor) - A tensor of the same type as `var`, for the gradient.
-        - **indices** (Tensor) - A vector of indices in the first dimension of `var` and `accum`.
-          The shape of `indices` must be the same as `grad` in the first dimension. The type must be int32.
+        - **indices** (Tensor) - A tensor of indices in the first dimension of `var` and `accum`.
+          The shape of `indices` must be the same as `grad` in the first dimension. If there are
+          duplicates in `indices`, the behavior is undefined. The type must be int32 or int64.
 
     Outputs:
         - **var** (Tensor) - Tensor, has the same shape and data type as `var`.
         - **accum** (Tensor) - Tensor, has the same shape and data type as `accum`.
         - **linear** (Tensor) - Tensor, has the same shape and data type as `linear`.
+
+    Supported Platforms:
+        ``Ascend`` ``GPU``
 
     Examples:
         >>> import mindspore
@@ -5084,23 +5897,29 @@ class SparseApplyFtrl(PrimitiveWithCheck):
         >>> import numpy as np
         >>> from mindspore import Parameter
         >>> from mindspore import Tensor
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class SparseApplyFtrlNet(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(SparseApplyFtrlNet, self).__init__()
-        >>>         self.sparse_apply_ftrl = P.SparseApplyFtrl(lr=0.01, l1=0.0, l2=0.0, lr_power=-0.5)
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="var")
-        >>>         self.accum = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="accum")
-        >>>         self.linear = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="linear")
-        >>>
-        >>>     def construct(self, grad, indices):
-        >>>         out = self.sparse_apply_ftrl(self.var, self.accum, self.linear, grad, indices)
-        >>>         return out
-        >>>
+        ...     def __init__(self):
+        ...         super(SparseApplyFtrlNet, self).__init__()
+        ...         self.sparse_apply_ftrl = ops.SparseApplyFtrl(lr=0.01, l1=0.0, l2=0.0, lr_power=-0.5)
+        ...         self.var = Parameter(Tensor(np.random.rand(1, 1).astype(np.float32)), name="var")
+        ...         self.accum = Parameter(Tensor(np.random.rand(1, 1).astype(np.float32)), name="accum")
+        ...         self.linear = Parameter(Tensor(np.random.rand(1, 1).astype(np.float32)), name="linear")
+        ...
+        ...     def construct(self, grad, indices):
+        ...         out = self.sparse_apply_ftrl(self.var, self.accum, self.linear, grad, indices)
+        ...         return out
+        ...
+        >>> np.random.seed(0)
         >>> net = SparseApplyFtrlNet()
-        >>> grad = Tensor(np.random.rand(3, 3).astype(np.float32))
-        >>> indices = Tensor(np.ones([3]), mindspore.int32)
+        >>> grad = Tensor(np.random.rand(1, 1).astype(np.float32))
+        >>> indices = Tensor(np.ones([1]), mindspore.int32)
         >>> output = net(grad, indices)
+        >>> print(output)
+        (Tensor(shape=[1, 1], dtype=Float32, value=
+        [[5.48813522e-01]]), Tensor(shape=[1, 1], dtype=Float32, value=
+        [[7.15189338e-01]]), Tensor(shape=[1, 1], dtype=Float32, value=
+        [[6.02763355e-01]]))
     """
 
     __mindspore_signature__ = (
@@ -5117,9 +5936,9 @@ class SparseApplyFtrl(PrimitiveWithCheck):
         validator.check_value_type("l1", l1, [float], self.name)
         validator.check_value_type("l2", l2, [float], self.name)
         validator.check_value_type("lr_power", lr_power, [float], self.name)
-        self.lr = validator.check_number_range("lr", lr, 0.0, float("inf"), Rel.INC_NEITHER, self.name)
-        self.l1 = validator.check_number_range("l1", l1, 0.0, float("inf"), Rel.INC_LEFT, self.name)
-        self.l2 = validator.check_number_range("l2", l2, 0.0, float("inf"), Rel.INC_LEFT, self.name)
+        self.lr = validator.check_positive_float(lr, "lr", self.name)
+        self.l1 = validator.check_non_negative_float(l1, "l1", self.name)
+        self.l2 = validator.check_non_negative_float(l2, "l2", self.name)
         self.lr_power = validator.check_number("lr_power", lr_power, 0, Rel.LE, self.name)
         self.use_locking = validator.check_value_type("use_locking", use_locking, [bool], self.name)
         self.init_prim_io_names(inputs=['var', 'accum', 'linear', 'grad', 'indices'],
@@ -5130,19 +5949,20 @@ class SparseApplyFtrl(PrimitiveWithCheck):
         validator.check('var shape', var_shape, 'linear shape', linear_shape, Rel.EQ, self.name)
         if len(var_shape) > 1:
             validator.check('var_shape[1:]', var_shape[1:], 'grad_shape[1:]', grad_shape[1:], Rel.EQ, self.name)
-        validator.check_integer("indices rank", len(indices_shape), 1, Rel.EQ, self.name)
+        validator.check_int(len(indices_shape), 1, Rel.EQ, "indices rank", self.name)
         validator.check('grad_shape[0]', grad_shape[0], 'indices_shape[0]', indices_shape[0], Rel.EQ, self.name)
 
     def check_dtype(self, var_dtype, accum_dtype, linear_dtype, grad_dtype, indices_dtype):
         args = {"var_dtype": var_dtype, "accum_dtype": accum_dtype,
                 "linear_dtype": linear_dtype, "grad_dtype": grad_dtype}
-        validator.check_tensor_type_same(args, [mstype.float16, mstype.float32], self.name)
-        validator.check_tensor_type_same({"indices_dtype": indices_dtype}, [mstype.int32], self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid("indices_dtype", indices_dtype, [mstype.int32, mstype.int64], self.name)
 
 
 class SparseApplyFtrlV2(PrimitiveWithInfer):
     """
-    Updates relevant entries according to the FTRL-proximal scheme.
+    Updates relevant entries according to the FTRL-proximal scheme. This class has one more attribute, named
+    l2_shrinkage, than class SparseApplyFtrl.
 
     All of inputs except `indices` comply with the implicit type conversion rules to make the data types consistent.
     If they have different data types, lower priority data type will be converted to
@@ -5174,30 +5994,39 @@ class SparseApplyFtrlV2(PrimitiveWithInfer):
         - **accum** (Tensor) - Tensor, has the same shape and data type as `accum`.
         - **linear** (Tensor) - Tensor, has the same shape and data type as `linear`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> import mindspore
         >>> import mindspore.nn as nn
         >>> import numpy as np
         >>> from mindspore import Parameter
         >>> from mindspore import Tensor
-        >>> from mindspore.ops import operations as P
+        >>> from mindspore.ops import operations as ops
         >>> class SparseApplyFtrlV2Net(nn.Cell):
-        >>>     def __init__(self):
-        >>>         super(SparseApplyFtrlV2Net, self).__init__()
-        >>>         self.sparse_apply_ftrl_v2 = P.SparseApplyFtrlV2(lr=0.01, l1=0.0, l2=0.0,
-                                                                    l2_shrinkage=0.0, lr_power=-0.5)
-        >>>         self.var = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="var")
-        >>>         self.accum = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="accum")
-        >>>         self.linear = Parameter(Tensor(np.random.rand(3, 3).astype(np.float32)), name="linear")
-        >>>
-        >>>     def construct(self, grad, indices):
-        >>>         out = self.sparse_apply_ftrl_v2(self.var, self.accum, self.linear, grad, indices)
-        >>>         return out
-        >>>
+        ...     def __init__(self):
+        ...         super(SparseApplyFtrlV2Net, self).__init__()
+        ...         self.sparse_apply_ftrl_v2 = ops.SparseApplyFtrlV2(lr=0.01, l1=0.0, l2=0.0,
+        ...                                                         l2_shrinkage=0.0, lr_power=-0.5)
+        ...         self.var = Parameter(Tensor(np.random.rand(1, 2).astype(np.float32)), name="var")
+        ...         self.accum = Parameter(Tensor(np.random.rand(1, 2).astype(np.float32)), name="accum")
+        ...         self.linear = Parameter(Tensor(np.random.rand(1, 2).astype(np.float32)), name="linear")
+        ...
+        ...     def construct(self, grad, indices):
+        ...         out = self.sparse_apply_ftrl_v2(self.var, self.accum, self.linear, grad, indices)
+        ...         return out
+        ...
+        >>> np.random.seed(0)
         >>> net = SparseApplyFtrlV2Net()
-        >>> grad = Tensor(np.random.rand(3, 3).astype(np.float32))
-        >>> indices = Tensor(np.ones([3]), mindspore.int32)
+        >>> grad = Tensor(np.random.rand(1, 2).astype(np.float32))
+        >>> indices = Tensor(np.ones([1]), mindspore.int32)
         >>> output = net(grad, indices)
+        >>> print(output)
+        (Tensor(shape=[1, 2], dtype=Float32, value=
+        [[ 5.48813522e-01,  7.15189338e-01]]), Tensor(shape=[1, 2], dtype=Float32, value=
+        [[ 6.02763355e-01,  5.44883192e-01]]), Tensor(shape=[1, 2], dtype=Float32, value=
+        [[ 4.23654795e-01,  6.45894110e-01]]))
     """
 
     __mindspore_signature__ = (
@@ -5214,9 +6043,9 @@ class SparseApplyFtrlV2(PrimitiveWithInfer):
         validator.check_value_type("l1", l1, [float], self.name)
         validator.check_value_type("l2", l2, [float], self.name)
         validator.check_value_type("lr_power", lr_power, [float], self.name)
-        self.lr = validator.check_number_range("lr", lr, 0.0, float("inf"), Rel.INC_NEITHER, self.name)
-        self.l1 = validator.check_number_range("l1", l1, 0.0, float("inf"), Rel.INC_LEFT, self.name)
-        self.l2 = validator.check_number_range("l2", l2, 0.0, float("inf"), Rel.INC_LEFT, self.name)
+        self.lr = validator.check_positive_float(lr, "lr", self.name)
+        self.l1 = validator.check_non_negative_float(l1, "l1", self.name)
+        self.l2 = validator.check_non_negative_float(l2, "l2", self.name)
         self.lr_power = validator.check_number("lr_power", lr_power, 0, Rel.LE, self.name)
         self.l2_shrinkage = validator.check_value_type("l2_shrinkage", l2_shrinkage, [float], self.name)
         self.use_locking = validator.check_value_type("use_locking", use_locking, [bool], self.name)
@@ -5226,15 +6055,15 @@ class SparseApplyFtrlV2(PrimitiveWithInfer):
         validator.check('var shape', var_shape, 'linear shape', linear_shape, Rel.EQ, self.name)
         if len(var_shape) > 1:
             validator.check('var_shape[1:]', var_shape[1:], 'grad_shape[1:]', grad_shape[1:], Rel.EQ, self.name)
-        validator.check_integer("indices rank", len(indices_shape), 1, Rel.EQ, self.name)
+        validator.check_int(len(indices_shape), 1, Rel.EQ, "indices rank", self.name)
         validator.check('grad_shape[0]', grad_shape[0], 'indices_shape[0]', indices_shape[0], Rel.EQ, self.name)
         return var_shape, accum_shape, linear_shape
 
     def infer_dtype(self, var_dtype, accum_dtype, linear_dtype, grad_dtype, indices_dtype):
         args = {"var_dtype": var_dtype, "accum_dtype": accum_dtype,
                 "linear_dtype": linear_dtype, "grad_dtype": grad_dtype}
-        validator.check_tensor_type_same(args, [mstype.float16, mstype.float32], self.name)
-        validator.check_tensor_type_same({"indices_dtype": indices_dtype}, [mstype.int32], self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensor_dtype_valid("indicese", indices_dtype, [mstype.int32], self.name)
         return var_dtype, accum_dtype, linear_dtype
 
 
@@ -5244,33 +6073,39 @@ class Dropout(PrimitiveWithInfer):
 
     Args:
         keep_prob (float): The keep rate, between 0 and 1, e.g. keep_prob = 0.9,
-          means dropping out 10% of input units.
+            means dropping out 10% of input units.
 
     Inputs:
-        - **shape** (tuple[int]) - The shape of target mask.
+        - **input** (Tensor) - The input tensor.
 
     Outputs:
-        Tensor, the value of generated mask for input shape.
+        - **output** (Tensor) - with the same shape as the input tensor.
+        - **mask** (Tensor) - with the same shape as the input tensor.
 
     Examples:
-        >>> dropout = P.Dropout(keep_prob=0.5)
-        >>> in = Tensor((20, 16, 50, 50))
-        >>> out = dropout(in)
+        >>> dropout = ops.Dropout(keep_prob=0.5)
+        >>> x = Tensor((20, 16, 50, 50), mindspore.float32)
+        >>> output, mask = dropout(x)
+        >>> print(output)
+        [0. 32. 0. 0.]
+        >>> print(mask)
+        [0. 1. 0. 0.]
     """
 
     @prim_attr_register
-    def __init__(self, keep_prob=0.5):
-        self.keep_prob = validator.check_number_range("keep_prob", keep_prob, 0, 1, Rel.INC_RIGHT, self.name)
+    def __init__(self, keep_prob=0.5, Seed0=0, Seed1=0):
+        self.seed0 = validator.check_value_type("Seed0", Seed0, [int], self.name)
+        self.seed1 = validator.check_value_type("Seed1", Seed1, [int], self.name)
+        self.keep_prob = validator.check_float_range(keep_prob, 0, 1, Rel.INC_RIGHT, "keep_prob", self.name)
 
     def infer_shape(self, x_shape):
-        validator.check_integer("x_shape", len(x_shape), 1, Rel.GE, self.name)
+        validator.check_int(len(x_shape), 1, Rel.GE, "x_shape", self.name)
         mask_shape = x_shape
         return x_shape, mask_shape
 
     def infer_dtype(self, x_dtype):
-        valid_types = (mstype.float16, mstype.float32)
-        validator.check_subclass("x", x_dtype, mstype.tensor, self.name)
-        validator.check_tensor_type_same({"x_dtype": x_dtype}, valid_types, self.name)
+        valid_dtypes = (mstype.float16, mstype.float32)
+        validator.check_tensor_dtype_valid("x", x_dtype, valid_dtypes, self.name)
         return x_dtype, x_dtype
 
 
@@ -5304,13 +6139,23 @@ class CTCLoss(PrimitiveWithInfer):
           the same type with `inputs`.
         - **gradient** (Tensor) - The gradient of `loss`, has the same type and shape with `inputs`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> inputs = Tensor(np.random.random((2, 2, 3)), mindspore.float32)
         >>> labels_indices = Tensor(np.array([[0, 0], [1, 0]]), mindspore.int64)
         >>> labels_values = Tensor(np.array([2, 2]), mindspore.int32)
         >>> sequence_length = Tensor(np.array([2, 2]), mindspore.int32)
-        >>> ctc_loss = P.CTCLoss()
-        >>> output = ctc_loss(inputs, labels_indices, labels_values, sequence_length)
+        >>> ctc_loss = ops.CTCLoss()
+        >>> loss, gradient = ctc_loss(inputs, labels_indices, labels_values, sequence_length)
+        >>> print(loss)
+        [ 0.69121575  0.5381993 ]
+        >>> print(gradient)
+        [[[ 0.25831494  0.3623634  -0.62067937 ]
+          [ 0.25187883  0.2921483  -0.5440271 ]]
+         [[ 0.43522435  0.24408469  0.07787037 ]
+          [ 0.29642645  0.4232373   0.06138104 ]]]
     """
 
     @prim_attr_register
@@ -5327,11 +6172,11 @@ class CTCLoss(PrimitiveWithInfer):
         self.ignore_longer_outputs_than_inputs_ = ignore_longer_outputs_than_inputs
 
     def infer_shape(self, inputs, labels_indices, labels_values, sequence_length):
-        validator.check_integer("inputs rank", len(inputs), 3, Rel.EQ, self.name)
-        validator.check_integer("labels_indices rank", len(labels_indices), 2, Rel.EQ, self.name)
-        validator.check_integer("labels_indices dim one", labels_indices[1], 2, Rel.EQ, self.name)
-        validator.check_integer("labels_values rank", len(labels_values), 1, Rel.EQ, self.name)
-        validator.check_integer("sequence_length rank", len(sequence_length), 1, Rel.EQ, self.name)
+        validator.check_int(len(inputs), 3, Rel.EQ, "inputs rank", self.name)
+        validator.check_int(len(labels_indices), 2, Rel.EQ, "labels_indices rank", self.name)
+        validator.check_int(labels_indices[1], 2, Rel.EQ, "labels_indices dim one", self.name)
+        validator.check_int(len(labels_values), 1, Rel.EQ, "labels_values rank", self.name)
+        validator.check_int(len(sequence_length), 1, Rel.EQ, "sequence_length rank", self.name)
         validator.check('labels_indices size', labels_indices[0], 'labels_values size',
                         labels_values[0], Rel.EQ, self.name)
         validator.check('inputs batch_size', inputs[1], 'sequence_length batch_size',
@@ -5342,10 +6187,10 @@ class CTCLoss(PrimitiveWithInfer):
 
     def infer_dtype(self, inputs, labels_indices, labels_values, sequence_length):
         valid_dtype = [mstype.float16, mstype.float32, mstype.double]
-        validator.check_tensor_type_same({"inputs_dtype": inputs}, valid_dtype, self.name)
-        validator.check_tensor_type_same({"labels_indices_dtype": labels_indices}, [mstype.int64], self.name)
-        validator.check_tensor_type_same({"labels_values_dtype": labels_values}, [mstype.int32], self.name)
-        validator.check_tensor_type_same({"sequence_length_dtype": sequence_length}, [mstype.int32], self.name)
+        validator.check_tensor_dtype_valid("inputs", inputs, valid_dtype, self.name)
+        validator.check_tensor_dtype_valid("labels_indices", labels_indices, [mstype.int64], self.name)
+        validator.check_tensor_dtype_valid("labels_values", labels_values, [mstype.int32], self.name)
+        validator.check_tensor_dtype_valid("sequence_length", sequence_length, [mstype.int32], self.name)
         return inputs, inputs
 
 
@@ -5362,7 +6207,7 @@ class CTCGreedyDecoder(PrimitiveWithInfer):
           `num_labels` indicates the number of actual labels. Blank labels are reserved.
           Default blank label is `num_classes - 1`. Data type must be float32 or float64.
         - **sequence_length** (Tensor) - A tensor containing sequence lengths with the shape of (`batch_size`).
-          The type must be int32. Each value in the tensor must not greater than `max_time`.
+          The type must be int32. Each value in the tensor must be equal to or less than `max_time`.
 
     Outputs:
         - **decoded_indices** (Tensor) - A tensor with shape of (`total_decoded_outputs`, 2).
@@ -5375,21 +6220,22 @@ class CTCGreedyDecoder(PrimitiveWithInfer):
           containing sequence log-probability, has the same type as `inputs`.
 
     Examples:
-        >>>    class CTCGreedyDecoderNet(nn.Cell):
-        >>>        def __init__(self):
-        >>>            super(CTCGreedyDecoderNet, self).__init__()
-        >>>            self.ctc_greedy_decoder = P.CTCGreedyDecoder()
-        >>>            self.assert_op = P.Assert(300)
-        >>>
-        >>>        def construct(self, inputs, sequence_length):
-        >>>            out = self.ctc_greedy_decoder(inputs,sequence_length)
-        >>>            self.assert_op(True, (out[0], out[1], out[2], out[3]))
-        >>>            return out[2]
-        >>>
+        >>> class CTCGreedyDecoderNet(nn.Cell):
+        ...    def __init__(self):
+        ...        super(CTCGreedyDecoderNet, self).__init__()
+        ...        self.ctc_greedy_decoder = P.CTCGreedyDecoder()
+        ...        self.assert_op = ops.Assert(300)
+        ...
+        ...    def construct(self, inputs, sequence_length):
+        ...        out = self.ctc_greedy_decoder(inputs,sequence_length)
+        ...        self.assert_op(True, (out[0], out[1], out[2], out[3]))
+        ...        return out[2]
+        ...
         >>> inputs = Tensor(np.random.random((2, 2, 3)), mindspore.float32)
         >>> sequence_length = Tensor(np.array([2, 2]), mindspore.int32)
         >>> net = CTCGreedyDecoderNet()
         >>> output = net(inputs, sequence_length)
+        >>> print(output)
     """
 
     @prim_attr_register
@@ -5397,8 +6243,8 @@ class CTCGreedyDecoder(PrimitiveWithInfer):
         self.merge_repeated = validator.check_value_type("merge_repeated", merge_repeated, [bool], self.name)
 
     def infer_shape(self, inputs_shape, sequence_length_shape):
-        validator.check_integer("inputs rank", len(inputs_shape), 3, Rel.EQ, self.name)
-        validator.check_integer("sequence_length rank", len(sequence_length_shape), 1, Rel.EQ, self.name)
+        validator.check_int(len(inputs_shape), 3, Rel.EQ, "inputs rank", self.name)
+        validator.check_int(len(sequence_length_shape), 1, Rel.EQ, "sequence_length rank", self.name)
         validator.check('inputs batch_size', inputs_shape[1], 'sequence_length batch_size',
                         sequence_length_shape[0], Rel.EQ, self.name)
         total_decoded_outputs = -1
@@ -5409,8 +6255,8 @@ class CTCGreedyDecoder(PrimitiveWithInfer):
         return decoded_indices_shape, decoded_values, decoded_shape, log_probability_shape
 
     def infer_dtype(self, inputs_dtype, sequence_length_dtype):
-        validator.check_tensor_type_same({"inputs_dtype": inputs_dtype}, [mstype.float32, mstype.double], self.name)
-        validator.check_tensor_type_same({"sequence_length_dtype": sequence_length_dtype}, [mstype.int32], self.name)
+        validator.check_tensor_dtype_valid("inputs_dtype", inputs_dtype, [mstype.float32, mstype.double], self.name)
+        validator.check_tensor_dtype_valid("sequence_length_dtype", sequence_length_dtype, [mstype.int32], self.name)
         decoded_type = mstype.tensor_type(mstype.int64)
         return decoded_type, decoded_type, decoded_type, inputs_dtype
 
@@ -5442,7 +6288,7 @@ class BasicLSTMCell(PrimitiveWithInfer):
             LSTM layer except the last layer. Default 1.0. The range of dropout is [0.0, 1.0].
         forget_bias (float): Add forget bias to forget gate biases in order to decrease former scale. Default: 1.0.
         state_is_tuple (bool): If true, the state is a tuple of 2 tensors, containing h and c; If false, the state is
-        a tensor and it needs to be split first. Default: True.
+            a tensor and it needs to be split first. Default: True.
         activation (str): Activation. Default: "tanh". Only "tanh" is currently supported.
 
     Inputs:
@@ -5472,31 +6318,44 @@ class BasicLSTMCell(PrimitiveWithInfer):
         - **tanhct** (Tensor) - Forward :math:`tanh c_t` cache at moment `t`.
           Tensor of shape (`batch_size`, `hidden_size`), has the same type with input `c`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
+        >>> np.random.seed(0)
         >>> x = Tensor(np.random.rand(1, 32).astype(np.float16))
-        >>> h = Tensor(np.random.rand(1, 64).astype(np.float16))
-        >>> c = Tensor(np.random.rand(1, 64).astype(np.float16))
-        >>> w = Tensor(np.random.rand(96, 256).astype(np.float16))
-        >>> b = Tensor(np.random.rand(256, ).astype(np.float16))
-        >>> lstm = P.BasicLSTMCell(keep_prob=1.0, forget_bias=1.0, state_is_tuple=True, activation='tanh')
-        >>> lstm(x, h, c, w, b)
+        >>> h = Tensor(np.random.rand(1, 2).astype(np.float16))
+        >>> c = Tensor(np.random.rand(1, 2).astype(np.float16))
+        >>> w = Tensor(np.random.rand(34, 8).astype(np.float16))
+        >>> b = Tensor(np.random.rand(8, ).astype(np.float16))
+        >>> lstm = ops.BasicLSTMCell(keep_prob=1.0, forget_bias=1.0, state_is_tuple=True, activation='tanh')
+        >>> output = lstm(x, h, c, w, b)
+        >>> print(output)
+        (Tensor(shape=[1, 2], dtype=Float16, value=
+        ([[7.6953e-01, 9.2432e-01]]), Tensor(shape=[1, 2], dtype=Float16, value=
+         [[1.0000e+00, 1.0000e+00]]), Tensor(shape=[1, 2], dtype=Float16, value=
+         [[1.0000e+00, 1.0000e+00]]), Tensor(shape=[1, 2], dtype=Float16, value=
+         [[1.0000e+00, 1.0000e+00]]), Tensor(shape=[1, 2], dtype=Float16, value=
+         [[1.0000e+00, 1.0000e+00]]), Tensor(shape=[1, 2], dtype=Float16, value=
+         [[7.6953e-01, 9.2432e-01]]), Tensor(shape=[1, 2], dtype=Float16, value=
+         [[0.0000e+00, 0.0000e+00]]))
     """
 
     @prim_attr_register
     def __init__(self, keep_prob=1.0, forget_bias=1.0, state_is_tuple=True, activation='tanh'):
         self.keep_prob = validator.check_value_type("keep_prob", keep_prob, [float], self.name)
-        self.keep_prob = validator.check_number_range("keep_prob", keep_prob, 0.0, 1.0, Rel.INC_BOTH, self.name)
+        self.keep_prob = validator.check_float_range(keep_prob, 0.0, 1.0, Rel.INC_BOTH, "keep_prob", self.name)
         self.forget_bias = validator.check_value_type("forget_bias", forget_bias, [float], self.name)
         self.state_is_tuple = validator.check_value_type("state_is_tuple", state_is_tuple, [bool], self.name)
         self.activation = validator.check_string(activation, ['tanh'], "activation", self.name)
         self.add_prim_attr("io_format", "ND")
 
     def infer_shape(self, x_shape, h_shape, c_shape, w_shape, b_shape):
-        validator.check_integer("x rank", len(x_shape), 2, Rel.EQ, self.name)
-        validator.check_integer("h rank", len(h_shape), 2, Rel.EQ, self.name)
-        validator.check_integer("c rank", len(c_shape), 2, Rel.EQ, self.name)
-        validator.check_integer("w rank", len(w_shape), 2, Rel.EQ, self.name)
-        validator.check_integer("b rank", len(b_shape), 1, Rel.EQ, self.name)
+        validator.check_int(len(x_shape), 2, Rel.EQ, "x rank", self.name)
+        validator.check_int(len(h_shape), 2, Rel.EQ, "h rank", self.name)
+        validator.check_int(len(c_shape), 2, Rel.EQ, "c rank", self.name)
+        validator.check_int(len(w_shape), 2, Rel.EQ, "w rank", self.name)
+        validator.check_int(len(b_shape), 1, Rel.EQ, "b rank", self.name)
         validator.check("x_shape[0]", x_shape[0], "h_shape[0]", h_shape[0], Rel.EQ, self.name)
         validator.check("c_shape[0]", c_shape[0], "h_shape[0]", h_shape[0], Rel.EQ, self.name)
         validator.check("c_shape[1]", c_shape[1], "h_shape[1]", h_shape[1], Rel.EQ, self.name)
@@ -5514,12 +6373,12 @@ class BasicLSTMCell(PrimitiveWithInfer):
         return (ct_shape, ht_shape, it_shape, jt_shape, ft_shape, ot_shape, tanhct_shape)
 
     def infer_dtype(self, x_dtype, h_dtype, c_dtype, w_dtype, b_dtype):
-        validator.check_tensor_type_same({"x_dtype": x_dtype}, [mstype.float16, mstype.float32], self.name)
-        validator.check_tensor_type_same({"h_dtype": h_dtype}, [mstype.float16, mstype.float32], self.name)
-        validator.check_tensor_type_same({"w_dtype": w_dtype}, [mstype.float16, mstype.float32], self.name)
-
+        tuple(map(partial(validator.check_tensor_dtype_valid,
+                          valid_dtypes=(mstype.float16, mstype.float32), prim_name=self.name),
+                  ("x_dtype", "h_dtype", "w_dtype"),
+                  (x_dtype, h_dtype, w_dtype)))
         args = {"c_dtype": c_dtype, "b_dtype": b_dtype}
-        validator.check_tensor_type_same(args, [mstype.float16, mstype.float32], self.name)
+        validator.check_tensors_dtypes_same_and_valid(args, [mstype.float16, mstype.float32], self.name)
         return (c_dtype, mstype.float16, c_dtype, c_dtype, c_dtype, c_dtype, c_dtype)
 
 
@@ -5528,33 +6387,35 @@ class DynamicRNN(PrimitiveWithInfer):
     DynamicRNN Operator.
 
     Args:
-        cell_type (str): An string identifying the cell type in the op. Default: 'LSTM'.
+        cell_type (str): A string identifying the cell type in the op. Default: 'LSTM'.
             Only 'LSTM' is currently supported.
-        direction (str): An string identifying the direction in the op. Default: 'UNIDIRECTIONAL'.
+        direction (str): A string identifying the direction in the op. Default: 'UNIDIRECTIONAL'.
             Only 'UNIDIRECTIONAL' is currently supported.
         cell_depth (int): An integer identifying the cell depth in the op. Default: 1.
-        use_peephole (bool): An bool identifying if use peephole in the op. Default: False.
-        keep_prob (float): An float identifying the keep prob in the op. Default: 1.0.
-        cell_clip (float): An float identifying the cell clip in the op. Default: -1.0.
+        use_peephole (bool): A bool identifying if use peephole in the op. Default: False.
+        keep_prob (float): A float identifying the keep prob in the op. Default: 1.0.
+        cell_clip (float): A float identifying the cell clip in the op. Default: -1.0.
         num_proj (int): An integer identifying the num proj in the op. Default: 0.
-        time_major (bool): An bool identifying the time major in the op. Default: True.
+        time_major (bool): A bool identifying the time major in the op. Default: True.
             Only `True` is currently supported.
-        activation (str): An string identifying the type of activation function in the op. Default: 'tanh'.
+        activation (str): A string identifying the type of activation function in the op. Default: 'tanh'.
             Only 'tanh' is currently supported.
-        forget_bias (float): An float identifying the forget bias in the op. Default: 0.0.
-        is_training (bool): An bool identifying is training in the op. Default: True.
+        forget_bias (float): A float identifying the forget bias in the op. Default: 0.0.
+        is_training (bool): A bool identifying is training in the op. Default: True.
 
     Inputs:
         - **x** (Tensor) - Current words. Tensor of shape (`num_step`, `batch_size`, `input_size`).
-          The data type must be float16 or float32.
+          The data type must be float16.
         - **w** (Tensor) - Weight. Tensor of shape (`input_size + hidden_size`, `4 x hidden_size`).
-          The data type must be float16 or float32.
+          The data type must be float16.
         - **b** (Tensor) - Bias. Tensor of shape (`4 x hidden_size`).
           The data type must be float16 or float32.
         - **seq_length** (Tensor) - The length of each batch. Tensor of shape (`batch_size`).
           Only `None` is currently supported.
         - **init_h** (Tensor) - Hidden state of initial time. Tensor of shape (1, `batch_size`, `hidden_size`).
+          The data type must be float16.
         - **init_c** (Tensor) - Cell state of initial time. Tensor of shape (1, `batch_size`, `hidden_size`).
+          The data type must be float16.
 
     Outputs:
         - **y** (Tensor) - A Tensor of shape (`num_step`, `batch_size`, `hidden_size`).
@@ -5574,14 +6435,19 @@ class DynamicRNN(PrimitiveWithInfer):
         - **tanhct** (Tensor) - A Tensor of shape (`num_step`, `batch_size`, `hidden_size`).
           Has the same type with input `b`.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> x = Tensor(np.random.rand(2, 16, 64).astype(np.float16))
         >>> w = Tensor(np.random.rand(96, 128).astype(np.float16))
         >>> b = Tensor(np.random.rand(128).astype(np.float16))
         >>> init_h = Tensor(np.random.rand(1, 16, 32).astype(np.float16))
         >>> init_c = Tensor(np.random.rand(1, 16, 32).astype(np.float16))
-        >>> dynamic_rnn = P.DynamicRNN()
-        >>> output = lstm(x, w, b, None, init_h, init_c)
+        >>> dynamic_rnn = ops.DynamicRNN()
+        >>> output = dynamic_rnn(x, w, b, None, init_h, init_c)
+        >>> print(output[0].shape)
+        (2, 16, 32)
     """
 
     @prim_attr_register
@@ -5601,7 +6467,7 @@ class DynamicRNN(PrimitiveWithInfer):
         self.cell_depth = validator.check_value_type("cell_depth", cell_depth, [int], self.name)
         self.keep_prob = validator.check_value_type("keep_prob", keep_prob, [float], self.name)
         self.cell_clip = validator.check_value_type("cell_clip", cell_clip, [float], self.name)
-        self.num_proj = validator.check_value_type("num_proj", num_proj, [int], self.name)
+        self.num_proj = validator.check_non_negative_int(num_proj, "num_proj", self.name)
         self.forget_bias = validator.check_value_type("forget_bias", forget_bias, [float], self.name)
         self.use_peephole = validator.check_value_type("use_peephole", use_peephole, [bool], self.name)
         self.time_major = validator.check_value_type("time_major", time_major, [bool], self.name)
@@ -5612,11 +6478,11 @@ class DynamicRNN(PrimitiveWithInfer):
         self.add_prim_attr("io_format", "ND")
 
     def infer_shape(self, x_shape, w_shape, b_shape, seq_shape, h_shape, c_shape):
-        validator.check_integer("x_shape", len(x_shape), 3, Rel.EQ, self.name)
-        validator.check_integer("w rank", len(w_shape), 2, Rel.EQ, self.name)
-        validator.check_integer("b rank", len(b_shape), 1, Rel.EQ, self.name)
-        validator.check_integer("h_shape", len(h_shape), 3, Rel.EQ, self.name)
-        validator.check_integer("c_shape", len(c_shape), 3, Rel.EQ, self.name)
+        validator.check_int(len(x_shape), 3, Rel.EQ, "x_shape", self.name)
+        validator.check_int(len(w_shape), 2, Rel.EQ, "w rank", self.name)
+        validator.check_int(len(b_shape), 1, Rel.EQ, "b rank", self.name)
+        validator.check_int(len(h_shape), 3, Rel.EQ, "h_shape", self.name)
+        validator.check_int(len(c_shape), 3, Rel.EQ, "c_shape", self.name)
         if seq_shape is not None:
             raise ValueError(f"For {self.name}, seq_shape should be None.")
 
@@ -5629,7 +6495,7 @@ class DynamicRNN(PrimitiveWithInfer):
         validator.check("w_shape[0]", w_shape[0], "input_size + hidden_size",
                         input_size + hidden_size, Rel.EQ, self.name)
         validator.check("b_shape[0]", b_shape[0], "w_shape[1]", w_shape[1], Rel.EQ, self.name)
-        validator.check_integer("h_shape[0]", h_shape[0], 1, Rel.EQ, self.name)
+        validator.check_int(h_shape[0], 1, Rel.EQ, "h_shape[0]", self.name)
         validator.check("h_shape[1]", h_shape[1], "batch_size", batch_size, Rel.EQ, self.name)
         validator.check("h_shape[2]", h_shape[2], "hidden_size", hidden_size, Rel.EQ, self.name)
         validator.check("c_shape", c_shape, "h_shape", h_shape, Rel.EQ, self.name)
@@ -5638,17 +6504,172 @@ class DynamicRNN(PrimitiveWithInfer):
         return y_shape, y_shape, y_shape, y_shape, y_shape, y_shape, y_shape, y_shape
 
     def infer_dtype(self, x_dtype, w_dtype, b_dtype, seq_dtype, h_dtype, c_dtype):
-        validator.check_tensor_type_same({"x dtype": x_dtype}, (mstype.float32, mstype.float16), self.name)
-        validator.check_tensor_type_same({"w dtype": w_dtype}, (mstype.float32, mstype.float16), self.name)
-        validator.check_tensor_type_same({"b dtype": b_dtype}, (mstype.float32, mstype.float16), self.name)
-        validator.check_tensor_type_same({"h dtype": h_dtype}, (mstype.float32, mstype.float16), self.name)
-        validator.check_tensor_type_same({"c dtype": c_dtype}, (mstype.float32, mstype.float16), self.name)
+        tuple(map(partial(validator.check_tensor_dtype_valid, valid_dtypes=[mstype.float16], prim_name=self.name),
+                  ("x", "w", "h", "c"),
+                  (x_dtype, w_dtype, h_dtype, c_dtype)))
+        validator.check_tensor_dtype_valid("b", b_dtype, (mstype.float16, mstype.float32), self.name)
         return b_dtype, x_dtype, b_dtype, b_dtype, b_dtype, b_dtype, b_dtype, b_dtype
+
+
+class DynamicGRUV2(PrimitiveWithInfer):
+    r"""
+    Applies a single-layer gated recurrent unit (GRU) to an input sequence.
+
+    Args:
+        direction (str): A string identifying the direction in the op. Default: 'UNIDIRECTIONAL'.
+            Only 'UNIDIRECTIONAL' is currently supported.
+        cell_depth (int): An integer identifying the cell depth in the op. Default: 1.
+        keep_prob (float): A float identifying the keep prob in the op. Default: 1.0.
+        cell_clip (float): A float identifying the cell clip in the op. Default: -1.0.
+        num_proj (int): An integer identifying the num proj in the op. Default: 0.
+        time_major (bool): A bool identifying the time major in the op. Default: True.
+        activation (str) : A string identifying the type of activation function in the op. Default: 'tanh'.
+            Only 'tanh' is currently supported.
+        gate_order (str): A string identifying the gate order in weight and bias. Default: 'rzh.
+            'zrh' is another option.
+        reset_after (bool): A bool identifying whether to apply reset gate after matrix multiplication. Default: True.
+        is_training (bool): A bool identifying is training in the op. Default: True.
+
+    Inputs:
+        - **x** (Tensor) - Current words.
+          Tensor of shape :math:`(\text{num_step}, \text{batch_size}, \text{input_size})`.
+          The data type must be float16.
+        - **weight_input** (Tensor) - Input-hidden weight.
+          Tensor of shape :math:`(\text{input_size}, 3 \times \text{hidden_size})`.
+          The data type must be float16.
+        - **weight_hidden** (Tensor) - Hidden-hidden weight.
+          Tensor of shape :math:`(\text{hidden_size}, 3 \times \text{hidden_size})`.
+          The data type must be float16.
+        - **bias_input** (Tensor) - Input-hidden bias. Tensor of shape :math:`(3 \times \text{hidden_size})`, or None.
+          Has the same data type with input `init_h`.
+        - **bias_hidden** (Tensor) - Hidden-hidden bias. Tensor of shape :math:`(3 \times \text{hidden_size})`, or None.
+          Has the same data type with input `init_h`.
+        - **seq_length** (Tensor) - The length of each batch. Tensor of shape :math:`(\text{batch_size})`.
+          Only `None` is currently supported.
+        - **init_h** (Tensor) - Hidden state of initial time.
+          Tensor of shape :math:`(\text{batch_size}, \text{hidden_size})`.
+          The data type must be float16 or float32.
+
+    Outputs:
+        - **y** (Tensor) - A Tensor of shape :math:
+          if num_proj > 0 `(num_step, batch_size, min(hidden_size, num_proj)`,
+          if num_proj == 0 `(num_step, batch_size, hidden_size)`.
+          Has the same data type with input `bias_type`.
+        - **output_h** (Tensor) - A Tensor of shape :math:`(\text{num_step}, \text{batch_size}, \text{hidden_size})`.
+          Has the same data type with input `bias_type`.
+        - **update** (Tensor) - A Tensor of shape :math:`(\text{num_step}, \text{batch_size}, \text{hidden_size})`.
+          Has the same data type with input `bias_type`.
+        - **reset** (Tensor) - A Tensor of shape :math:`(\text{num_step}, \text{batch_size}, \text{hidden_size})`.
+          Has the same data type with input `bias_type`.
+        - **new** (Tensor) - A Tensor of shape :math:`(\text{num_step}, \text{batch_size}, \text{hidden_size})`.
+          Has the same data type with input `bias_type`.
+        - **hidden_new** (Tensor) - A Tensor of shape :math:`(\text{num_step}, \text{batch_size}, \text{hidden_size})`.
+          Has the same data type with input `bias_type`.
+
+        - If `bias_input` and `bias_hidden` both are `None`, `bias_type` is date type of `init_h`.
+        - If `bias_input` is not `None`, `bias_type` is the date type of `bias_input`.
+        - If `bias_input` is `None` and `bias_hidden` is not `None, `bias_type` is the date type of `bias_hidden`.
+
+    Supported Platforms:
+        ``Ascend``
+
+    Examples:
+        >>> x = Tensor(np.random.rand(2, 8, 64).astype(np.float16))
+        >>> weight_i = Tensor(np.random.rand(64, 48).astype(np.float16))
+        >>> weight_h = Tensor(np.random.rand(16, 48).astype(np.float16))
+        >>> bias_i = Tensor(np.random.rand(48).astype(np.float16))
+        >>> bias_h = Tensor(np.random.rand(48).astype(np.float16))
+        >>> init_h = Tensor(np.random.rand(8, 16).astype(np.float16))
+        >>> dynamic_gru_v2 = ops.DynamicGRUV2()
+        >>> output = dynamic_gru_v2(x, weight_i, weight_h, bias_i, bias_h, None, init_h)
+        >>> print(output[0].shape)
+        (2, 8, 16)
+    """
+
+    @prim_attr_register
+    def __init__(self,
+                 direction='UNIDIRECTIONAL',
+                 cell_depth=1,
+                 keep_prob=1.0,
+                 cell_clip=-1.0,
+                 num_proj=0,
+                 time_major=True,
+                 activation="tanh",
+                 gate_order="rzh",
+                 reset_after=True,
+                 is_training=True):
+        self.cell_depth = validator.check_value_type("cell_depth", cell_depth, [int], self.name)
+        self.keep_prob = validator.check_value_type("keep_prob", keep_prob, [float], self.name)
+        self.cell_clip = validator.check_value_type("cell_clip", cell_clip, [float], self.name)
+        self.num_proj = validator.check_non_negative_int(num_proj, "num_proj", self.name)
+        self.time_major = validator.check_value_type("time_major", time_major, [bool], self.name)
+        self.is_training = validator.check_value_type("is_training", is_training, [bool], self.name)
+        self.direction = validator.check_string(direction, ['UNIDIRECTIONAL'], "direction", self.name)
+        self.activation = validator.check_string(activation, ['tanh'], "activation", self.name)
+        self.gate_order = validator.check_string(gate_order, ['zrh', 'rzh'], "gate_order", self.name)
+        self.reset_after = validator.check_value_type("reset_after", reset_after, [bool], self.name)
+        self.add_prim_attr("io_format", "ND")
+
+    def infer_shape(self, x_shape, winput_shape, whidden_shape, binput_shape, bhidden_shape, seq_shape, h_shape):
+        validator.check_int(len(x_shape), 3, Rel.EQ, "x shape", self.name)
+        validator.check_int(len(winput_shape), 2, Rel.EQ, "weight input shape rank", self.name)
+        validator.check_int(len(whidden_shape), 2, Rel.EQ, "weight hidden shape rank", self.name)
+
+        num_step, batch_size, input_size = x_shape
+        hidden_size = winput_shape[-1] // 3
+        if winput_shape[-1] % 3 != 0:
+            raise ValueError(f"For {self.name}, weight_input_shape[-1] should multiple of 3.")
+
+        self.placeholder_index = [3, 4, 5]
+        if binput_shape is not None:
+            validator.check_int(len(binput_shape), 1, Rel.EQ, "bias input shape rank", self.name)
+            validator.check("bias_input_shape", binput_shape, "3 * hidden_shape", [3 * hidden_size], Rel.EQ, self.name)
+            self.placeholder_index.remove(3)
+        if bhidden_shape is not None:
+            validator.check_int(len(bhidden_shape), 1, Rel.EQ, "bias hidden shape rank", self.name)
+            validator.check("bias_hidden_shape", bhidden_shape,
+                            "3 * hidden_shape", [3 * hidden_size], Rel.EQ, self.name)
+            self.placeholder_index.remove(4)
+        if seq_shape is not None:
+            raise ValueError(f"For {self.name}, seq_shape should be None.")
+
+        validator.check_int(len(h_shape), 2, Rel.EQ, "init_h shape rank", self.name)
+        validator.check("init_h_shape[0]", h_shape[0], "batch_size", batch_size, Rel.EQ, self.name)
+        validator.check("init_h_shape[1]", h_shape[1], "hidden_size", hidden_size, Rel.EQ, self.name)
+        validator.check("weight_input_shape[-1]", winput_shape[-1], "weight_hidden_shape[-1]",
+                        whidden_shape[-1], Rel.EQ, self.name)
+        validator.check("weight_input_shape[0]", winput_shape[0], "input_size", input_size, Rel.EQ, self.name)
+        validator.check("weight_hidden_shape[0]", whidden_shape[0], "hidden_size", hidden_size, Rel.EQ, self.name)
+        if self.num_proj > 0:
+            y_shape = (num_step, batch_size, min(hidden_size, self.num_proj))
+        else:
+            y_shape = (num_step, batch_size, hidden_size)
+        out_shape = (num_step, batch_size, hidden_size)
+        self.add_prim_attr("placeholder_index", self.placeholder_index)
+        return y_shape, out_shape, out_shape, out_shape, out_shape, out_shape
+
+    def infer_dtype(self, x_dtype, winput_dtype, whidden_dtype, binput_dtype, bhidden_dtype, seq_dtype, h_dtype):
+        validator.check_tensor_dtype_valid("x dtype", x_dtype, [mstype.float16], self.name)
+        validator.check_tensor_dtype_valid("weight input dtype", winput_dtype, [mstype.float16], self.name)
+        validator.check_tensor_dtype_valid("weight hidden dtype", whidden_dtype, [mstype.float16], self.name)
+        valid_dtypes = [mstype.float16, mstype.float32]
+        validator.check_tensor_dtype_valid("init_h dtype", h_dtype, valid_dtypes, self.name)
+        b_dtype = h_dtype
+        if binput_dtype is not None:
+            args = {'init_h': h_dtype, 'bias_input': binput_dtype}
+            validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
+            b_dtype = binput_dtype
+        if bhidden_dtype is not None:
+            args = {'init_h': h_dtype, 'bias_hidden': bhidden_dtype}
+            validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
+            b_dtype = bhidden_dtype
+
+        return b_dtype, b_dtype, b_dtype, b_dtype, b_dtype, b_dtype
 
 
 class InTopK(PrimitiveWithInfer):
     r"""
-    Whether the targets are in the top `k` predictions.
+    Determines whether the targets are in the top `k` predictions.
 
     Args:
         k (int): Specifies the number of top elements to be used for computing precision.
@@ -5663,12 +6684,16 @@ class InTopK(PrimitiveWithInfer):
         Tensor has 1 dimension of type bool and the same shape with `x2`. For labeling sample `i` in `x2`,
         if the label in the first `k` predictions for sample `i` is in `x1`, then the value is True, otherwise False.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
         >>> x1 = Tensor(np.array([[1, 8, 5, 2, 7], [4, 9, 1, 3, 5]]), mindspore.float32)
         >>> x2 = Tensor(np.array([1, 3]), mindspore.int32)
-        >>> in_top_k = P.InTopK(3)
-        >>> result = in_top_k(x1, x2)
-        [True  False]
+        >>> in_top_k = ops.InTopK(3)
+        >>> output = in_top_k(x1, x2)
+        >>> print(output)
+        [ True  False]
     """
 
     @prim_attr_register
@@ -5678,8 +6703,8 @@ class InTopK(PrimitiveWithInfer):
         validator.check_value_type("k", k, [int], self.name)
 
     def infer_dtype(self, x1_dtype, x2_dtype):
-        validator.check_tensor_type_same({"x1": x1_dtype}, (mstype.float16, mstype.float32,), self.name)
-        validator.check_tensor_type_same({"x2": x2_dtype}, (mstype.int32,), self.name)
+        validator.check_tensor_dtype_valid("x1", x1_dtype, (mstype.float16, mstype.float32,), self.name)
+        validator.check_tensor_dtype_valid("x2", x2_dtype, (mstype.int32,), self.name)
 
         return mstype.tensor_type(mstype.bool_)
 
@@ -5707,11 +6732,17 @@ class LRN(PrimitiveWithInfer):
     Outputs:
         Tensor, with the same shape and data type as the input tensor.
 
+    Supported Platforms:
+        ``Ascend``
+
     Examples:
-        >>> x = Tensor(np.random.rand(1, 10, 4, 4)), mindspore.float32)
-        >>> lrn = P.LRN()
-        >>> lrn(x)
+        >>> x = Tensor(np.random.rand(1, 2, 2, 2), mindspore.float32)
+        >>> lrn = ops.LRN()
+        >>> output = lrn(x)
+        >>> print(output.shape)
+        (1, 2, 2, 2)
     """
+
     @prim_attr_register
     def __init__(self, depth_radius=5, bias=1.0, alpha=1.0, beta=0.5, norm_region="ACROSS_CHANNELS"):
         """Initialize LRN"""
@@ -5725,9 +6756,445 @@ class LRN(PrimitiveWithInfer):
         validator.check_non_negative_int(depth_radius, "depth_radius", self.name)
 
     def infer_dtype(self, x_dtype):
-        validator.check_tensor_type_same({"x": x_dtype}, (mstype.float16, mstype.float32,), self.name)
+        validator.check_tensor_dtype_valid("x", x_dtype, (mstype.float16, mstype.float32,), self.name)
         return x_dtype
 
     def infer_shape(self, x_shape):
-        validator.check_integer("x_shape", len(x_shape), 4, Rel.EQ, self.name)
+        validator.check_int(len(x_shape), 4, Rel.EQ, "x_shape", self.name)
         return x_shape
+
+
+class Conv3D(PrimitiveWithInfer):
+    r"""
+    3D convolution layer.
+
+    Applies a 3D convolution over an input tensor which is typically of shape
+    :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`, where :math:`N` is batch size and :math:`C_{in}` is channel number.
+    For each batch of shape :math:`(C_{in}, D_{in}, H_{in}, W_{in})`.
+
+    If the 'pad_mode' is set to be "valid", the output height and width will be
+    :math:`\left \lfloor{1 + \frac{D_{in} + 2 \times \text{padding} - \text{ks_d} -
+    (\text{ks_d} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor` and
+    :math:`\left \lfloor{1 + \frac{H_{in} + 2 \times \text{padding} - \text{ks_h} -
+    (\text{ks_h} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor` and
+    :math:`\left \lfloor{1 + \frac{W_{in} + 2 \times \text{padding} - \text{ks_w} -
+    (\text{ks_w} - 1) \times (\text{dilation} - 1) }{\text{stride}}} \right \rfloor` respectively.
+
+    Args:
+        out_channel (int): The dimension of the output.
+        kernel_size (Union[int, tuple[int]]): The kernel size of the 3D convolution.
+        mode (int): Modes for different convolutions. Not currently used.
+        pad_mode (str): Modes to fill padding. It could be "valid", "same", or "pad". Default: "valid".
+        pad (Union(int, tuple[int])): The pad value to be filled. Default: 0. If `pad` is an integer, the paddings of
+                    head, tail, top, bottom, left and right are the same, equal to pad. If `pad` is a tuple of four
+                    integers, the padding of head, tail, top, bottom, left and right equal to pad[0], pad[1], pad[2],
+                    pad[3], pad[4] and pad[5] correspondingly.
+        stride (Union(int, tuple[int])): The stride to be applied to the convolution filter. Default: 1.
+        dilation (Union(int, tuple[int])): Specifies the space to use between kernel elements. Default: 1.
+        group (int): Splits input into groups. Default: 1.
+        data_format (str): The optional value for data format. Currently only support "NCDHW".
+
+    Inputs:
+        - **input** (Tensor) - Tensor of shape :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`.
+        - **weight** (Tensor) - Set size of kernel is :math:`(D_in, K_h, K_w)`, then the shape is
+          :math:`(C_{out}, C_{in}, D_{in}, K_h, K_w)`.
+
+    Outputs:
+        Tensor, the value that applied 3D convolution. The shape is :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})`.
+
+    Supported Platforms:
+        ``Ascend``
+
+    Examples:
+        >>> input = Tensor(np.ones([16, 3, 10, 32, 32]), mindspore.float32)
+        >>> weight = Tensor(np.ones([32, 3, 4, 3, 3]), mindspore.float32)
+        >>> conv3d = P.Conv3D(out_channel=32, kernel_size=(4, 3, 3))
+        >>> output = conv3d(input, weight)
+        >>> print(output.shape)
+        (16, 32, 7, 30, 30)
+    """
+
+    @prim_attr_register
+    def __init__(self,
+                 out_channel,
+                 kernel_size,
+                 mode=1,
+                 pad_mode="valid",
+                 pad=0,
+                 stride=1,
+                 dilation=1,
+                 group=1,
+                 data_format="NCDHW"):
+        """Initialize Conv3D"""
+        self.init_prim_io_names(inputs=['x', 'w'], outputs=['output'])
+        self.kernel_size = _check_3d_int_or_tuple('kernel_size', kernel_size, self.name)
+        self.stride = _check_3d_int_or_tuple('stride', stride, self.name, allow_five=True, ret_five=True)
+        self.add_prim_attr('strides', self.stride)
+        self.dilation = _check_3d_int_or_tuple('dilation', dilation, self.name, allow_five=True, ret_five=True)
+        self.add_prim_attr('dilations', self.dilation)
+        validator.check_value_type('pad', pad, (int, tuple), self.name)
+        if isinstance(pad, int):
+            pad = (pad,) * 6
+        validator.check_equal_int(len(pad), 6, 'pad size', self.name)
+        self.padding = pad
+        validator.check_int_range(self.padding[0], 0, kernel_size[0], Rel.INC_LEFT,
+                                  'pad_d belonging [0, kernel_size_d)', self.name)
+        validator.check_int_range(self.padding[1], 0, kernel_size[0], Rel.INC_LEFT,
+                                  'pad_d belonging [0, kernel_size_d)', self.name)
+        validator.check_int_range(self.padding[2], 0, kernel_size[1], Rel.INC_LEFT,
+                                  'pad_h belonging [0, kernel_size_h)', self.name)
+        validator.check_int_range(self.padding[3], 0, kernel_size[1], Rel.INC_LEFT,
+                                  'pad_h belonging [0, kernel_size_h)', self.name)
+        validator.check_int_range(self.padding[4], 0, kernel_size[2], Rel.INC_LEFT,
+                                  'pad_w belonging [0, kernel_size_w)', self.name)
+        validator.check_int_range(self.padding[5], 0, kernel_size[2], Rel.INC_LEFT,
+                                  'pad_w belonging [0, kernel_size_w)', self.name)
+        self.pad_mode = validator.check_string(pad_mode.lower(), ['valid', 'same', 'pad'], 'pad_mode', self.name)
+        self.add_prim_attr('pad_mode', self.pad_mode)
+
+        if self.pad_mode != 'pad' and pad != (0, 0, 0, 0, 0, 0):
+            raise ValueError(f"For '{self.name}', when pad is not 0, pad_mode should be set as 'pad'.")
+        if self.pad_mode == 'pad':
+            for item in pad:
+                validator.check_non_negative_int(item, 'pad item', self.name)
+
+        self.mode = validator.check_equal_int(mode, 1, 'mode', self.name)
+        self.add_prim_attr('mode', self.mode)
+        self.format = validator.check_string(data_format, ['NCDHW'], 'format', self.name)
+        self.add_prim_attr('data_format', self.format)
+        self.add_prim_attr('io_format', self.format)
+        self.out_channel = validator.check_positive_int(out_channel, 'out_channel', self.name)
+        self.group = validator.check_positive_int(group, 'group', self.name)
+        self.add_prim_attr('groups', self.group)
+        self.add_prim_attr('offset_x', 0)
+
+    def infer_shape(self, x_shape, w_shape, b_shape=None):
+        validator.check_equal_int(len(w_shape), 5, "weight rank", self.name)
+        validator.check_equal_int(len(x_shape), 5, "x rank", self.name)
+        if b_shape is not None:
+            raise ValueError("Bias currently only support None.")
+        validator.check(f"x_shape[1] / group", x_shape[1] // self.group, "w_shape[1]", w_shape[1], Rel.EQ, self.name)
+        validator.check('out_channel', self.out_channel, 'w_shape[0]', w_shape[0], Rel.EQ, self.name)
+        validator.check('kernel_size', self.kernel_size, 'w_shape[1:4]', tuple(w_shape[2:]), Rel.EQ, self.name)
+
+        kernel_size_d = w_shape[2]
+        kernel_size_h = w_shape[3]
+        kernel_size_w = w_shape[4]
+
+        stride_d = self.stride[2]
+        stride_h = self.stride[3]
+        stride_w = self.stride[4]
+
+        dilation_d = self.dilation[2]
+        dilation_h = self.dilation[3]
+        dilation_w = self.dilation[4]
+
+        if self.pad_mode == "valid":
+            d_out = math.ceil((x_shape[2] - dilation_d * (kernel_size_d - 1)) / stride_d)
+            h_out = math.ceil((x_shape[3] - dilation_h * (kernel_size_h - 1)) / stride_h)
+            w_out = math.ceil((x_shape[4] - dilation_w * (kernel_size_w - 1)) / stride_w)
+            pad_head, pad_tail, pad_top, pad_bottom, pad_left, pad_right = 0, 0, 0, 0, 0, 0
+
+        elif self.pad_mode == "same":
+            d_out = math.ceil(x_shape[2] / stride_d)
+            h_out = math.ceil(x_shape[3] / stride_h)
+            w_out = math.ceil(x_shape[4] / stride_w)
+
+            pad_needed_d = max(0, (d_out - 1) * stride_d + dilation_d * (kernel_size_d - 1) + 1 - x_shape[2])
+            pad_head = math.floor(pad_needed_d / 2)
+            pad_tail = pad_needed_d - pad_head
+
+            pad_needed_h = max(0, (h_out - 1) * stride_h + dilation_h * (kernel_size_h - 1) + 1 - x_shape[3])
+            pad_top = math.floor(pad_needed_h / 2)
+            pad_bottom = pad_needed_h - pad_top
+
+            pad_needed_w = max(0, (w_out - 1) * stride_w + dilation_w * (kernel_size_w - 1) + 1 - x_shape[4])
+            pad_left = math.floor(pad_needed_w / 2)
+            pad_right = pad_needed_w - pad_left
+
+        elif self.pad_mode == 'pad':
+            pad_head, pad_tail, pad_top, pad_bottom, pad_left, pad_right = self.padding
+            d_out = 1 + (x_shape[2] + pad_head + pad_tail - kernel_size_d - (kernel_size_d - 1)
+                         * (dilation_d - 1)) / stride_d
+            h_out = 1 + (x_shape[3] + pad_top + pad_bottom - kernel_size_h - (kernel_size_h - 1)
+                         * (dilation_h - 1)) / stride_h
+            w_out = 1 + (x_shape[4] + pad_left + pad_right - kernel_size_w - (kernel_size_w - 1)
+                         * (dilation_w - 1)) / stride_w
+            d_out = math.floor(d_out)
+            h_out = math.floor(h_out)
+            w_out = math.floor(w_out)
+
+        self.pad_list = [pad_head, pad_tail, pad_top, pad_bottom, pad_left, pad_right]
+        self.add_prim_attr('pads', (pad_head, pad_tail, pad_top, pad_bottom, pad_left, pad_right))
+        out_channel = self.out_channel
+        out_shape = [x_shape[0], out_channel, d_out, h_out, w_out]
+        _check_shape('output', out_shape, self.name)
+        return out_shape
+
+    def infer_dtype(self, x_dtype, w_dtype, b_dtype=None):
+        args = {'x': x_dtype, 'w': w_dtype}
+        valid_dtypes = [mstype.float16, mstype.float32]
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
+        return x_dtype
+
+
+class Conv3DBackpropInput(PrimitiveWithInfer):
+    """
+    Computes the gradients of convolution 3D with respect to the input.
+
+    Args:
+        out_channel (int): The dimension of the output.
+        kernel_size (Union[int, tuple[int]]): The kernel size of the 3D convolution.
+        mode (int): Modes for different convolutions. Not currently used.
+        pad_mode (str): Modes to fill padding. It could be "valid", "same", or "pad". Default: "valid".
+        pad (Union(int, tuple[int])): The pad value to be filled. Default: 0. If `pad` is an integer, the paddings of
+                    head, tail, top, bottom, left and right are the same, equal to pad. If `pad` is a tuple of four
+                    integers, the padding of head, tail, top, bottom, left and right equal to pad[0], pad[1], pad[2],
+                    pad[3], pad[4] and pad[5] correspondingly.
+        stride (Union(int, tuple[int])): The stride to be applied to the convolution filter. Default: 1.
+        dilation (Union(int, tuple[int])): Specifies the space to use between kernel elements. Default: 1.
+        group (int): Splits input into groups. Default: 1.
+        data_format (str): The optional value for data format. Currently only support 'NCDHW'.
+
+    Inputs:
+        - **weight** (Tensor) - Set size of kernel is :math:`(D_in, K_h, K_w)`, then the shape is
+          :math:`(C_{out}, C_{in}, D_{in}, K_h, K_w)`.
+        - **dout** (Tensor) - the gradients w.r.t the output of the convolution. The shape conforms to the default
+          data_format :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})`.
+        - **input_size** (Tensor) - A tuple describes the shape of the input which conforms to the format
+          :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`.
+
+    Outputs:
+        Tensor, the gradients w.r.t the input of convolution 3D. It has the same shape as the input.
+
+    Supported Platforms:
+        ``Ascend``
+
+    Examples:
+        >>> dout = Tensor(np.ones([16, 32, 10, 32, 32]), mindspore.float32)
+        >>> weight = Tensor(np.ones([32, 32, 4, 6, 2]), mindspore.float32)
+        >>> x = Tensor(np.ones([16, 32, 13, 37, 33]))
+        >>> conv3d_backprop_input = P.Conv3DBackpropInput(out_channel=4, kernel_size=(4, 6, 2))
+        >>> output = conv3d_backprop_input(dout, weight, F.shape(x))
+        >>> print(output.shape)
+        (16, 32, 13, 37, 33)
+    """
+
+    @prim_attr_register
+    def __init__(self,
+                 out_channel,
+                 kernel_size,
+                 mode=1,
+                 pad_mode="valid",
+                 pad=0,
+                 stride=1,
+                 dilation=1,
+                 group=1,
+                 data_format="NCDHW"):
+        """Initialize Conv3DBackpropInput"""
+        self.init_prim_io_names(inputs=['filter', 'out_backprop', 'input_size'], outputs=['y'])
+        self.out_channel = validator.check_positive_int(out_channel, 'out_channel', self.name)
+        self.kernel_size = _check_3d_int_or_tuple('kernel_size', kernel_size, self.name)
+        self.stride = _check_3d_int_or_tuple('stride', stride, self.name, allow_five=True, ret_five=True)
+        self.add_prim_attr('strides', self.stride)
+        self.dilation = _check_3d_int_or_tuple('dilation', dilation, self.name, allow_five=True, ret_five=True)
+        self.add_prim_attr('dilations', self.dilation)
+        validator.check_value_type('pad', pad, (int, tuple), self.name)
+        if isinstance(pad, int):
+            pad = (pad,) * 6
+        validator.check_equal_int(len(pad), 6, 'pad size', self.name)
+        self.pad_list = pad
+
+        self.pad_mode = validator.check_string(pad_mode.lower(), ['valid', 'same', 'pad'], 'pad_mode', self.name)
+        if self.pad_mode != 'pad' and self.pad_list != (0, 0, 0, 0, 0, 0):
+            raise ValueError(f"For '{self.name}', when pad is not 0, pad_mode should be set as 'pad'.")
+        if self.pad_mode == 'pad':
+            for item in pad:
+                validator.check_non_negative_int(item, 'pad item', self.name)
+        self.add_prim_attr('pad_mode', self.pad_mode)
+
+        self.mode = validator.check_equal_int(mode, 1, 'mode', self.name)
+        self.add_prim_attr('mode', self.mode)
+        self.group = validator.check_positive_int(group, 'group', self.name)
+        self.add_prim_attr('groups', self.group)
+        self.format = validator.check_string(data_format, ['NCDHW'], 'format', self.name)
+        self.add_prim_attr('data_format', self.format)
+        self.add_prim_attr('io_format', self.format)
+
+    def __infer__(self, w, doutput, x_size):
+        x_size_v = x_size['value']
+        validator.check_value_type('x_size', x_size_v, [tuple], self.name)
+        for i, dim_len in enumerate(x_size_v):
+            validator.check_value_type("x_size[%d]" % i, dim_len, [int], self.name)
+        args = {'doutput': doutput['dtype'], 'w': w['dtype']}
+        valid_dtypes = [mstype.float16, mstype.float32]
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
+        validator.check("filter's batch", w['shape'][0], "dout's channel", doutput['shape'][1], Rel.EQ, self.name)
+        validator.check("filter's channel", w['shape'][1], "input_size's channel", x_size_v[1], Rel.EQ, self.name)
+        validator.check("input_size's batch", x_size_v[0], "dout's batch", doutput['shape'][0], Rel.EQ, self.name)
+
+        # infer shape
+        dout_shape = doutput['shape']
+        kernel_d = self.kernel_size[0]
+        kernel_h = self.kernel_size[1]
+        kernel_w = self.kernel_size[2]
+        stride_d = self.stride[2]
+        stride_h = self.stride[3]
+        stride_w = self.stride[4]
+        dilation_d = self.dilation[2]
+        dilation_h = self.dilation[3]
+        dilation_w = self.dilation[4]
+        # The pad_mode is valid by default. If pad_mode is not valid or same, then pad.
+        if self.pad_mode == "valid":
+            self.pad_list = (0, 0, 0, 0, 0, 0)
+        if self.pad_mode == "same":
+            pad_needed_d = max(0, (dout_shape[2] - 1) * stride_d + dilation_d * (kernel_d - 1) + 1 - x_size_v[2])
+            pad_head = math.floor(pad_needed_d / 2)
+            pad_tail = pad_needed_d - pad_head
+
+            pad_needed_h = max(0, (dout_shape[3] - 1) * stride_h + dilation_h * (kernel_h - 1) + 1 - x_size_v[3])
+            pad_top = math.floor(pad_needed_h / 2)
+            pad_bottom = pad_needed_h - pad_top
+
+            pad_needed_w = max(0, (dout_shape[4] - 1) * stride_w + dilation_w * (kernel_w - 1) + 1 - x_size_v[4])
+            pad_left = math.floor(pad_needed_w / 2)
+            pad_right = pad_needed_w - pad_left
+            self.pad_list = (pad_head, pad_tail, pad_top, pad_bottom, pad_left, pad_right)
+
+        self.add_prim_attr('pads', self.pad_list)
+        out = {
+            'value': None,
+            'shape': x_size_v,
+            'dtype': doutput['dtype'],
+        }
+        return out
+
+
+class Conv3DTranspose(PrimitiveWithInfer):
+    """
+    Computes the gradients of convolution 3D with respect to the input.
+
+    Args:
+        in_channel (int): The channel of the input x.
+        out_channel (int): The channel of the weight x.
+        kernel_size (Union[int, tuple[int]]): The kernel size of the 3D convolution.
+        mode (int): Modes for different convolutions. Not currently used.
+        pad (Union(int, tuple[int])): The pad value to be filled. Default: 0. If `pad` is an integer, the paddings of
+             head, tail, top, bottom, left and right are the same, equal to pad. If `pad` is a tuple of four integers,
+             the padding of head, tail, top, bottom, left and right equal to pad[0], pad[1], pad[2], pad[3], pad[4]
+             and pad[5] correspondingly.
+        stride (Union(int, tuple[int])): The stride to be applied to the convolution filter. Default: 1.
+        dilation (Union(int, tuple[int])): Specifies the space to use between kernel elements. Default: 1.
+        group (int): Splits input into groups. Default: 1.
+        output_padding (Union(int, tuple[int])): Add extra size to each dimension of the output. Default: 0.
+        data_format (str): The optional value for data format. Currently only support 'NCDHW'.
+
+    Inputs:
+        - **dout** (Tensor) - the gradients w.r.t the output of the convolution. The shape conforms to the default
+          data_format :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})`.
+        - **weight** (Tensor) - Set size of kernel is :math:`(D_in, K_h, K_w)`, then the shape is
+          :math:`(C_{out}, C_{in}, D_{in}, K_h, K_w)`.
+        - **input_size** (Tensor) - A tuple describes the shape of the input which conforms to the format
+          :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`.
+
+    Outputs:
+        Tensor, the gradients w.r.t the input of convolution 3D. It has the same shape as the input.
+
+    Supported Platforms:
+        ``Ascend``
+
+    Examples:
+        >>> input_x = Tensor(np.ones([32, 16, 10, 32, 32]), mindspore.float32)
+        >>> weight = Tensor(np.ones([16, 3, 4, 6, 2]), mindspore.float32)
+        >>> conv3d_transpose = P.Conv3DTranspose(in_channel=16, out_channel=3, kernel_size=(4, 6, 2))
+        >>> output = conv3d_transpose(input_x, weight)
+        >>> print(output.shape)
+        (32, 3, 13, 37, 33)
+    """
+
+    @prim_attr_register
+    def __init__(self,
+                 in_channel,
+                 out_channel,
+                 kernel_size,
+                 mode=1,
+                 pad=0,
+                 stride=1,
+                 dilation=1,
+                 group=1,
+                 output_padding=0,
+                 data_format="NCDHW"):
+        """Initialize Conv3DTranspose"""
+        self.init_prim_io_names(inputs=['x', 'filter'], outputs=['output'])
+        self.in_channel = validator.check_positive_int(in_channel, 'in_channel', self.name)
+        self.add_prim_attr('in_channel', self.in_channel)
+        self.out_channel = validator.check_positive_int(out_channel, 'out_channel', self.name)
+        self.add_prim_attr('out_channel', self.out_channel)
+        self.kernel_size = _check_3d_int_or_tuple('kernel_size', kernel_size, self.name)
+        self.stride = _check_3d_int_or_tuple('stride', stride, self.name, allow_five=True, ret_five=True)
+        self.add_prim_attr('strides', self.stride)
+        self.dilation = _check_3d_int_or_tuple('dilation', dilation, self.name, allow_five=True, ret_five=True)
+        self.add_prim_attr('dilations', self.dilation)
+        validator.check_value_type('pad', pad, (int, tuple), self.name)
+        if isinstance(pad, int):
+            pad = (pad,) * 6
+        validator.check_equal_int(len(pad), 6, 'pad size', self.name)
+        self.pad_list = pad
+        for item in self.pad_list:
+            validator.check_non_negative_int(item, 'pad item', self.name)
+        validator.check_int_range(self.pad_list[0], 0, kernel_size[0], Rel.INC_LEFT,
+                                  'pad_d belonging [0, kernel_size_d)', self.name)
+        validator.check_int_range(self.pad_list[1], 0, kernel_size[0], Rel.INC_LEFT,
+                                  'pad_d belonging [0, kernel_size_d)', self.name)
+        validator.check_int_range(self.pad_list[2], 0, kernel_size[1], Rel.INC_LEFT,
+                                  'pad_h belonging [0, kernel_size_h)', self.name)
+        validator.check_int_range(self.pad_list[3], 0, kernel_size[1], Rel.INC_LEFT,
+                                  'pad_h belonging [0, kernel_size_h)', self.name)
+        validator.check_int_range(self.pad_list[4], 0, kernel_size[2], Rel.INC_LEFT,
+                                  'pad_w belonging [0, kernel_size_w)', self.name)
+        validator.check_int_range(self.pad_list[5], 0, kernel_size[2], Rel.INC_LEFT,
+                                  'pad_w belonging [0, kernel_size_w)', self.name)
+        self.mode = validator.check_equal_int(mode, 1, 'mode', self.name)
+        self.add_prim_attr('mode', self.mode)
+        self.group = validator.check_positive_int(group, 'group', self.name)
+        self.add_prim_attr('groups', self.group)
+        self.format = validator.check_string(data_format, ['NCDHW'], 'format', self.name)
+        self.add_prim_attr('data_format', self.format)
+        self.add_prim_attr('io_format', self.format)
+
+        self.output_padding = _check_3d_int_or_tuple('output_padding', output_padding, self.name,
+                                                     allow_five=True, ret_five=True, greater_zero=False)
+        validator.check_int_range(self.output_padding[2], 0, max(self.dilation[2], self.stride[2]), Rel.INC_LEFT,
+                                  'output_padding_d belonging [0, max(stride_d, dilation_d))', self.name)
+        validator.check_int_range(self.output_padding[3], 0, max(self.dilation[3], self.stride[3]), Rel.INC_LEFT,
+                                  'output_padding_h belonging [0, max(stride_h,dilation_h))', self.name)
+        validator.check_int_range(self.output_padding[4], 0, max(self.dilation[4], self.stride[4]), Rel.INC_LEFT,
+                                  'output_padding_w belonging [0, max(stride_w,dilation_w))', self.name)
+        self.add_prim_attr('output_padding', self.output_padding)
+
+    def __infer__(self, x, w, b=None):
+        args = {'x': x['dtype'], 'w': w['dtype']}
+        if b is not None:
+            raise ValueError("Bias currently only support None.")
+        valid_dtypes = [mstype.float16, mstype.float32]
+        validator.check_tensors_dtypes_same_and_valid(args, valid_dtypes, self.name)
+        validator.check("filter's batch", w['shape'][0], "input x's channel", x['shape'][1], Rel.EQ, self.name)
+        # infer shape
+        x_shape = x['shape']
+        w_shape = w['shape']
+        self.add_prim_attr('pads', self.pad_list)
+        pad_head, pad_tail, pad_top, pad_bottom, pad_left, pad_right = self.pad_list
+        d_out = (x_shape[2] - 1) * self.stride[2] - (pad_head + pad_tail) + self.dilation[2] * \
+                (self.kernel_size[0] - 1) + self.output_padding[2] + 1
+        h_out = (x_shape[3] - 1) * self.stride[3] - (pad_top + pad_bottom) + self.dilation[3] * \
+                (self.kernel_size[1] - 1) + self.output_padding[3] + 1
+        w_out = (x_shape[4] - 1) * self.stride[4] - (pad_left + pad_right) + self.dilation[4] * \
+                (self.kernel_size[2] - 1) + self.output_padding[4] + 1
+        output_shape = (x_shape[0], w_shape[1], d_out, h_out, w_out)
+        self.add_prim_attr('input_size', output_shape)
+        out = {
+            'value': None,
+            'shape': output_shape,
+            'dtype': x['dtype'],
+        }
+        return out

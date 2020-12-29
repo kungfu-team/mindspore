@@ -16,19 +16,22 @@
 
 #include "backend/optimizer/graph_kernel/graph_kernel_expander.h"
 
-#include <vector>
 #include <string>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
-#include "backend/session/anf_runtime_algorithm.h"
-#include "pipeline/jit/parse/python_adapter.h"
-#include "mindspore/core/ir/graph_utils.h"
-#include "backend/optimizer/graph_kernel/graph_kernel_helper.h"
 #include "backend/kernel_compiler/akg/akg_kernel_json_generator.h"
-#include "vm/segment_runner.h"
-#include "runtime/device/kernel_info.h"
 #include "backend/kernel_compiler/common_utils.h"
 #include "backend/kernel_compiler/kernel_build_info.h"
+#include "backend/optimizer/graph_kernel/graph_kernel_helper.h"
+#include "backend/optimizer/graph_kernel/substitute_dropout.h"
+#include "backend/session/anf_runtime_algorithm.h"
+#include "mindspore/core/ir/graph_utils.h"
+#include "pipeline/jit/parse/python_adapter.h"
+#include "pybind_api/ir/primitive_py.h"
+#include "runtime/device/kernel_info.h"
+#include "vm/segment_runner.h"
 
 namespace mindspore {
 namespace opt {
@@ -143,14 +146,38 @@ FuncGraphPtr GraphKernelExpander::CreateExpandFuncGraph(const CNodePtr &node) {
   return JsonDescToAnf(kernel_desc_str, ori_inputs);
 }
 
+void GraphKernelExpander::EliminateRedundantParameters(const FuncGraphPtr &func_graph, AnfNodePtrList *inputs) {
+  const auto &ori_parameter = func_graph->parameters();
+  auto todos = TopoSort(func_graph->get_return());
+  std::unordered_set<AnfNodePtr> used_param;
+  for (auto node : todos) {
+    if (node->isa<Parameter>()) {
+      used_param.insert(node);
+    }
+  }
+  if (used_param.size() == ori_parameter.size()) {
+    return;
+  }
+  AnfNodePtrList new_parameter, new_inputs;
+  for (size_t i = 0; i < ori_parameter.size(); ++i) {
+    if (used_param.count(ori_parameter[i])) {
+      new_parameter.push_back(ori_parameter[i]);
+      new_inputs.push_back((*inputs)[i]);
+    }
+  }
+  func_graph->set_parameters(new_parameter);
+  *inputs = std::move(new_inputs);
+}
+
 AnfNodePtr GraphKernelExpander::CreateExpandGraphKernel(const FuncGraphPtr &func_graph,
                                                         const FuncGraphPtr &new_func_graph, const CNodePtr &node) {
   std::vector<AnfNodePtr> inputs(node->inputs().begin() + 1, node->inputs().end());
   AnfNodePtrList kernel_nodes;
   AnfNodePtrList outputs;
+  EliminateRedundantParameters(new_func_graph, &inputs);
   kernel::GetValidKernelNodes(new_func_graph, &kernel_nodes);
   kernel::GetFuncGraphOutputNodes(new_func_graph, &outputs);
-  auto graph_kernel_node = CreateNewFuseCNode(func_graph, new_func_graph, inputs, outputs, false);
+  auto graph_kernel_node = CreateNewFuseCNode(func_graph, new_func_graph, inputs, outputs);
   SetNewKernelInfo(graph_kernel_node, new_func_graph, inputs, outputs, AnfAlgo::GetProcessor(node));
   std::string graph_kernel_flag;
   std::for_each(kernel_nodes.begin(), kernel_nodes.end(), [&graph_kernel_flag](const AnfNodePtr &node) {
@@ -183,18 +210,43 @@ bool GraphKernelExpander::DoExpand(const FuncGraphPtr &func_graph) {
 
     auto graph_kernel_node = CreateExpandGraphKernel(func_graph, new_func_graph, node);
     new_func_graph->set_attr(FUNC_GRAPH_ATTR_GRAPH_KERNEL, MakeValue(AnfAlgo::GetCNodeName(node)));
-    MS_LOG(INFO) << "create new cnode success.";
 
     // replace origin node.
     (void)mng->Replace(node, graph_kernel_node);
+
+    ToPrimitive(AnfAlgo::GetCNodeFuncGraphPtr(graph_kernel_node));
     changed = true;
   }
   return changed;
 }
 
+void GraphKernelExpander::ToPrimitive(const FuncGraphPtr &func_graph) const {
+  auto todos = TopoSort(func_graph->get_return());
+  std::reverse(todos.begin(), todos.end());
+  auto mng = func_graph->manager();
+  MS_EXCEPTION_IF_NULL(mng);
+  for (const auto &n : todos) {
+    auto cnode = n->cast<CNodePtr>();
+    if (cnode == nullptr) {
+      continue;
+    }
+
+    auto origin_prim = AnfAlgo::GetCNodePrimitive(cnode);
+    MS_EXCEPTION_IF_NULL(origin_prim);
+    if (!origin_prim->isa<PrimitivePy>()) {
+      continue;
+    }
+    cnode->set_input(0, std::make_shared<ValueNode>(std::make_shared<Primitive>(*origin_prim)));
+  }
+}
+
 bool GraphKernelExpander::Run(const FuncGraphPtr &func_graph) {
   expand_ops_ = GetExpandOps();
   MS_EXCEPTION_IF_NULL(func_graph);
+  if (expand_ops_.count(prim::kPrimGkDropout) > 0) {
+    std::shared_ptr<Pass> pass = std::make_shared<opt::SubstituteDropout>();
+    pass->Run(func_graph);
+  }
   auto mng = func_graph->manager();
   if (mng == nullptr) {
     mng = Manage(func_graph, true);

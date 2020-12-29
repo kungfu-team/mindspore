@@ -16,6 +16,10 @@
 
 #include "src/ops/l2_norm.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -57,6 +61,9 @@ std::vector<int> L2Norm::GetAxis() const {
 float L2Norm::GetEpsilon() const { return this->primitive_->value_as_L2Norm()->epsilon(); }
 int L2Norm::GetActivationType() const { return this->primitive_->value_as_L2Norm()->activationType(); }
 
+PrimitiveC *L2NormCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<L2Norm>(primitive); }
+Registry L2NormRegistry(schema::PrimitiveType_L2Norm, L2NormCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

@@ -17,12 +17,14 @@
 #include "runtime/device/ascend/executor/ai_cpu_dynamic_kernel.h"
 #include <vector>
 #include <memory>
+#include <set>
 #include <algorithm>
 #include "runtime/mem.h"
 #include "runtime/kernel.h"
+#include "utils/utils.h"
 #include "backend/session/anf_runtime_algorithm.h"
 #include "backend/kernel_compiler/aicpu/aicpu_util.h"
-#include "runtime/device/ascend/executor/executor_callback.h"
+#include "runtime/device/executor/executor_callback.h"
 
 namespace mindspore {
 namespace device {
@@ -66,11 +68,17 @@ void AiCpuDynamicKernel::Initialize() {
   input_num_ = AnfAlgo::GetInputTensorNum(cnode_ptr_);
   output_num_ = AnfAlgo::GetOutputTensorNum(cnode_ptr_);
 
+  UnknowShapeOpType shape_type = UnknowShapeOpType::DEPEND_IN_SHAPE;
+  auto op_name = AnfAlgo::GetCNodeName(cnode_ptr_);
+  if (kComputeDepend.find(op_name) != kComputeDepend.end()) {
+    shape_type = UnknowShapeOpType::DEPEND_COMPUTE;
+  }
+  unknow_type_ = shape_type;
   // Parse aicpu ext info
   if (is_dynamic_shape_) {
     MS_EXCEPTION_IF_NULL(cnode_ptr_);
     ext_info_handler_ =
-      std::make_shared<AicpuExtInfoHandler>(cnode_ptr_->fullname_with_scope(), input_num_, output_num_, DEPEND_COMPUTE);
+      std::make_shared<AicpuExtInfoHandler>(cnode_ptr_->fullname_with_scope(), input_num_, output_num_, shape_type);
     ext_info_handler_->Parse(ext_info_data_);
   }
 
@@ -137,7 +145,7 @@ bool AiCpuDynamicKernel::UpdateExtInfo() {
     ext_info_handler_->UpdateInputShapeAndType(i, NOT_NULL(cnode_ptr_));
   }
 
-  if (unknow_type_ != DEPEND_COMPUTE) {
+  if (AnfAlgo::IsDynamicShape(cnode_ptr_) && unknow_type_ != DEPEND_COMPUTE) {
     for (size_t i = 0; i < output_num_; ++i) {
       ext_info_handler_->UpdateOutputShapeAndType(i, NOT_NULL(cnode_ptr_));
     }
@@ -194,6 +202,13 @@ bool AiCpuDynamicKernel::UpdateOutputShapeFromExtInfo() {
 
 void AiCpuDynamicKernel::PostExecute() {
   MS_LOG(INFO) << "Aicpu " << cnode_ptr_->fullname_with_scope() << " PostExecute";
+  if (unknow_type_ != DEPEND_COMPUTE) {
+    return;
+  }
+  if (RT_ERROR_NONE != rtStreamSynchronize(stream_)) {
+    MS_LOG(ERROR) << "Call runtime rtStreamSynchronize error.";
+    return;
+  }
   if (AnfAlgo::IsDynamicShape(cnode_ptr_) && unknow_type_ == DEPEND_COMPUTE) {
     MS_LOG(INFO) << "Update aicpu kernel output shape from ext_info";
     UpdateOutputShapeFromExtInfo();

@@ -25,151 +25,204 @@ namespace lite {
 class OnnxAddParser : public OnnxNodeParser {
  public:
   OnnxAddParser() : OnnxNodeParser("Add") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxAddParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxSubParser : public OnnxNodeParser {
  public:
   OnnxSubParser() : OnnxNodeParser("Sub") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxSubParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxMulParser : public OnnxNodeParser {
  public:
   OnnxMulParser() : OnnxNodeParser("Mul") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxMulParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxDivParser : public OnnxNodeParser {
  public:
   OnnxDivParser() : OnnxNodeParser("Div") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
-};
-
-class OnnxMeanParser : public OnnxNodeParser {
- public:
-  OnnxMeanParser() : OnnxNodeParser("Mean") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxDivParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxPowParser : public OnnxNodeParser {
  public:
   OnnxPowParser() : OnnxNodeParser("Power") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxPowParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxEqualParser : public OnnxNodeParser {
  public:
   OnnxEqualParser() : OnnxNodeParser("Equal") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxEqualParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxLessParser : public OnnxNodeParser {
  public:
   OnnxLessParser() : OnnxNodeParser("Less") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxLessParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxGreaterParser : public OnnxNodeParser {
  public:
   OnnxGreaterParser() : OnnxNodeParser("Greater") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxGreaterParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxMinParser : public OnnxNodeParser {
  public:
   OnnxMinParser() : OnnxNodeParser("Min") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxMinParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxEltwiseParser : public OnnxNodeParser {
  public:
   OnnxEltwiseParser() : OnnxNodeParser("Eltwise") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxEltwiseParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxFloorParser : public OnnxNodeParser {
  public:
   OnnxFloorParser() : OnnxNodeParser("Floor") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxFloorParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxAbsParser : public OnnxNodeParser {
  public:
   OnnxAbsParser() : OnnxNodeParser("Abs") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxAbsParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxNegParser : public OnnxNodeParser {
  public:
   OnnxNegParser() : OnnxNodeParser("Neg") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxNegParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxExpParser : public OnnxNodeParser {
  public:
   OnnxExpParser() : OnnxNodeParser("Exp") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxExpParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxCosParser : public OnnxNodeParser {
  public:
   OnnxCosParser() : OnnxNodeParser("Cos") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxCosParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxSinParser : public OnnxNodeParser {
  public:
   OnnxSinParser() : OnnxNodeParser("Sin") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxSinParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxSqrtParser : public OnnxNodeParser {
  public:
   OnnxSqrtParser() : OnnxNodeParser("Sqrt") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxSqrtParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxCeilParser : public OnnxNodeParser {
  public:
   OnnxCeilParser() : OnnxNodeParser("Ceil") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxCeilParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxLogParser : public OnnxNodeParser {
  public:
   OnnxLogParser() : OnnxNodeParser("Log") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxLogParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxTanParser : public OnnxNodeParser {
  public:
   OnnxTanParser() : OnnxNodeParser("Tan") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxTanParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxAtanParser : public OnnxNodeParser {
  public:
   OnnxAtanParser() : OnnxNodeParser("Atan") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxAtanParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxAsinParser : public OnnxNodeParser {
  public:
   OnnxAsinParser() : OnnxNodeParser("Asin") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxAsinParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxTanhParser : public OnnxNodeParser {
  public:
   OnnxTanhParser() : OnnxNodeParser("Tanh") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxTanhParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 
 class OnnxSignParser : public OnnxNodeParser {
  public:
   OnnxSignParser() : OnnxNodeParser("Sign") {}
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  ~OnnxSignParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
+};
+
+class OnnxAndParser : public OnnxNodeParser {
+ public:
+  OnnxAndParser() : OnnxNodeParser("And") {}
+  ~OnnxAndParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
+};
+
+class OnnxOrParser : public OnnxNodeParser {
+ public:
+  OnnxOrParser() : OnnxNodeParser("Or") {}
+  ~OnnxOrParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
+};
+
+class OnnxNotParser : public OnnxNodeParser {
+ public:
+  OnnxNotParser() : OnnxNodeParser("Not") {}
+  ~OnnxNotParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
+};
+
+class OnnxRoundParser : public OnnxNodeParser {
+ public:
+  OnnxRoundParser() : OnnxNodeParser("Round") {}
+  ~OnnxRoundParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
+};
+
+class OnnxReciprocalParser : public OnnxNodeParser {
+ public:
+  OnnxReciprocalParser() : OnnxNodeParser("Reciprocal") {}
+  ~OnnxReciprocalParser() override = default;
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 }  // namespace lite
 }  // namespace mindspore

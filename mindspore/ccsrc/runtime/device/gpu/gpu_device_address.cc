@@ -87,7 +87,10 @@ bool GPUDeviceAddress::LoadMemToHost(const std::string &tensor_name, int executi
     return true;
   }
 
-  TensorLoader *tensor_loader = Debugger::GetInstance()->debug_services()->tensor_loader();
+  if (Debugger::GetInstance()->TensorExistsInCurrent(tensor_name)) {
+    MS_LOG(INFO) << tensor_name << " already loaded for this step so not loading it again.";
+    return true;
+  }
 
   mindspore::tensor::TensorPtr out_tensor = std::make_shared<tensor::Tensor>(type_id_, host_shape);
   size_t host_size = out_tensor->data().nbytes();
@@ -101,7 +104,7 @@ bool GPUDeviceAddress::LoadMemToHost(const std::string &tensor_name, int executi
   tensor_data->SetExecutionOrder(execution_order);
   tensor_data->SetTensor(out_tensor);
   tensor_data->SetSlot(slot);
-  ret = tensor_loader->LoadNewTensor(tensor_data, keep_prev);
+  ret = Debugger::GetInstance()->LoadNewTensor(tensor_data, keep_prev);
   MS_LOG(INFO) << "E2E tensor name is " << tensor_name;
   return ret;
 }

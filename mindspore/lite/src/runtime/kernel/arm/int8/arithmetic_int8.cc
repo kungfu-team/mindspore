@@ -15,6 +15,8 @@
  */
 
 #include "src/runtime/kernel/arm/int8/arithmetic_int8.h"
+#include "src/runtime/kernel/arm/int8/add_int8.h"
+#include "src/runtime/kernel/arm/int8/mul_int8.h"
 #include "nnacl/arithmetic_common.h"
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
@@ -27,11 +29,14 @@ using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
 using mindspore::lite::RET_PARAM_INVALID;
 
+using mindspore::schema::PrimitiveType_Add;
+using mindspore::schema::PrimitiveType_Eltwise;
 using mindspore::schema::PrimitiveType_Equal;
 using mindspore::schema::PrimitiveType_Greater;
 using mindspore::schema::PrimitiveType_GreaterEqual;
 using mindspore::schema::PrimitiveType_Less;
 using mindspore::schema::PrimitiveType_LessEqual;
+using mindspore::schema::PrimitiveType_Mul;
 using mindspore::schema::PrimitiveType_NotEqual;
 
 namespace mindspore::kernel {
@@ -74,17 +79,17 @@ int ArithmeticInt8CPUKernel::Init() {
   }
 
   auto *input0_tensor = in_tensors_.at(0);
-  auto in0_quant_args = input0_tensor->GetQuantParams();
+  auto in0_quant_args = input0_tensor->quant_params();
   quant_args_.in0_args_.scale_ = in0_quant_args.front().scale;
   quant_args_.in0_args_.zp_ = in0_quant_args.front().zeroPoint;
 
   auto *input1_tensor = in_tensors_.at(1);
-  auto in1_quant_args = input1_tensor->GetQuantParams();
+  auto in1_quant_args = input1_tensor->quant_params();
   quant_args_.in1_args_.scale_ = in1_quant_args.front().scale;
   quant_args_.in1_args_.zp_ = in1_quant_args.front().zeroPoint;
 
   auto *out_tensor = out_tensors_.at(kOutputIndex);
-  auto out_quant_args = out_tensor->GetQuantParams();
+  auto out_quant_args = out_tensor->quant_params();
   quant_args_.out_args_.scale_ = out_quant_args.front().scale;
   quant_args_.out_args_.zp_ = out_quant_args.front().zeroPoint;
   if (!InferShapeDone()) {
@@ -99,11 +104,11 @@ int ArithmeticInt8CPUKernel::ReSize() { return RET_OK; }
 int ArithmeticInt8CPUKernel::DoArithmetic(int thread_id) {
   auto input0_data = reinterpret_cast<int8_t *>(in_tensors_[0]->MutableData());
   auto input1_data1 = reinterpret_cast<int8_t *>(in_tensors_[1]->MutableData());
-  auto output_data = reinterpret_cast<int8_t *>(out_tensors_[0]->MutableData());
+  auto output_data = reinterpret_cast<uint8_t *>(out_tensors_[0]->MutableData());
   auto element_num = out_tensors_[0]->ElementsNum();
   auto param = reinterpret_cast<ArithmeticParameter *>(op_parameter_);
   if (param->broadcasting_ && arithmetic_run_ != nullptr) {
-    MS_ASSERT(opParameter->thread_num_ != 0);
+    MS_ASSERT(op_parameter_->thread_num_ != 0);
     int stride = UP_DIV(element_num, op_parameter_->thread_num_);
     int count = MSMIN(stride, element_num - stride * thread_id);
     if (count <= 0) {
@@ -130,11 +135,6 @@ int ArithmeticInt8CPUKernel::DoArithmetic(int thread_id) {
 }
 
 int ArithmeticInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << ret;
-    return ret;
-  }
   auto param = reinterpret_cast<ArithmeticParameter *>(op_parameter_);
   if (param->broadcasting_) {
     auto input_data0 = reinterpret_cast<int8_t *>(in_tensors_[0]->MutableData());
@@ -149,7 +149,7 @@ int ArithmeticInt8CPUKernel::Run() {
     }
     TileDimensionsInt8(input_data0, input_data1, tile_data0_, tile_data1_, param);
   }
-  ret = ParallelLaunch(this->context_->thread_pool_, ArithmeticsInt8Launch, this, op_parameter_->thread_num_);
+  auto ret = ParallelLaunch(this->context_->thread_pool_, ArithmeticsInt8Launch, this, op_parameter_->thread_num_);
   if (param->broadcasting_) {
     context_->allocator->Free(tile_data0_);
     context_->allocator->Free(tile_data1_);
@@ -164,13 +164,18 @@ kernel::LiteKernel *CpuArithmeticInt8KernelCreator(const std::vector<lite::Tenso
                                                    const std::vector<lite::Tensor *> &outputs, OpParameter *parameter,
                                                    const lite::InnerContext *ctx, const kernel::KernelKey &desc,
                                                    const mindspore::lite::PrimitiveC *primitive) {
-  if (parameter == nullptr) {
-    MS_LOG(ERROR) << "Input parameter is null!";
-    return nullptr;
+  kernel::LiteKernel *kernel = nullptr;
+  if (desc.type == PrimitiveType_Eltwise && static_cast<schema::PrimitiveType>(parameter->type_) == PrimitiveType_Add) {
+    kernel = new (std::nothrow) QuantizedAddCPUKernel(parameter, inputs, outputs, ctx, primitive);
+  } else if (desc.type == PrimitiveType_Eltwise &&
+             static_cast<schema::PrimitiveType>(parameter->type_) == PrimitiveType_Mul) {
+    kernel = new (std::nothrow) MulInt8CPUKernel(parameter, inputs, outputs, ctx, primitive);
+  } else {
+    kernel = new (std::nothrow) ArithmeticInt8CPUKernel(parameter, inputs, outputs, ctx, primitive);
   }
-  auto kernel = new (std::nothrow) ArithmeticInt8CPUKernel(parameter, inputs, outputs, ctx, primitive);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "Create ArithmeticInt8CPUKernel failed, name: " << parameter->name_;
+    free(parameter);
     return nullptr;
   }
   auto ret = kernel->Init();
@@ -189,5 +194,5 @@ REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Less, CpuArithmeticInt8KernelCre
 REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_LessEqual, CpuArithmeticInt8KernelCreator)
 REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Greater, CpuArithmeticInt8KernelCreator)
 REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_GreaterEqual, CpuArithmeticInt8KernelCreator)
-
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Eltwise, CpuArithmeticInt8KernelCreator)
 }  // namespace mindspore::kernel

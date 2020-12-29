@@ -16,6 +16,10 @@
 
 #include "src/ops/cast.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -49,10 +53,6 @@ int Cast::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &input
     attr->srcT = srcAnf->number_type();
     attr->dstT = dstAnf->number_type();
     this->primitive_->value.value = attr;
-    if (this->primitive_->value.value == nullptr) {
-      MS_LOG(ERROR) << "primitive value is nullptr";
-      return RET_ERROR;
-    }
   }
 
   return RET_OK;
@@ -75,6 +75,8 @@ int Cast::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::F
 int Cast::GetSrcT() const { return this->primitive_->value_as_Cast()->srcT(); }
 int Cast::GetDstT() const { return this->primitive_->value_as_Cast()->dstT(); }
 
+PrimitiveC *CastCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Cast>(primitive); }
+Registry CastRegistry(schema::PrimitiveType_Cast, CastCreator);
 #endif
 
 int Cast::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
@@ -83,16 +85,15 @@ int Cast::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> output
   MS_ASSERT(input != nullptr);
   auto output = outputs_.front();
   MS_ASSERT(output != nullptr);
-  if (inputs_.size() != kSingleNum || outputs_.size() != kSingleNum) {
+  if (outputs_.size() != kSingleNum) {
     MS_LOG(ERROR) << "tensor number is error.";
     return RET_INPUT_TENSOR_ERROR;
   }
-  output->SetFormat(input->GetFormat());
+  output->set_format(input->format());
 
-  MS_ASSERT(cast_prim != nullptr);
   output->set_data_type(static_cast<TypeId>(GetDstT()));
-  if (!GetInferFlag()) {
-    return RET_OK;
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
 
   if (GetSrcT() != 0 && input->data_type() != GetSrcT()) {

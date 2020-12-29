@@ -16,6 +16,10 @@
 
 #include "src/ops/quant_dtype_cast.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -42,6 +46,11 @@ int QuantDTypeCast::UnPackToFlatBuilder(const schema::Primitive *primitive, flat
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *QuantDTypeCastCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<QuantDTypeCast>(primitive);
+}
+Registry QuantDTypeCastRegistry(schema::PrimitiveType_QuantDTypeCast, QuantDTypeCastCreator);
 #endif
 
 int QuantDTypeCast::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
@@ -50,11 +59,11 @@ int QuantDTypeCast::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor
   MS_ASSERT(input != nullptr);
   auto output = outputs_.front();
   MS_ASSERT(output != nullptr);
-  MS_ASSERT(input->data_type() == param->srcT);
+  MS_ASSERT(input->data_type() == this->GetSrcT());
   output->set_data_type(static_cast<TypeId>(GetDstT()));
-  output->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output->set_format(input->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   output->set_shape(input->shape());
   return RET_OK;

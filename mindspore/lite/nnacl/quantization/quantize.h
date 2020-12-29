@@ -58,16 +58,8 @@ typedef struct ConcatQuantArg {
 } ConcatQuantArg;
 
 typedef struct SqueezeQuantArg {
-  int *input_sizes_;
-  int output_size_;
-  int **input_shapes_;
-  int *output_shape_;
-  float alpha;
-  int axis_;
-  size_t input_num_;
-  size_t output_dim_;
   QuantArg *in_quant_args_;
-  QuantArg out_quant_args_;
+  QuantArg *out_quant_args_;
 } SqueezeQuantArg;
 
 typedef struct UnSqueezeQuantArg {
@@ -254,11 +246,33 @@ typedef struct LeakyReluQuantArg {
   PreluQuantArg quant_arg;
   float slope_;
   int64_t axis_;
-  const int *in_shape_;
-  const int *out_shape_;
+  int *in_shape_;
+  int *out_shape_;
   int input_dim_;
   int element_num;
 } LeakyReluQuantArg;
+
+typedef struct ResizeQuantArg {
+  int32_t ratio_x_;
+  int32_t ratio_y_;
+  int32_t *x_axis_index_;
+  int32_t *x_axis_lower_;
+  int32_t *x_axis_upper_;
+  int32_t *y_axis_index_;
+  int32_t *y_axis_lower_;
+  int32_t *y_axis_upper_;
+} ResizeQuantArg;
+
+typedef struct ResizeFloatScaleQuantArg {
+  float ratio_x_;
+  float ratio_y_;
+  float *x_axis_index_;
+  int32_t *x_axis_lower_;
+  int32_t *x_axis_upper_;
+  float *y_axis_index_;
+  int32_t *y_axis_lower_;
+  int32_t *y_axis_upper_;
+} ResizeFloatScaleQuantArg;
 
 #ifdef __cplusplus
 extern "C" {
@@ -276,7 +290,7 @@ int32_t QuantizeToInt8(float real_value, float scale, int32_t zp);
 
 void CalculateActivationRangeQuantized(bool is_relu, bool is_relu6, int32_t zp, float scale, int *mini, int *maxi);
 // quantize from float to int8
-void Quantize(float *input_data, int length, float scale, int zero_point, int8_t *output_data);
+void Quantize(const float *input_data, int length, float scale, int zero_point, int8_t *output_data);
 
 // dequantize from int8 to float
 void Dequantize(int8_t *input_data, int length, float scale, int zero_point, float *output_data);

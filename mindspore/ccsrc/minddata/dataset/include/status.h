@@ -66,6 +66,11 @@ namespace dataset {
     }                                 \
   } while (false)
 
+#define RETURN_STATUS_SYNTAX_ERROR(_e)                               \
+  do {                                                               \
+    return Status(StatusCode::kSyntaxError, __LINE__, __FILE__, _e); \
+  } while (false)
+
 enum class StatusCode : char {
   kOK = 0,
   kOutOfMemory = 1,
@@ -84,6 +89,7 @@ enum class StatusCode : char {
   kTimeOut = 14,
   kBuddySpaceFull = 15,
   kNetWorkError = 16,
+  kNotImplementedYet = 17,
   // Make this error code the last one. Add new error code above it.
   kUnexpectedError = 127
 };

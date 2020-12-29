@@ -1,17 +1,16 @@
-## Demo_image_classification
+## Demo of Image Classification
 
 The following describes how to use the MindSpore Lite C++ APIs (Android JNIs) and MindSpore Lite image classification models to perform on-device inference, classify the content captured by a device camera, and display the most possible classification result on the application's image preview screen.
 
-
-### 运行依赖
+### Running Dependencies
 
 - Android Studio 3.2 or later (Android 4.0 or later is recommended.)
 - Native development kit (NDK) 21.3
-- CMake 3.10.2 [CMake](https://cmake.org/download) 
+- CMake 3.10.2 [CMake](https://cmake.org/download)
 - Android software development kit (SDK) 26 or later
-- JDK 1.8 or later [JDK]( https://www.oracle.com/downloads/otn-pub/java/JDK/) 
+- JDK 1.8 or later
 
-### 构建与运行
+### Building and Running
 
 1. Load the sample source code to Android Studio and install the corresponding SDK. (After the SDK version is specified, Android Studio automatically installs the SDK.)
 
@@ -21,9 +20,7 @@ The following describes how to use the MindSpore Lite C++ APIs (Android JNIs) an
 
     ![start_sdk](images/sdk_management.png)
 
-    (Optional) If an NDK version issue occurs during the installation, manually download the corresponding [NDK version](https://developer.android.com/ndk/downloads) (the version used in the sample code is 21.3). Specify the SDK location in `Android NDK location` of `Project Structure`.
-
-    ![project_structure](images/project_structure.png)
+    If you have any Android Studio configuration problem when trying this demo, please refer to item 4 to resolve it.
 
 2. Connect to an Android device and runs the image classification application.
 
@@ -35,11 +32,20 @@ The following describes how to use the MindSpore Lite C++ APIs (Android JNIs) an
 
     The mobile phone needs to be turn on "USB debugging mode" before Android Studio can recognize the mobile phone. Huawei mobile phones generally turn on "USB debugging model" in Settings > system and update > developer Options > USB debugging.
 
-3. 在Android设备上，点击“继续安装”，安装完即可查看到设备摄像头捕获的内容和推理结果。
-
-    Continue the installation on the Android device. After the installation is complete, you can view the content captured by a camera and the inference result.
+3. Continue the installation on the Android device. After the installation is complete, you can view the content captured by a camera and the inference result.
 
     ![result](images/app_result.jpg)
+
+4. The solutions of Android Studio configuration problems:
+
+    |      | Warning                                                         | Solution                                                     |
+    | ---- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+    | 1    | Gradle sync failed: NDK not configured.                      | Specify the installed ndk directory in local.properties：ndk.dir={ndk的安装目录} |
+    | 2    | Requested NDK version did not match the version requested by ndk.dir | Manually download corresponding [NDK Version](https://developer.android.com/ndk/downloads)，and specify the sdk directory in Project Structure - Android NDK location.（You can refer to the figure below.） |
+    | 3    | This version of Android Studio cannot open this project, please retry with Android Studio or newer. | Update Android Studio Version in Tools - help - Checkout for Updates.                 |
+    | 4    | SSL peer shut down incorrectly                               | Run this demo again.                                                     |
+
+    ![project_structure](images/project_structure.png)
 
 ## Detailed Description of the Sample Program  
 
@@ -47,7 +53,7 @@ This image classification sample program on the Android device includes a Java l
 
 ### Sample Program Structure
 
-```
+```text
 app
 │
 ├── src/main
@@ -60,12 +66,12 @@ app
 │   |   └── MindSporeNetnative.h # header file
 │   |
 │   ├── java # application code at the Java layer
-│   │   └── com.huawei.himindsporedemo 
+│   │   └── com.mindspore.classification
 │   │       ├── gallery.classify # implementation related to image processing and MindSpore JNI calling
 │   │       │   └── ...
 │   │       └── widget # implementation related to camera enabling and drawing
 │   │           └── ...
-│   │   
+│   │
 │   ├── res # resource files related to Android
 │   └── AndroidManifest.xml # Android configuration file
 │
@@ -80,13 +86,13 @@ app
 
 When MindSpore C++ APIs are called at the Android JNI layer, related library files are required. You can use MindSpore Lite [source code compilation](https://www.mindspore.cn/tutorial/lite/en/master/use/build.html) to generate the MindSpore Lite version. In this case, you need to use the compile command of generate with image preprocessing module.
 
-In this example, the build process automatically downloads the `mindspore-lite-1.0.0-minddata-arm64-cpu` by the `app/download.gradle` file and saves in the `app/src/main/cpp` directory.
+In this example, the build process automatically downloads the `mindspore-lite-1.0.1-runtime-arm64-cpu` by the `app/download.gradle` file and saves in the `app/src/main/cpp` directory.
 
 Note: if the automatic download fails, please manually download the relevant library files and put them in the corresponding location.
 
-mindspore-lite-1.0.0-minddata-arm64-cpu.tar.gz [Download link](https://ms-release.obs.cn-north-4.myhuaweicloud.com/1.0.0/lite/android_aarch64/mindspore-lite-1.0.0-minddata-arm64-cpu.tar.gz)
+mindspore-lite-1.0.1-runtime-arm64-cpu.tar.gz [Download link](https://ms-release.obs.cn-north-4.myhuaweicloud.com/1.0.1/lite/android_aarch64/mindspore-lite-1.0.1-runtime-arm64-cpu.tar.gz)
 
-```
+```text
 android{
     defaultConfig{
         externalNativeBuild{
@@ -95,7 +101,7 @@ android{
             }
         }
 
-        ndk{ 
+        ndk{
             abiFilters'armeabi-v7a', 'arm64-v8a'  
         }
     }
@@ -104,7 +110,7 @@ android{
 
 Create a link to the `.so` library file in the `app/CMakeLists.txt` file:
 
-```
+```text
 # ============== Set MindSpore Dependencies. =============
 include_directories(${CMAKE_SOURCE_DIR}/src/main/cpp)
 include_directories(${CMAKE_SOURCE_DIR}/src/main/cpp/${MINDSPORELITE_VERSION}/third_party/flatbuffers/include)
@@ -122,7 +128,7 @@ set_target_properties(minddata-lite PROPERTIES IMPORTED_LOCATION
         ${CMAKE_SOURCE_DIR}/src/main/cpp/${MINDSPORELITE_VERSION}/lib/libminddata-lite.so)
 # --------------- MindSpore Lite set End. --------------------
 
-# Link target library.       
+# Link target library.
 target_link_libraries(
     ...
      # --- mindspore ---
@@ -134,7 +140,7 @@ target_link_libraries(
 
 ### Downloading and Deploying a Model File
 
-In this example, the  download.gradle File configuration auto download `mobilenetv2.ms `and placed in the 'app/libs/arm64-v8a' directory.
+In this example, the  download.gradle File configuration auto download `mobilenetv2.ms`and placed in the 'app/libs/arm64-v8a' directory.
 
 Note: if the automatic download fails, please manually download the relevant library files and put them in the corresponding location.
 
@@ -144,11 +150,11 @@ mobilenetv2.ms [mobilenetv2.ms]( https://download.mindspore.cn/model_zoo/officia
 
 Call MindSpore Lite C++ APIs at the JNI layer to implement on-device inference.
 
-The inference code process is as follows. For details about the complete code, see `src/cpp/MindSporeNetnative.cpp`. 
+The inference code process is as follows. For details about the complete code, see `src/cpp/MindSporeNetnative.cpp`.
 
 1. Load the MindSpore Lite model file and build the context, session, and computational graph for inference.  
 
-   - Load a model file. Create and configure the context for model inference.
+    - Load a model file. Create and configure the context for model inference.
 
      ```cpp
      // Buffer is the model data passed in by the Java layer
@@ -156,24 +162,24 @@ The inference code process is as follows. For details about the complete code, s
      char *modelBuffer = CreateLocalModelBuffer(env, buffer);  
      ```
 
-   - Create a session.
+    - Create a session.
 
      ```cpp
      void **labelEnv = new void *;
      MSNetWork *labelNet = new MSNetWork;
      *labelEnv = labelNet;
-     
+
      // Create context.
      mindspore::lite::Context *context = new mindspore::lite::Context;
      context->thread_num_ = num_thread;
-     
+
      // Create the mindspore session.
      labelNet->CreateSessionMS(modelBuffer, bufferLen, "device label", context);
      delete(context);
-     
+
      ```
 
-   - Load the model file and build a computational graph for inference.
+    - Load the model file and build a computational graph for inference.
 
      ```cpp
      void MSNetWork::CreateSessionMS(char* modelBuffer, size_t bufferLen, std::string name, mindspore::lite::Context* ctx)
@@ -185,40 +191,56 @@ The inference code process is as follows. For details about the complete code, s
      }
      ```
 
-2. Convert the input image into the Tensor format of the MindSpore model. 
+2. Convert the input image into the Tensor format of the MindSpore model.
 
    Convert the image data to be detected into the Tensor format of the MindSpore model.
 
      ```cpp
-     // Convert the Bitmap image passed in from the JAVA layer to Mat for OpenCV processing
-     BitmapToMat(env, srcBitmap, matImageSrc);
-     // Processing such as zooming the picture size.
-     matImgPreprocessed = PreProcessImageData(matImageSrc);
+    if (!BitmapToLiteMat(env, srcBitmap, &lite_mat_bgr)) {
+     MS_PRINT("BitmapToLiteMat error");
+     return NULL;
+    }
+    if (!PreProcessImageData(lite_mat_bgr, &lite_norm_mat_cut)) {
+     MS_PRINT("PreProcessImageData error");
+     return NULL;
+    }
 
-     ImgDims inputDims;
-     inputDims.channel = matImgPreprocessed.channels();
-     inputDims.width = matImgPreprocessed.cols;
-     inputDims.height = matImgPreprocessed.rows;
-     float *dataHWC = new float[inputDims.channel * inputDims.width * inputDims.height]
+    ImgDims inputDims;
+    inputDims.channel = lite_norm_mat_cut.channel_;
+    inputDims.width = lite_norm_mat_cut.width_;
+    inputDims.height = lite_norm_mat_cut.height_;
 
-     // Copy the image data to be detected to the dataHWC array.
-     // The dataHWC[image_size] array here is the intermediate variable of the input MindSpore model tensor.
-     float *ptrTmp = reinterpret_cast<float *>(matImgPreprocessed.data);
-     for(int i = 0; i < inputDims.channel * inputDims.width * inputDims.height; i++){
-        dataHWC[i] = ptrTmp[i];
-     }
+    // Get the mindsore inference environment which created in loadModel().
+    void **labelEnv = reinterpret_cast<void **>(netEnv);
+    if (labelEnv == nullptr) {
+     MS_PRINT("MindSpore error, labelEnv is a nullptr.");
+     return NULL;
+    }
+    MSNetWork *labelNet = static_cast<MSNetWork *>(*labelEnv);
 
-     // Assign dataHWC[image_size] to the input tensor variable.
-     auto msInputs = mSession->GetInputs();
-     auto inTensor = msInputs.front();
-     memcpy(inTensor->MutableData(), dataHWC,
+    auto mSession = labelNet->session();
+    if (mSession == nullptr) {
+     MS_PRINT("MindSpore error, Session is a nullptr.");
+     return NULL;
+    }
+    MS_PRINT("MindSpore get session.");
+
+    auto msInputs = mSession->GetInputs();
+    if (msInputs.size() == 0) {
+     MS_PRINT("MindSpore error, msInputs.size() equals 0.");
+     return NULL;
+    }
+    auto inTensor = msInputs.front();
+
+    float *dataHWC = reinterpret_cast<float *>(lite_norm_mat_cut.data_ptr_);
+    // Copy dataHWC to the model input tensor.
+    memcpy(inTensor->MutableData(), dataHWC,
          inputDims.channel * inputDims.width * inputDims.height * sizeof(float));
-     delete[] (dataHWC);
-     ```
+    ```
 
-3. Perform inference on the input tensor based on the model, obtain the output tensor, and perform post-processing.    
+3. Perform inference on the input tensor based on the model, obtain the output tensor, and perform post-processing.
 
-   - Perform graph execution and on-device inference.
+    - Perform graph execution and on-device inference.
 
      ```cpp
      // After the model and image tensor data is loaded, run inference.
@@ -240,39 +262,56 @@ The inference code process is as follows. For details about the complete code, s
    - Perform post-processing of the output data.
 
      ```cpp
-     std::string ProcessRunnetResult(std::unordered_map<std::string,
-             mindspore::tensor::MSTensor *> msOutputs, int runnetRet) {
-     
-       std::unordered_map<std::string, mindspore::tensor::MSTensor *>::iterator iter;
-       iter = msOutputs.begin();
-     
-       // The mobilenetv2.ms model output just one branch.
-       auto outputTensor = iter->second;
-       int tensorNum = outputTensor->ElementsNum();
-       MS_PRINT("Number of tensor elements:%d", tensorNum);
-     
-       // Get a pointer to the first score.
-       float *temp_scores = static_cast<float * >(outputTensor->MutableData());
-     
-       float scores[RET_CATEGORY_SUM];
-       for (int i = 0; i < RET_CATEGORY_SUM; ++i) {
-         if (temp_scores[i] > 0.5) {
-           MS_PRINT("MindSpore scores[%d] : [%f]", i, temp_scores[i]);
-         }
-         scores[i] = temp_scores[i];
-       }
-     
-       // Score for each category.
-       // Converted to text information that needs to be displayed in the APP.
-       std::string categoryScore = "";
-       for (int i = 0; i < RET_CATEGORY_SUM; ++i) {
-         categoryScore += labels_name_map[i];
-         categoryScore += ":";
-         std::string score_str = std::to_string(scores[i]);
-         categoryScore += score_str;
-         categoryScore += ";";
-       }
-       return categoryScore;
-     }      
-     ```
+     std::string ProcessRunnetResult(const int RET_CATEGORY_SUM, const char *const labels_name_map[],
+              std::unordered_map<std::string, mindspore::tensor::MSTensor *> msOutputs) {
+      // Get the branch of the model output.
+      // Use iterators to get map elements.
+      std::unordered_map<std::string, mindspore::tensor::MSTensor *>::iterator iter;
+      iter = msOutputs.begin();
 
+      // The mobilenetv2.ms model output just one branch.
+      auto outputTensor = iter->second;
+
+      int tensorNum = outputTensor->ElementsNum();
+      MS_PRINT("Number of tensor elements:%d", tensorNum);
+
+      // Get a pointer to the first score.
+      float *temp_scores = static_cast<float *>(outputTensor->MutableData());
+      float scores[RET_CATEGORY_SUM];
+      for (int i = 0; i < RET_CATEGORY_SUM; ++i) {
+       scores[i] = temp_scores[i];
+      }
+
+      float unifiedThre = 0.5;
+      float probMax = 1.0;
+      for (size_t i = 0; i < RET_CATEGORY_SUM; ++i) {
+       float threshold = g_thres_map[i];
+       float tmpProb = scores[i];
+       if (tmpProb < threshold) {
+        tmpProb = tmpProb / threshold * unifiedThre;
+       } else {
+        tmpProb = (tmpProb - threshold) / (probMax - threshold) * unifiedThre + unifiedThre;
+      }
+       scores[i] = tmpProb;
+     }
+
+      for (int i = 0; i < RET_CATEGORY_SUM; ++i) {
+      if (scores[i] > 0.5) {
+          MS_PRINT("MindSpore scores[%d] : [%f]", i, scores[i]);
+       }
+      }
+
+      // Score for each category.
+      // Converted to text information that needs to be displayed in the APP.
+      std::string categoryScore = "";
+      for (int i = 0; i < RET_CATEGORY_SUM; ++i) {
+       categoryScore += labels_name_map[i];
+       categoryScore += ":";
+       std::string score_str = std::to_string(scores[i]);
+       categoryScore += score_str;
+       categoryScore += ";";
+      }
+        return categoryScore;
+     }
+
+     ```

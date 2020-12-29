@@ -16,6 +16,10 @@
 
 #include "src/ops/roi_pooling.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -47,6 +51,11 @@ int ROIPooling::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuff
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *ROIPoolingCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<ROIPooling>(primitive);
+}
+Registry ROIPoolingRegistry(schema::PrimitiveType_ROIPooling, ROIPoolingCreator);
 #endif
 
 int ROIPooling::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
@@ -68,9 +77,9 @@ int ROIPooling::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> 
     return RET_NULL_PTR;
   }
   output->set_data_type(input->data_type());
-  output->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output->set_format(input->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
 
   auto new_h = GetPooledH();

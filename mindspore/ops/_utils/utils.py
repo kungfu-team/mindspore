@@ -54,6 +54,8 @@ def get_broadcast_shape(x_shape, y_shape, prim_name):
             broadcast_shape_back.append(x_shape[i])
         elif x_shape[i] == y_shape[i]:
             broadcast_shape_back.append(x_shape[i])
+        elif x_shape[i] == -1 or y_shape[i] == -1:
+            broadcast_shape_back.append(-1)
         else:
             raise ValueError(f"For '{prim_name}', the x_shape {x_shape} and y_shape {y_shape} can not broadcast.")
 
@@ -69,7 +71,7 @@ def get_concat_offset(x_shp, x_type, axis, prim_name):
     validator.check_subclass("shape0", x_type[0], mstype.tensor, prim_name)
     validator.check_positive_int(len(x_shp[0]), "len of x_shp[0]", prim_name)
     rank_base = len(x_shp[0])
-    validator.check_int_range('axis', axis, -rank_base - 1, rank_base, Rel.INC_BOTH, prim_name)
+    validator.check_int_range(axis, -rank_base - 1, rank_base, Rel.INC_BOTH, 'axis', prim_name)
     if axis < 0:
         axis = axis + rank_base
     all_shp = x_shp[0][axis]

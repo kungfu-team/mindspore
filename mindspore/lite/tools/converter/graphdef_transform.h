@@ -18,6 +18,7 @@
 #define MINDSPORE_LITE_TOOLS_CONVERTER_GRAPHDEF_TRANSFORM_H
 
 #include <memory>
+#include <vector>
 #include "tools/converter/optimizer.h"
 #include "tools/converter/quantizer/quantizer.h"
 #include "schema/inner/model_generated.h"
@@ -37,14 +38,11 @@ class GraphDefTransform {
   virtual int Transform(const converter::Flags &ctx);
   void SetGraphDef(schema::MetaGraphT *dstDef);
   inline schema::MetaGraphT *GetOutput() { return graphDefT; }
-  void CreateQuantizer(const converter::Flags *flags);
 
  protected:
+  std::vector<schema::CNodeT *> GetGraphNodes();
   schema::MetaGraphT *graphDefT = nullptr;
   Optimizer *optimizer = nullptr;
-
-  std::unique_ptr<quant::Quantizer> mQuantizer;
-  std::unique_ptr<quant::FbQuantizer> fbQuantizer;
 };
 }  // namespace lite
 }  // namespace mindspore

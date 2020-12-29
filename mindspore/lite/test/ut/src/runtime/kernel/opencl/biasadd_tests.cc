@@ -19,17 +19,20 @@
 #include "common/common_test.h"
 #include "mindspore/lite/src/common/file_utils.h"
 #include "mindspore/lite/src/runtime/opencl/opencl_runtime.h"
-#include "mindspore/lite/src/runtime/kernel/opencl/subgraph_opencl_kernel.h"
+#include "mindspore/lite/src/runtime/kernel/opencl/opencl_subgraph.h"
 #include "mindspore/lite/src/runtime/kernel/opencl/kernel/biasadd.h"
 
 using mindspore::kernel::BiasAddOpenCLKernel;
 using mindspore::kernel::LiteKernel;
-using mindspore::kernel::SubGraphOpenCLKernel;
+using mindspore::kernel::OpenCLSubGraph;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
 
 namespace mindspore {
-class TestBiasAddOpenCL : public mindspore::CommonTest {};
+
+// PrimitiveType_BiasAdd: src/ops/populate/bias_add_populate.cc
+
+class TestBiasAddOpenCL : public CommonTest {};
 
 void LoadDataBiasAdd(void *dst, size_t dst_size, const std::string &file_path) {
   if (file_path.empty()) {
@@ -77,13 +80,12 @@ TEST_F(TestBiasAddOpenCL, BiasAddFp32_dim4) {
   MS_LOG(INFO) << "BiasAdd Begin test:";
   auto ocl_runtime = lite::opencl::OpenCLRuntimeWrapper().GetInstance();
   ocl_runtime->Init();
-  auto data_type = kNumberTypeFloat16;  // need modify
+  auto data_type = kNumberTypeFloat16;
   ocl_runtime->SetFp16Enable(data_type == kNumberTypeFloat16);
-  std::vector<int> input_shape = {1, 9};   // need modify
-  std::vector<int> output_shape = {1, 9};  // need modify
-  auto tensor_type = lite::TensorCategory(schema::NodeType_ValueNode);
-  schema::Format type = schema::Format_NC;        // need modify
-  schema::Format op_format = schema::Format_NC4;  // need modify
+  std::vector<int> input_shape = {1, 9};
+  std::vector<int> output_shape = {1, 9};
+  auto tensor_type = lite::Tensor::CONST_TENSOR;
+  schema::Format type = schema::Format_NC;
   int weight_shape = 0;
   if (input_shape.size() == 4) {
     weight_shape = input_shape[3];
@@ -142,7 +144,6 @@ TEST_F(TestBiasAddOpenCL, BiasAddFp32_dim4) {
     delete param;
     return;
   }
-  biasadd_kernel->SetFormatType(op_format);
   auto ret = biasadd_kernel->Init();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "biasadd kernel init error.";
@@ -156,7 +157,7 @@ TEST_F(TestBiasAddOpenCL, BiasAddFp32_dim4) {
 
   MS_LOG(INFO) << "initialize sub_graph";
   std::vector<kernel::LiteKernel *> kernels{biasadd_kernel};
-  auto *sub_graph = new (std::nothrow) kernel::SubGraphOpenCLKernel({input_tensor}, outputs, kernels, kernels, kernels);
+  auto *sub_graph = new (std::nothrow) kernel::OpenCLSubGraph({input_tensor}, outputs, kernels, kernels, kernels);
   if (sub_graph == nullptr) {
     MS_LOG(ERROR) << "Create sub_graph kernel error.";
     delete input_tensor;

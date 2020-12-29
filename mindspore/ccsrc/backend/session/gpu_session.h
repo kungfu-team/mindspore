@@ -31,15 +31,18 @@ class GPUSession : public SessionBasic {
  public:
   GPUSession() = default;
   ~GPUSession() override = default;
-  void Init(uint32_t device_id) override { InitDevice(kGPUDevice, device_id); }
+  void Init(uint32_t device_id) override;
+  void SyncStream() override;
 
  protected:
+  void UnifyMindIR(const KernelGraphPtr &graph) override { return; }
   GraphId CompileGraphImpl(const AnfNodePtrList &lst, const AnfNodePtrList &outputs) override;
   void RunGraphImpl(const GraphId &graph_id, const std::vector<tensor::TensorPtr> &inputs, VectorRef *outputs) override;
   void BuildOpImpl(const OpRunInfo &op_run_info, const GraphInfo &graph_info,
-                   const std::vector<tensor::TensorPtr> &input_tensors, const std::vector<int> &tensors_mask) override;
-  void RunOpImpl(const OpRunInfo &op_run_info, const GraphInfo &graph_info,
-                 const std::vector<tensor::TensorPtr> &input_tensors, VectorRef *outputs) override;
+                   const std::vector<tensor::TensorPtr> &input_tensors,
+                   const std::vector<int64_t> &tensors_mask) override;
+  void RunOpImpl(const GraphInfo &graph_info, OpRunInfo *op_run_info, std::vector<tensor::TensorPtr> *input_tensors,
+                 VectorRef *outputs, const std::vector<int64_t> &tensors_mask) override;
 
  private:
   void SelectKernel(const std::shared_ptr<KernelGraph> &kernel_graph) const;
@@ -50,6 +53,8 @@ class GPUSession : public SessionBasic {
 
   void HardwareOptimize(const std::shared_ptr<KernelGraph> &kernel_graph);
 
+  void RunOpHardwareOptimize(const std::shared_ptr<KernelGraph> &kernel_graph);
+
   void GraphKernelOptimize(const std::shared_ptr<KernelGraph> &kernel_graph);
 
   void AssignStream(const std::shared_ptr<KernelGraph> &kernel_graph);
@@ -58,8 +63,7 @@ class GPUSession : public SessionBasic {
 
   void AllocateMemory(KernelGraph *kernel_graph) const;
 
-  void RunOpAllocateMemory(const ValuePtr &pre_output_value, const std::vector<tensor::TensorPtr> &input_tensors,
-                           KernelGraph *kernel_graph) const;
+  void RunOpAllocateMemory(const std::vector<tensor::TensorPtr> &input_tensors, KernelGraph *kernel_graph) const;
 
   void RunOpClearMemory(KernelGraph *kernel_graph) const;
 
@@ -72,13 +76,11 @@ class GPUSession : public SessionBasic {
 
   bool DumpDataEnabledIteration() const;
 
-  void PreIterationDbg(const std::shared_ptr<KernelGraph> &kernel_graph) const;
-
   void PostIterationDbg(const std::shared_ptr<KernelGraph> &kernel_graph) const;
 
-  void PreLoadTensor(const std::shared_ptr<KernelGraph> &kernel_graph) const;
+  void SyncValueNodeDeviceAddr(const std::shared_ptr<KernelGraph> &kernel_graph) const;
 
-  void PostLoadTensor(const std::shared_ptr<KernelGraph> &kernel_graph) const;
+  void CleanValueNodeDeviceAddr(const std::shared_ptr<KernelGraph> &kernel_graph) const;
 };
 using GPUSessionPtr = std::shared_ptr<GPUSession>;
 MS_REG_SESSION(kGPUDevice, GPUSession);

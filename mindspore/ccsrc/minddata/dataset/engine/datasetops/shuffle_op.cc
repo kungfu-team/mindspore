@@ -31,10 +31,9 @@
 #include "minddata/dataset/engine/data_buffer.h"
 #include "minddata/dataset/engine/db_connector.h"
 #include "minddata/dataset/engine/opt/pass.h"
+#include "minddata/dataset/util/log_adapter.h"
 #include "minddata/dataset/util/random.h"
 #include "minddata/dataset/util/status.h"
-
-#include "utils/log_adapter.h"
 
 namespace mindspore {
 namespace dataset {
@@ -221,7 +220,7 @@ Status ShuffleOp::operator()() {
     }
 
     // Since we overloaded eoeReceived function, we are responsible to flow the EOE up the
-    // pipepline manually now that we are done draining the shuffle buffer
+    // pipeline manually now that we are done draining the shuffle buffer
     MS_LOG(DEBUG) << "Shuffle operator sending EOE.";
     auto eoe_buffer = std::make_unique<DataBuffer>(0, DataBuffer::kDeBFlagEOE);
     RETURN_IF_NOT_OK(out_connector_->Add(0, std::move(eoe_buffer)));
@@ -284,7 +283,7 @@ Status ShuffleOp::InitShuffleBuffer() {
     shuffle_buffer_state_ = kShuffleStateDrain;
   }
 
-  MS_LOG(DEBUG) << "Shuffle operator finished intializing the shuffle buffer.";
+  MS_LOG(DEBUG) << "Shuffle operator finished initializing the shuffle buffer.";
   return Status::OK();
 }
 

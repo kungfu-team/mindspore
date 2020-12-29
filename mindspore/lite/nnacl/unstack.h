@@ -20,9 +20,12 @@
 #include "nnacl/op_base.h"
 
 typedef struct UnstackParameter {
+  // primitive parameter
   OpParameter op_parameter_;
   int num_;
   int axis_;
+
+  // other parameter
   int pre_dims_;
   int axis_dim_;
   int after_dims_;
@@ -31,7 +34,7 @@ typedef struct UnstackParameter {
 #ifdef __cplusplus
 extern "C" {
 #endif
-void Unistack(float *input, float **output, UnstackParameter *para);
+void Unistack(const float *input, float **output, UnstackParameter *para);
 #ifdef __cplusplus
 }
 #endif

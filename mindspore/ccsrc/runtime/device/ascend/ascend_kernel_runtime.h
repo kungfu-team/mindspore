@@ -18,6 +18,8 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <map>
+#include <utility>
 #include <unordered_map>
 #include <unordered_set>
 #include "runtime/device/kernel_runtime.h"
@@ -30,28 +32,29 @@
 using ge::model_runner::TaskInfo;
 using std::unordered_map;
 using std::vector;
-namespace mindspore {
-namespace device {
-namespace ascend {
+namespace mindspore::device::ascend {
 class AscendKernelRuntime : public KernelRuntime {
  public:
   AscendKernelRuntime() = default;
   ~AscendKernelRuntime() override;
   bool Init() override;
-  bool LoadData(session::KernelGraph *graph, Debugger *debugger) override;
+  bool LoadData(session::KernelGraph *graph) override;
   bool GenTask(const session::KernelGraph *graph);
   bool GenDynamicKernel(const session::KernelGraph *graph) override;
   bool RunDynamicKernelAsync(const session::KernelGraph *graph) override;
   bool LoadTask(const session::KernelGraph *graph);
   bool RunTask(const session::KernelGraph *graph);
   bool Load(session::KernelGraph *graph, bool is_task_sink) override;
-  bool Run(session::KernelGraph *graph, bool is_task_sink, Debugger *debugger = nullptr) override;
+  bool Run(session::KernelGraph *graph, bool is_task_sink) override;
   void ClearGraphRuntimeResource(uint32_t graph_id, const std::vector<AnfNodePtr> &inputs,
                                  const std::unordered_set<ValueNodePtr> &value_nodes,
                                  const std::vector<CNodePtr> &execution_order) override;
   void ClearGlobalIdleMem() override;
   bool SyncStream() override;
   void SetContext() override;
+  void CreateContext() override;
+  void *context() const override { return rt_context_; }
+  void PreInit() override;
 
  protected:
   DeviceAddressPtr CreateDeviceAddress(void *device_ptr, size_t device_size, const string &format,
@@ -59,31 +62,39 @@ class AscendKernelRuntime : public KernelRuntime {
   bool NodeOutputDeviceAddressExist(const AnfNodePtr &node, size_t index) override;
   bool KernelMemNotReuse(const AnfNodePtr &node) override;
 
+  void KernelLaunchProfiling(const std::string &kernel_name) override;
+
  private:
   bool InitDevice();
-  bool ResetDevice();
+  bool ResetDevice(uint32_t device_id);
   bool HcclInit();
   bool NeedDestroyHccl();
   bool DestroyHccl();
+  bool DestroySingleOpHccl();
   void InnerSetContext();
 
   void ClearGraphModelMap();
   void ReleaseDeviceRes() override;
   bool GraphWithEmptyTaskList(const session::KernelGraph *graph) const;
   bool CheckGraphIdValid(GraphId graph_id) const;
-  static void DebugTaskIdName(GraphId graph_id);
   void DistributeDebugTask(NotNull<const session::KernelGraph *> graph, NotNull<std::function<void *()>> model_handle);
   void LaunchDataDump(GraphId graph_id);
+  static string GetErrorNodeName(uint32_t streamid, uint32_t taskid);
+  static void DumpTaskExceptionInfo(const session::KernelGraph *graph);
+  static void TaskFailCallback(rtTaskFailInfo *task_fail_info);
+  void ReportProfilingData();
 
   rtContext_t rt_context_{nullptr};
   bool initialized_{false};
   unordered_map<GraphId, vector<std::shared_ptr<TaskInfo>>> task_map_;
   unordered_map<GraphId, std::shared_ptr<ge::model_runner::DavinciModel>> graph_model_map_;
   unordered_map<GraphId, std::shared_ptr<DataDumper>> graph_data_dumper_;
+  std::map<std::pair<uint32_t, uint32_t>, std::string> stream_id_task_id_op_name_map_;
+  static uint32_t current_graph_id_;
+  static std::map<std::string, uint32_t> overflow_tasks_;
+  static std::vector<rtTaskFailInfo> task_fail_infoes_;
 };
 
 MS_REG_KERNEL_RUNTIME(kAscendDevice, AscendKernelRuntime);
-}  // namespace ascend
-}  // namespace device
-}  // namespace mindspore
+}  // namespace mindspore::device::ascend
 #endif  // MINDSPORE_CCSRC_RUNTIME_DEVICE_ASCEND_ASCEND_KERNEL_RUNTIME_H_

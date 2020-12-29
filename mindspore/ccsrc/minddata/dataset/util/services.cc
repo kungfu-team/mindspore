@@ -16,24 +16,30 @@
 #include "minddata/dataset/util/services.h"
 
 #include <limits.h>
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID) && !defined(__APPLE__)
 #include <sys/syscall.h>
 #else
 #include <stdlib.h>
 #endif
 #include <unistd.h>
+#include "./securec.h"
 #include "minddata/dataset/util/circular_pool.h"
 #include "minddata/dataset/util/random.h"
 #include "minddata/dataset/util/task_manager.h"
+
+#if defined(__APPLE__)
+#define LOGIN_NAME_MAX 256
+#endif
 
 namespace mindspore {
 namespace dataset {
 std::unique_ptr<Services> Services::instance_ = nullptr;
 std::once_flag Services::init_instance_flag_;
-std::set<std::string> Services::unique_id_list_ = {};
+std::map<std::string, uint64_t> Services::unique_id_list_ = {};
+uint64_t Services::unique_id_count_ = 0;
 std::mutex Services::unique_id_mutex_;
 
-#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID)
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__ANDROID__) && !defined(ANDROID) && !defined(__APPLE__)
 std::string Services::GetUserName() {
   char user[LOGIN_NAME_MAX];
   (void)getlogin_r(user, sizeof(user));
@@ -68,7 +74,22 @@ std::string Services::GetUniqueID() {
       if (unique_id_list_.find(std::string(buffer, UNIQUEID_LEN)) != unique_id_list_.end()) {
         continue;
       }
-      unique_id_list_.insert(std::string(buffer, UNIQUEID_LEN));
+      unique_id_list_[std::string(buffer, UNIQUEID_LEN)] = unique_id_count_;
+      unique_id_count_++;
+      // Temporary solution to solve a long stability memory increasing problem that
+      // we limit the size of unique_id_list_ not to greater than UNIQUEID_LIST_LIMITS(1024).
+      if (unique_id_list_.size() >= UNIQUEID_LIST_LIMITS) {
+        for (auto iter = unique_id_list_.begin(); iter != unique_id_list_.end();) {
+          if (iter->second < UNIQUEID_HALF_INDEX) {
+            iter = unique_id_list_.erase(iter);
+            unique_id_count_--;
+          } else {
+            iter->second -= UNIQUEID_HALF_INDEX;
+            iter++;
+          }
+        }
+      }
+      MS_LOG(DEBUG) << "unique_id_list_ size is " << unique_id_list_.size() << ", count is " << unique_id_count_;
       break;
     }
   }

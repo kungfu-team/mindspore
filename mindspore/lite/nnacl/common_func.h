@@ -31,6 +31,12 @@ int8_t MinInt8(int8_t a, int8_t b);
 int8_t MaxInt8(int8_t a, int8_t b);
 void ReluFp32(float *data, float *dst, int ele_num);
 void Relu6Fp32(float *data, float *dst, int ele_num);
+#ifdef ENABLE_AVX
+#ifdef WIN32
+void ReluFp32C8(float *data, float *dst, int ele_num);
+void Relu6Fp32C8(float *data, float *dst, int ele_num);
+#endif
+#endif
 int offset(const int *shape, const int dim0, const int dim1, const int dim2, const int dim3);
 int offsetComm(const int *shape, const int dim0, const int dim1, const int dim2);
 int offset4d(const int *shape, const int *dims);
@@ -44,6 +50,19 @@ static inline bool isMulOverflow(int32_t x, int32_t y) {
   int32_t p = x * y;
   return (x != 0) && (p / x != y);
 }
+
+static inline int GetStride(int *strides, const int *shape, int length) {
+  if (length <= 0) {
+    return 1;
+  }
+  int stride = 1;
+  for (int i = length - 1; i >= 0; --i) {
+    strides[i] = stride;
+    stride *= shape[i];
+  }
+  return stride;
+}
+
 #ifdef ENABLE_ARM64
 void BiasAdd(const float *bias, float *data, size_t oc4, size_t plan_size);
 void BiasAddRelu6(const float *bias, float *data, size_t oc4, size_t plan_size);

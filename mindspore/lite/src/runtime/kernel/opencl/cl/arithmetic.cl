@@ -2,8 +2,8 @@
 #define divide_no_check(a, b) (a / b)
 __constant sampler_t smp_none = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_NONE | CLK_FILTER_NEAREST;
 
-__kernel void ElementAdd_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                             __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
+__kernel void ElementAdd(__read_only image2d_t input_a, __read_only image2d_t input_b, __write_only image2d_t output,
+                         const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -17,8 +17,8 @@ __kernel void ElementAdd_IMG(__read_only image2d_t input_a, __read_only image2d_
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementSub_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                             __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
+__kernel void ElementSub(__read_only image2d_t input_a, __read_only image2d_t input_b, __write_only image2d_t output,
+                         const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -32,8 +32,8 @@ __kernel void ElementSub_IMG(__read_only image2d_t input_a, __read_only image2d_
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementMul_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                             __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
+__kernel void ElementMul(__read_only image2d_t input_a, __read_only image2d_t input_b, __write_only image2d_t output,
+                         const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -47,8 +47,8 @@ __kernel void ElementMul_IMG(__read_only image2d_t input_a, __read_only image2d_
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementDiv_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                             __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
+__kernel void ElementDiv(__read_only image2d_t input_a, __read_only image2d_t input_b, __write_only image2d_t output,
+                         const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -62,8 +62,8 @@ __kernel void ElementDiv_IMG(__read_only image2d_t input_a, __read_only image2d_
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementAnd_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                             __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
+__kernel void ElementLogicalAnd(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                                __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -77,8 +77,8 @@ __kernel void ElementAnd_IMG(__read_only image2d_t input_a, __read_only image2d_
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementOr_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b, __write_only image2d_t output,
-                            const int2 output_shape, float act_min, float act_max) {
+__kernel void ElementLogicalOr(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                               __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -92,7 +92,7 @@ __kernel void ElementOr_IMG(__read_only image2d_t input_a, __read_only image2d_t
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementMax_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
+__kernel void ElementMaximum(__read_only image2d_t input_a, __read_only image2d_t input_b,
                              __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
@@ -107,7 +107,7 @@ __kernel void ElementMax_IMG(__read_only image2d_t input_a, __read_only image2d_
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementMin_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
+__kernel void ElementMinimum(__read_only image2d_t input_a, __read_only image2d_t input_b,
                              __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
@@ -122,9 +122,8 @@ __kernel void ElementMin_IMG(__read_only image2d_t input_a, __read_only image2d_
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementFloorDiv_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                                  __write_only image2d_t output, const int2 output_shape, float act_min,
-                                  float act_max) {
+__kernel void ElementFloorDiv(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                              __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -138,9 +137,8 @@ __kernel void ElementFloorDiv_IMG(__read_only image2d_t input_a, __read_only ima
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementFloorMod_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                                  __write_only image2d_t output, const int2 output_shape, float act_min,
-                                  float act_max) {
+__kernel void ElementFloorMod(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                              __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -149,14 +147,14 @@ __kernel void ElementFloorMod_IMG(__read_only image2d_t input_a, __read_only ima
 
   FLT4 a = READ_IMAGE(input_a, smp_none, (int2)(X, Y));
   FLT4 b = READ_IMAGE(input_b, smp_none, (int2)(X, Y));
-  FLT4 result = floor(divide_no_check(a, b)) * b;
+  FLT4 result = a - floor(divide_no_check(a, b)) * b;
   result = clamp(result, (FLT)(act_min), (FLT)(act_max));
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementSquaredDifference_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                                           __write_only image2d_t output, const int2 output_shape, float act_min,
-                                           float act_max) {
+__kernel void ElementSquaredDifference(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                                       __write_only image2d_t output, const int2 output_shape, float act_min,
+                                       float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -170,8 +168,8 @@ __kernel void ElementSquaredDifference_IMG(__read_only image2d_t input_a, __read
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementEqual_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                               __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
+__kernel void ElementEqual(__read_only image2d_t input_a, __read_only image2d_t input_b, __write_only image2d_t output,
+                           const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -186,9 +184,8 @@ __kernel void ElementEqual_IMG(__read_only image2d_t input_a, __read_only image2
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementNotEqual_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                                  __write_only image2d_t output, const int2 output_shape, float act_min,
-                                  float act_max) {
+__kernel void ElementNotEqual(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                              __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -202,8 +199,8 @@ __kernel void ElementNotEqual_IMG(__read_only image2d_t input_a, __read_only ima
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementLess_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                              __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
+__kernel void ElementLess(__read_only image2d_t input_a, __read_only image2d_t input_b, __write_only image2d_t output,
+                          const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -217,9 +214,8 @@ __kernel void ElementLess_IMG(__read_only image2d_t input_a, __read_only image2d
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementLessEqual_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                                   __write_only image2d_t output, const int2 output_shape, float act_min,
-                                   float act_max) {
+__kernel void ElementLessEqual(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                               __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -233,8 +229,8 @@ __kernel void ElementLessEqual_IMG(__read_only image2d_t input_a, __read_only im
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementGreater_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                                 __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
+__kernel void ElementGreater(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                             __write_only image2d_t output, const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -248,9 +244,9 @@ __kernel void ElementGreater_IMG(__read_only image2d_t input_a, __read_only imag
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void ElementGreaterEqual_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                                      __write_only image2d_t output, const int2 output_shape, float act_min,
-                                      float act_max) {
+__kernel void ElementGreaterEqual(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                                  __write_only image2d_t output, const int2 output_shape, float act_min,
+                                  float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -264,112 +260,124 @@ __kernel void ElementGreaterEqual_IMG(__read_only image2d_t input_a, __read_only
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void BroadcastNHWC4Add_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                                    __write_only image2d_t output, const int4 a_shape, const int4 b_shape,
-                                    const int4 output_shape, float act_min, float act_max) {
+__kernel void BroadcastNHWC4Add(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                                __write_only image2d_t output, const int4 a_shape, const int4 b_shape,
+                                const int4 output_shape, const int broadcastC_flag, float act_min, float act_max) {
   int X = get_global_id(0);  // C4
   int Y = get_global_id(1);  // W
-  int Z = get_global_id(2);  // N * H
-  int N = Z / output_shape.y;
-  int H = Z % output_shape.y;
-  if (X >= output_shape.w || Y >= output_shape.z || Z >= output_shape.x * output_shape.y) {
+  int Z = get_global_id(2);  // H
+  if (X >= output_shape.w || Y >= output_shape.z || Z >= output_shape.y) {
     return;
   }
   int a_c = X < a_shape.w ? X : a_shape.w - 1;
   int a_w = Y < a_shape.z ? Y : a_shape.z - 1;
-  int a_h = H < a_shape.y ? H : a_shape.y - 1;
-  int a_n = N < a_shape.x ? N : a_shape.x - 1;
-  FLT4 a = READ_IMAGE(input_a, smp_none, (int2)(a_w * a_shape.w + a_c, a_n * a_shape.y + a_h));
+  int a_h = Z < a_shape.y ? Z : a_shape.y - 1;
+  FLT4 a = READ_IMAGE(input_a, smp_none, (int2)(a_w * a_shape.w + a_c, a_h));
   int b_c = X < b_shape.w ? X : b_shape.w - 1;
   int b_w = Y < b_shape.z ? Y : b_shape.z - 1;
-  int b_h = H < b_shape.y ? H : b_shape.y - 1;
-  int b_n = N < b_shape.x ? N : b_shape.x - 1;
-  FLT4 b = READ_IMAGE(input_b, smp_none, (int2)(b_w * b_shape.w + b_c, b_n * b_shape.y + b_h));
-  FLT4 result = a + b;
+  int b_h = Z < b_shape.y ? Z : b_shape.y - 1;
+  FLT4 b = READ_IMAGE(input_b, smp_none, (int2)(b_w * b_shape.w + b_c, b_h));
+  FLT4 result;
+  if (broadcastC_flag == 0) {
+    result = a + b;
+  } else if (broadcastC_flag == 1) {
+    result = a.x + b;
+  } else {
+    result = a + b.x;
+  }
   result = clamp(result, (FLT)(act_min), (FLT)(act_max));
-  WRITE_IMAGE(output, (int2)(Y * output_shape.w + X, N * output_shape.y + H), result);
+  WRITE_IMAGE(output, (int2)(Y * output_shape.w + X, Z), result);
 }
 
-__kernel void BroadcastNHWC4Sub_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                                    __write_only image2d_t output, const int4 a_shape, const int4 b_shape,
-                                    const int4 output_shape, float act_min, float act_max) {
+__kernel void BroadcastNHWC4Sub(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                                __write_only image2d_t output, const int4 a_shape, const int4 b_shape,
+                                const int4 output_shape, const int broadcastC_flag, float act_min, float act_max) {
   int X = get_global_id(0);  // C4
   int Y = get_global_id(1);  // W
-  int Z = get_global_id(2);  // N * H
-  int N = Z / output_shape.y;
-  int H = Z % output_shape.y;
-  if (X >= output_shape.w || Y >= output_shape.z || Z >= output_shape.x * output_shape.y) {
+  int Z = get_global_id(2);  // H
+  if (X >= output_shape.w || Y >= output_shape.z || Z >= output_shape.y) {
     return;
   }
   int a_c = X < a_shape.w ? X : a_shape.w - 1;
   int a_w = Y < a_shape.z ? Y : a_shape.z - 1;
-  int a_h = H < a_shape.y ? H : a_shape.y - 1;
-  int a_n = N < a_shape.x ? N : a_shape.x - 1;
-  FLT4 a = READ_IMAGE(input_a, smp_none, (int2)(a_w * a_shape.w + a_c, a_n * a_shape.y + a_h));
+  int a_h = Z < a_shape.y ? Z : a_shape.y - 1;
+  FLT4 a = READ_IMAGE(input_a, smp_none, (int2)(a_w * a_shape.w + a_c, a_h));
   int b_c = X < b_shape.w ? X : b_shape.w - 1;
   int b_w = Y < b_shape.z ? Y : b_shape.z - 1;
-  int b_h = H < b_shape.y ? H : b_shape.y - 1;
-  int b_n = N < b_shape.x ? N : b_shape.x - 1;
-  FLT4 b = READ_IMAGE(input_b, smp_none, (int2)(b_w * b_shape.w + b_c, b_n * b_shape.y + b_h));
-  FLT4 result = a - b;
+  int b_h = Z < b_shape.y ? Z : b_shape.y - 1;
+  FLT4 b = READ_IMAGE(input_b, smp_none, (int2)(b_w * b_shape.w + b_c, b_h));
+  FLT4 result;
+  if (broadcastC_flag == 0) {
+    result = a - b;
+  } else if (broadcastC_flag == 1) {
+    result = a.x - b;
+  } else {
+    result = a - b.x;
+  }
   result = clamp(result, (FLT)(act_min), (FLT)(act_max));
-  WRITE_IMAGE(output, (int2)(Y * output_shape.w + X, N * output_shape.y + H), result);
+  WRITE_IMAGE(output, (int2)(Y * output_shape.w + X, Z), result);
 }
 
-__kernel void BroadcastNHWC4Mul_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                                    __write_only image2d_t output, const int4 a_shape, const int4 b_shape,
-                                    const int4 output_shape, float act_min, float act_max) {
+__kernel void BroadcastNHWC4Mul(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                                __write_only image2d_t output, const int4 a_shape, const int4 b_shape,
+                                const int4 output_shape, const int broadcastC_flag, float act_min, float act_max) {
   int X = get_global_id(0);  // C4
   int Y = get_global_id(1);  // W
-  int Z = get_global_id(2);  // N * H
-  int N = Z / output_shape.y;
-  int H = Z % output_shape.y;
-  if (X >= output_shape.w || Y >= output_shape.z || Z >= output_shape.x * output_shape.y) {
+  int Z = get_global_id(2);  // H
+  if (X >= output_shape.w || Y >= output_shape.z || Z >= output_shape.y) {
     return;
   }
   int a_c = X < a_shape.w ? X : a_shape.w - 1;
   int a_w = Y < a_shape.z ? Y : a_shape.z - 1;
-  int a_h = H < a_shape.y ? H : a_shape.y - 1;
-  int a_n = N < a_shape.x ? N : a_shape.x - 1;
-  FLT4 a = READ_IMAGE(input_a, smp_none, (int2)(a_w * a_shape.w + a_c, a_n * a_shape.y + a_h));
+  int a_h = Z < a_shape.y ? Z : a_shape.y - 1;
+  FLT4 a = READ_IMAGE(input_a, smp_none, (int2)(a_w * a_shape.w + a_c, a_h));
   int b_c = X < b_shape.w ? X : b_shape.w - 1;
   int b_w = Y < b_shape.z ? Y : b_shape.z - 1;
-  int b_h = H < b_shape.y ? H : b_shape.y - 1;
-  int b_n = N < b_shape.x ? N : b_shape.x - 1;
-  FLT4 b = READ_IMAGE(input_b, smp_none, (int2)(b_w * b_shape.w + b_c, b_n * b_shape.y + b_h));
-  FLT4 result = a * b;
+  int b_h = Z < b_shape.y ? Z : b_shape.y - 1;
+  FLT4 b = READ_IMAGE(input_b, smp_none, (int2)(b_w * b_shape.w + b_c, b_h));
+  FLT4 result;
+  if (broadcastC_flag == 0) {
+    result = a * b;
+  } else if (broadcastC_flag == 1) {
+    result = a.x * b;
+  } else {
+    result = a * b.x;
+  }
   result = clamp(result, (FLT)(act_min), (FLT)(act_max));
-  WRITE_IMAGE(output, (int2)(Y * output_shape.w + X, N * output_shape.y + H), result);
+  WRITE_IMAGE(output, (int2)(Y * output_shape.w + X, Z), result);
 }
 
-__kernel void BroadcastNHWC4Div_IMG(__read_only image2d_t input_a, __read_only image2d_t input_b,
-                                    __write_only image2d_t output, const int4 a_shape, const int4 b_shape,
-                                    const int4 output_shape, float act_min, float act_max) {
+__kernel void BroadcastNHWC4Div(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                                __write_only image2d_t output, const int4 a_shape, const int4 b_shape,
+                                const int4 output_shape, const int broadcastC_flag, float act_min, float act_max) {
   int X = get_global_id(0);  // C4
   int Y = get_global_id(1);  // W
-  int Z = get_global_id(2);  // N * H
-  int N = Z / output_shape.y;
-  int H = Z % output_shape.y;
-  if (X >= output_shape.w || Y >= output_shape.z || Z >= output_shape.x * output_shape.y) {
+  int Z = get_global_id(2);  // H
+  if (X >= output_shape.w || Y >= output_shape.z || Z >= output_shape.y) {
     return;
   }
   int a_c = X < a_shape.w ? X : a_shape.w - 1;
   int a_w = Y < a_shape.z ? Y : a_shape.z - 1;
-  int a_h = H < a_shape.y ? H : a_shape.y - 1;
-  int a_n = N < a_shape.x ? N : a_shape.x - 1;
-  FLT4 a = READ_IMAGE(input_a, smp_none, (int2)(a_w * a_shape.w + a_c, a_n * a_shape.y + a_h));
+  int a_h = Z < a_shape.y ? Z : a_shape.y - 1;
+  FLT4 a = READ_IMAGE(input_a, smp_none, (int2)(a_w * a_shape.w + a_c, a_h));
   int b_c = X < b_shape.w ? X : b_shape.w - 1;
   int b_w = Y < b_shape.z ? Y : b_shape.z - 1;
-  int b_h = H < b_shape.y ? H : b_shape.y - 1;
-  int b_n = N < b_shape.x ? N : b_shape.x - 1;
-  FLT4 b = READ_IMAGE(input_b, smp_none, (int2)(b_w * b_shape.w + b_c, b_n * b_shape.y + b_h));
-  FLT4 result = a / b;
+  int b_h = Z < b_shape.y ? Z : b_shape.y - 1;
+  FLT4 b = READ_IMAGE(input_b, smp_none, (int2)(b_w * b_shape.w + b_c, b_h));
+  FLT4 result;
+  if (broadcastC_flag == 0) {
+    result = a / b;
+  } else if (broadcastC_flag == 1) {
+    result = a.x / b;
+  } else {
+    result = a / b.x;
+  }
   result = clamp(result, (FLT)(act_min), (FLT)(act_max));
-  WRITE_IMAGE(output, (int2)(Y * output_shape.w + X, N * output_shape.y + H), result);
+  WRITE_IMAGE(output, (int2)(Y * output_shape.w + X, Z), result);
 }
 
-__kernel void BroadcastAnd_IMG(__read_only image2d_t input_a, float b, __write_only image2d_t output,
-                               const int2 output_shape, float act_min, float act_max) {
+__kernel void BroadcastLogicalAnd(__read_only image2d_t input_a, float b, __write_only image2d_t output,
+                                  const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -382,8 +390,8 @@ __kernel void BroadcastAnd_IMG(__read_only image2d_t input_a, float b, __write_o
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void BroadcastOr_IMG(__read_only image2d_t input_a, float b, __write_only image2d_t output,
-                              const int2 output_shape, float act_min, float act_max) {
+__kernel void BroadcastLogicalOr(__read_only image2d_t input_a, float b, __write_only image2d_t output,
+                                 const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -396,7 +404,7 @@ __kernel void BroadcastOr_IMG(__read_only image2d_t input_a, float b, __write_on
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void BroadcastMax_IMG(__read_only image2d_t input_a, float b, __write_only image2d_t output,
+__kernel void BroadcastMaximum(__read_only image2d_t input_a, float b, __write_only image2d_t output,
                                const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
@@ -410,7 +418,7 @@ __kernel void BroadcastMax_IMG(__read_only image2d_t input_a, float b, __write_o
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void BroadcastMin_IMG(__read_only image2d_t input_a, float b, __write_only image2d_t output,
+__kernel void BroadcastMinimum(__read_only image2d_t input_a, float b, __write_only image2d_t output,
                                const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
@@ -424,8 +432,8 @@ __kernel void BroadcastMin_IMG(__read_only image2d_t input_a, float b, __write_o
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void BroadcastFloorDiv_IMG(__read_only image2d_t input_a, float b, __write_only image2d_t output,
-                                    const int2 output_shape, float act_min, float act_max) {
+__kernel void BroadcastFloorDiv(__read_only image2d_t input_a, float b, __write_only image2d_t output,
+                                const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -437,37 +445,43 @@ __kernel void BroadcastFloorDiv_IMG(__read_only image2d_t input_a, float b, __wr
   result = clamp(result, (FLT)(act_min), (FLT)(act_max));
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
-
-__kernel void BroadcastFloorMod_IMG(__read_only image2d_t input_a, float b, __write_only image2d_t output,
-                                    const int2 output_shape, float act_min, float act_max) {
-  int X = get_global_id(0);
-  int Y = get_global_id(1);
-  if (X >= output_shape.x || Y >= output_shape.y) {
+__kernel void BroadcastNHWC4FloorMod(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                                     __write_only image2d_t output, const int4 a_shape, const int4 b_shape,
+                                     const int4 output_shape, const int broadcastC_flag, float act_min, float act_max) {
+  int X = get_global_id(0);  // C4
+  int Y = get_global_id(1);  // W
+  int Z = get_global_id(2);  // H
+  if (X >= output_shape.w || Y >= output_shape.z || Z >= output_shape.y) {
     return;
   }
 
-  FLT4 a = READ_IMAGE(input_a, smp_none, (int2)(X, Y));
-  FLT4 result = floor(divide_no_check(a, (FLT4)b)) * (FLT)b;
+  FLT4 a = READ_IMAGE(input_a, smp_none, (int2)(Y * a_shape.w + X, Z));
+  FLT4 b = READ_IMAGE(input_b, smp_none, (int2)(X, 0));
+  FLT4 result = a - floor(divide_no_check(a, b)) * b;
   result = clamp(result, (FLT)(act_min), (FLT)(act_max));
-  WRITE_IMAGE(output, (int2)(X, Y), result);
+  WRITE_IMAGE(output, (int2)(Y * output_shape.w + X, Z), result);
 }
 
-__kernel void BroadcastSquaredDifference_IMG(__read_only image2d_t input_a, float b, __write_only image2d_t output,
-                                             const int2 output_shape, float act_min, float act_max) {
-  int X = get_global_id(0);
-  int Y = get_global_id(1);
-  if (X >= output_shape.x || Y >= output_shape.y) {
+__kernel void BroadcastNHWC4SquaredDifference(__read_only image2d_t input_a, __read_only image2d_t input_b,
+                                         __write_only image2d_t output, const int4 a_shape, const int4 b_shape,
+                                         const int4 output_shape, const int broadcastC_flag, float act_min,
+                                         float act_max) {
+  int X = get_global_id(0);  // C4
+  int Y = get_global_id(1);  // w
+  int Z = get_global_id(2);  // H
+  if (X >= output_shape.w || Y >= output_shape.z || Z >= output_shape.y) {
     return;
   }
 
-  FLT4 a = READ_IMAGE(input_a, smp_none, (int2)(X, Y));
-  FLT4 result = pown((a - (FLT4)b), (int4)2);
+  FLT4 a = READ_IMAGE(input_a, smp_none, (int2)(Y * a_shape.w + X, Z));
+  FLT4 b = READ_IMAGE(input_b, smp_none, (int2)(X, 0));
+  FLT4 result = pown((a - b), (int4)2);
   result = clamp(result, (FLT)(act_min), (FLT)(act_max));
-  WRITE_IMAGE(output, (int2)(X, Y), result);
+  WRITE_IMAGE(output, (int2)(Y * output_shape.w + X, Z), result);
 }
 
-__kernel void BroadcastEqual_IMG(__read_only image2d_t input_a, float b, __write_only image2d_t output,
-                                 const int2 output_shape, float act_min, float act_max) {
+__kernel void BroadcastEqual(__read_only image2d_t input_a, float b, __write_only image2d_t output,
+                             const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -480,8 +494,8 @@ __kernel void BroadcastEqual_IMG(__read_only image2d_t input_a, float b, __write
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void BroadcastNotEqual_IMG(__read_only image2d_t input_a, float b, __write_only image2d_t output,
-                                    const int2 output_shape, float act_min, float act_max) {
+__kernel void BroadcastNotEqual(__read_only image2d_t input_a, float b, __write_only image2d_t output,
+                                const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -494,8 +508,8 @@ __kernel void BroadcastNotEqual_IMG(__read_only image2d_t input_a, float b, __wr
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void BroadcastLess_IMG(__read_only image2d_t input_a, float b, __write_only image2d_t output,
-                                const int2 output_shape, float act_min, float act_max) {
+__kernel void BroadcastLess(__read_only image2d_t input_a, float b, __write_only image2d_t output,
+                            const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -508,8 +522,8 @@ __kernel void BroadcastLess_IMG(__read_only image2d_t input_a, float b, __write_
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void BroadcastLessEqual_IMG(__read_only image2d_t input_a, float b, __write_only image2d_t output,
-                                     const int2 output_shape, float act_min, float act_max) {
+__kernel void BroadcastLessEqual(__read_only image2d_t input_a, float b, __write_only image2d_t output,
+                                 const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -522,8 +536,8 @@ __kernel void BroadcastLessEqual_IMG(__read_only image2d_t input_a, float b, __w
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void BroadcastGreater_IMG(__read_only image2d_t input_a, float b, __write_only image2d_t output,
-                                   const int2 output_shape, float act_min, float act_max) {
+__kernel void BroadcastGreater(__read_only image2d_t input_a, float b, __write_only image2d_t output,
+                               const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -536,8 +550,8 @@ __kernel void BroadcastGreater_IMG(__read_only image2d_t input_a, float b, __wri
   WRITE_IMAGE(output, (int2)(X, Y), result);
 }
 
-__kernel void BroadcastGreaterEqual_IMG(__read_only image2d_t input_a, float b, __write_only image2d_t output,
-                                        const int2 output_shape, float act_min, float act_max) {
+__kernel void BroadcastGreaterEqual(__read_only image2d_t input_a, float b, __write_only image2d_t output,
+                                    const int2 output_shape, float act_min, float act_max) {
   int X = get_global_id(0);
   int Y = get_global_id(1);
   if (X >= output_shape.x || Y >= output_shape.y) {
@@ -548,56 +562,4 @@ __kernel void BroadcastGreaterEqual_IMG(__read_only image2d_t input_a, float b, 
   FLT4 result = a >= (FLT4)b ? (FLT4)1.f : (FLT4).0f;
   result = clamp(result, (FLT)(act_min), (FLT)(act_max));
   WRITE_IMAGE(output, (int2)(X, Y), result);
-}
-
-__kernel void ElementAdd_BUF(__global float *input_a, __global float *input_b, __global float *output,
-                             const unsigned int n) {
-  int idx = get_global_id(0);
-  if (idx >= n) return;
-  output[idx] = input_a[idx] + input_b[idx];
-}
-
-__kernel void ElementSub_BUF(__global float *input_a, __global float *input_b, __global float *output,
-                             const unsigned int n) {
-  int idx = get_global_id(0);
-  if (idx >= n) return;
-  output[idx] = input_a[idx] - input_b[idx];
-}
-
-__kernel void ElementMul_BUF(__global float *input_a, __global float *input_b, __global float *output,
-                             const unsigned int n) {
-  int idx = get_global_id(0);
-  if (idx >= n) return;
-  output[idx] = input_a[idx] * input_b[idx];
-}
-
-__kernel void ElementDiv_BUF(__global float *input_a, __global float *input_b, __global float *output,
-                             const unsigned int n) {
-  int idx = get_global_id(0);
-  if (idx >= n) return;
-  output[idx] = input_a[idx] * input_b[idx];
-}
-
-__kernel void BroadcastAdd_BUF(__global float *input_a, float b, __global float *output, const unsigned int n) {
-  int idx = get_global_id(0);
-  if (idx >= n) return;
-  output[idx] = input_a[idx] + (FLT)b;
-}
-
-__kernel void BroadcastSub_BUF(__global float *input_a, float b, __global float *output, const unsigned int n) {
-  int idx = get_global_id(0);
-  if (idx >= n) return;
-  output[idx] = input_a[idx] - (FLT)b;
-}
-
-__kernel void BroadcastMul_BUF(__global float *input_a, float b, __global float *output, const unsigned int n) {
-  int idx = get_global_id(0);
-  if (idx >= n) return;
-  output[idx] = input_a[idx] * (FLT)b;
-}
-
-__kernel void BroadcastDiv_BUF(__global float *input_a, float b, __global float *output, const unsigned int n) {
-  int idx = get_global_id(0);
-  if (idx >= n) return;
-  output[idx] = divide_no_check(input_a[idx], (FLT)b);
 }

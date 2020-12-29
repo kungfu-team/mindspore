@@ -17,7 +17,7 @@
 #define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_FP16_PAD_FP16_H_
 
 #include <vector>
-#include "src/runtime/kernel/arm/fp32/pad.h"
+#include "src/runtime/kernel/arm/fp32/pad_fp32.h"
 #include "nnacl/fp16/pad_fp16.h"
 
 namespace mindspore::kernel {
@@ -32,6 +32,7 @@ class PadFp16CPUKernel : public PadCPUKernel {
 
   int Run() override;
   int RunImpl(int task_id) override;
+  int RunMirrorPadImpl(int task_id) override;
 
  private:
   void FreeInputAndOutput();

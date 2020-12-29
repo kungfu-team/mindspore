@@ -33,14 +33,14 @@ namespace parallel {
 class ReduceMethod : public OperatorInfo {
  public:
   ReduceMethod(const std::string &name, const Shapes &inputs_shape, const Shapes &outputs_shape,
-               const PrimitiveAttrs &attrs)
-      : OperatorInfo(name, inputs_shape, outputs_shape, attrs, std::make_shared<ReduceMethodCost>(true)) {}
+               const PrimitiveAttrs &attrs, OperatorCostPtr cost)
+      : OperatorInfo(name, inputs_shape, outputs_shape, attrs, cost) {}
   ~ReduceMethod() override = default;
 
   Status Init(const StrategyPtr &strategy) override;
   Status InitForCostModel(const StrategyPtr &strategy) override;
 
-  Status GenerateStrategies(int32_t stage_id) override;
+  Status GenerateStrategies(int64_t stage_id) override;
   Status SetCostUnderStrategy(const StrategyPtr &strategy) override;
 
  protected:
@@ -53,7 +53,7 @@ class ReduceMethod : public OperatorInfo {
   Status InferTensorMap() override;
   Status InferTensorInfo() override;
   Status InferMirrorOps() override;
-  virtual std::vector<int32_t> reduce_dim();
+  virtual std::vector<int64_t> reduce_dim();
   Status InferForwardCommunication() override;
   Status InferDevMatrixShape() override;
 };
@@ -62,7 +62,7 @@ class ReduceMaxInfo : public ReduceMethod {
  public:
   ReduceMaxInfo(const std::string &name, const Shapes &inputs_shape, const Shapes &outputs_shape,
                 const PrimitiveAttrs &attrs)
-      : ReduceMethod(name, inputs_shape, outputs_shape, attrs) {
+      : ReduceMethod(name, inputs_shape, outputs_shape, attrs, std::make_shared<ReduceMaxCost>()) {
     reduce_method_ = REDUCE_OP_MAX;
   }
 
@@ -73,16 +73,16 @@ class ArgMaxWithValueInfo : public ReduceMethod {
  public:
   ArgMaxWithValueInfo(const std::string &name, const Shapes &inputs_shape, const Shapes &outputs_shape,
                       const PrimitiveAttrs &attrs)
-      : ReduceMethod(name, inputs_shape, outputs_shape, attrs) {
+      : ReduceMethod(name, inputs_shape, outputs_shape, attrs, std::make_shared<ArgMaxWithValueCost>()) {
     reduce_method_ = REDUCE_OP_MAX;
   }
 
   ~ArgMaxWithValueInfo() override = default;
 
-  Status GenerateStrategies(int32_t stage_id) override;
+  Status GenerateStrategies(int64_t stage_id) override;
 
  protected:
-  std::vector<int32_t> reduce_dim() override;
+  std::vector<int64_t> reduce_dim() override;
   Status CheckStrategy(const StrategyPtr &strategy) override;
   Status InferMirrorOps() override;
   Status InferTensorMap() override;
@@ -105,9 +105,7 @@ class ReduceMeanInfo : public ReduceMethod {
  public:
   ReduceMeanInfo(const std::string &name, const Shapes &inputs_shape, const Shapes &outputs_shape,
                  const PrimitiveAttrs &attrs)
-      : ReduceMethod(name, inputs_shape, outputs_shape, attrs) {
-    set_cost(std::make_shared<ReduceMeanCost>());
-  }
+      : ReduceMethod(name, inputs_shape, outputs_shape, attrs, std::make_shared<ReduceMeanCost>()) {}
 
   ~ReduceMeanInfo() override = default;
 
@@ -119,7 +117,7 @@ class ReduceSumInfo : public ReduceMethod {
  public:
   ReduceSumInfo(const std::string &name, const Shapes &inputs_shape, const Shapes &outputs_shape,
                 const PrimitiveAttrs &attrs)
-      : ReduceMethod(name, inputs_shape, outputs_shape, attrs) {
+      : ReduceMethod(name, inputs_shape, outputs_shape, attrs, std::make_shared<ReduceSumCost>()) {
     reduce_method_ = REDUCE_OP_SUM;
   }
 
@@ -130,7 +128,7 @@ class ReduceMinInfo : public ReduceMethod {
  public:
   ReduceMinInfo(const std::string &name, const Shapes &inputs_shape, const Shapes &outputs_shape,
                 const PrimitiveAttrs &attrs)
-      : ReduceMethod(name, inputs_shape, outputs_shape, attrs) {
+      : ReduceMethod(name, inputs_shape, outputs_shape, attrs, std::make_shared<ReduceMinCost>()) {
     reduce_method_ = REDUCE_OP_MIN;
   }
 

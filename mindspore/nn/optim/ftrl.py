@@ -24,14 +24,14 @@ _ftrl_opt = C.MultitypeFuncGraph("ftrl_opt")
 
 
 @_ftrl_opt.register("Function", "Function", "Function", "Function", "Number", "Number", "Number", "Tensor", "Tensor",
-                    "RowTensor", "Tensor", "Tensor", "Bool")
+                    "RowTensor", "Tensor", "Tensor", "Bool", "Bool")
 def _tensor_run_opt_with_sparse(opt, spars_opt, push, pull, l1, l2, lr_power, learning_rate, linear,
-                                gradient, weight, moment, ps_parameter):
+                                gradient, weight, moment, ps_parameter, cache_enable):
     """Apply sparse ftrl optimizer to the weight parameter when the gradient is sparse."""
     success = True
     indices = gradient.indices
     values = gradient.values
-    if ps_parameter:
+    if ps_parameter and not cache_enable:
         op_shape = P.Shape()
         shapes = (op_shape(weight), op_shape(moment), op_shape(linear), op_shape(values), op_shape(indices))
         success = F.depend(success, pull(push((values, indices), shapes), weight))
@@ -41,12 +41,12 @@ def _tensor_run_opt_with_sparse(opt, spars_opt, push, pull, l1, l2, lr_power, le
 
 
 @_ftrl_opt.register("Function", "Function", "Function", "Function", "Number", "Number", "Number", "Tensor", "Tensor",
-                    "Tensor", "Tensor", "Tensor", "Bool")
+                    "Tensor", "Tensor", "Tensor", "Bool", "Bool")
 def _tensor_run_opt(opt, spars_opt, push, pull, l1, l2, lr_power, learning_rate, linear,
-                    gradient, weight, moment, ps_parameter):
+                    gradient, weight, moment, ps_parameter, cache_enable):
     """Apply ftrl optimizer to the weight parameter."""
     success = True
-    if ps_parameter:
+    if ps_parameter and not cache_enable:
         op_shape = P.Shape()
         success = F.depend(success, pull(push((gradient, learning_rate, l1, l2, lr_power),
                                               (op_shape(weight), op_shape(moment), op_shape(linear))), weight))
@@ -74,7 +74,7 @@ def _check_param(initial_accum, lr_power, l1, l2, use_locking, prim_name=None):
 
 class FTRL(Optimizer):
     """
-    Implement the FTRL algorithm with ApplyFtrl Operator.
+    Implements the FTRL algorithm with ApplyFtrl Operator.
 
     FTRL is an online convex optimization algorithm that adaptively chooses its regularization function
     based on the loss functions. Refer to paper `Adaptive Bound Optimization for Online Convex Optimization
@@ -89,7 +89,8 @@ class FTRL(Optimizer):
         To improve parameter groups performance, the customized order of parameters can be supported.
 
         The sparse strategy is applied while the SparseGatherV2 operator being used for forward network.
-        The sparse feature is under continuous development. The sparse behavior is currently performed on the CPU.
+        The sparse feature is under continuous development. If the sparse strategy wants to be executed on the host,
+        set the target to the CPU.
 
     Args:
         params (Union[list[Parameter], list[dict]]): When the `params` is a list of `Parameter` which will be updated,
@@ -125,6 +126,9 @@ class FTRL(Optimizer):
     Outputs:
         tuple[Parameter], the updated parameters, the shape is the same as `params`.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU``
+
     Examples:
         >>> net = Net()
         >>> #1) All parameters use the same learning rate and weight decay
@@ -134,8 +138,8 @@ class FTRL(Optimizer):
         >>> conv_params = list(filter(lambda x: 'conv' in x.name, net.trainable_params()))
         >>> no_conv_params = list(filter(lambda x: 'conv' not in x.name, net.trainable_params()))
         >>> group_params = [{'params': conv_params, 'weight_decay': 0.01},
-        >>>                 {'params': no_conv_params},
-        >>>                 {'order_params': net.trainable_params()}]
+        ...                 {'params': no_conv_params},
+        ...                 {'order_params': net.trainable_params()}]
         >>> optim = nn.FTRL(group_params, learning_rate=0.1, weight_decay=0.0)
         >>> # The conv_params's parameters will use weight decay of 0.01.
         >>> # The no_conv_params's parameters will use default weight decay of 0.0.
@@ -154,12 +158,14 @@ class FTRL(Optimizer):
         self.linear = self.parameters.clone(prefix="linear", init='zeros')
         self.l1 = l1
         self.l2 = l2
+        self.lr = learning_rate
         self.lr_power = lr_power
         if not self.is_group:
             self.decay_flags = tuple((lambda: True)() for x in self.parameters)
         self.hyper_map = C.HyperMap()
         self.opt = P.ApplyFtrl(use_locking=use_locking)
-        self.sparse_opt = P.FusedSparseFtrl(learning_rate, l1, l2, lr_power, use_locking=use_locking)
+        self.use_locking = use_locking
+        self.sparse_opt = P.SparseApplyFtrl(learning_rate, l1, l2, lr_power, use_locking=use_locking)
         self._ps_pull = P.Pull()
         self._ps_push = P.Push("Ftrl", [0, 1, 2])
         self._ps_push.add_prim_attr("init_accum", initial_accum)
@@ -174,9 +180,28 @@ class FTRL(Optimizer):
         linear = self.linear
         grads = self.decay_weight(grads)
         grads = self.scale_grad(grads)
+        grads = self._grad_sparse_indices_deduplicate(grads)
         lr = self.get_lr()
 
         success = self.map_(F.partial(_ftrl_opt, self.opt, self.sparse_opt, self._ps_push, self._ps_pull,
                                       self.l1, self.l2, self.lr_power, lr),
-                            linear, grads, params, moments, self.ps_parameters)
+                            linear, grads, params, moments, self.ps_parameters, self.cache_enable)
         return success
+
+    @Optimizer.target.setter
+    def target(self, value):
+        """If the input value is set to "CPU", the parameters will be updated on the host using the Fused
+           optimizer operation."""
+        if not isinstance(value, str):
+            raise TypeError("The value must be str type, but got value type is {}".format(type(value)))
+
+        if value not in ('CPU', 'Ascend', 'GPU'):
+            raise ValueError("The value must be 'CPU', 'Ascend' or 'GPU', but got value {}".format(value))
+
+        if value == 'CPU':
+            self.sparse_opt = P.FusedSparseFtrl(self.lr, self.l1, self.l2, self.lr_power, self.use_locking)
+            self.sparse_opt.add_prim_attr("primitive_target", "CPU")
+        else:
+            self.sparse_opt = P.SparseApplyFtrl(self.lr, self.l1, self.l2, self.lr_power, self.use_locking)
+
+        self._target = value

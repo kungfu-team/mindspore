@@ -41,7 +41,7 @@ class ReplaceApplicator : public AnfVisitor {
     }
 
     auto fg = GetValueNode<FuncGraphPtr>(node);
-    if (fg->has_flag(FUNC_GRAPH_FLAG_DEFER_INLINE) || fg->stub() || *(fg->switch_layer_input())) {
+    if (fg->has_flag(FUNC_GRAPH_FLAG_DEFER_INLINE) || fg->stage() != -1 || fg->stub() || *(fg->switch_layer_input())) {
       return nullptr;
     }
 
@@ -70,46 +70,21 @@ class ReplaceApplicator : public AnfVisitor {
   }
 };
 
-using CriterionFuncType = std::function<bool(FuncGraphPtr, AnfNodePtr)>;
+class InlinerBase;
+using CriterionFuncType = std::function<bool(InlinerBase *, const FuncGraphPtr &, const AnfNodePtr &)>;
 
-bool IsTrivial(const FuncGraphPtr &fg, AnfNodePtr) {
-  auto n_cnode = fg->nodes().size() - fg->parameters().size();
-  // There is at least one CNode(return, other_node).
-  return n_cnode <= 2;
-}
+bool IsUniqueUse(InlinerBase *, const FuncGraphPtr &fg, const AnfNodePtr &);
 
-bool IsUniqueUse(const FuncGraphPtr &fg, AnfNodePtr) {
-  auto &cnodes = fg->func_graph_cnodes_index();
-  int n_use =
-    std::accumulate(cnodes.begin(), cnodes.end(), 0,
-                    [](int sum, const std::pair<const CNodeIndexPairPtr, int> &item) { return sum + item.second; });
-  return n_use == 1;
-}
-
-bool IsInside(FuncGraphPtr, const AnfNodePtr &node) {
-  MS_EXCEPTION_IF_NULL(node->func_graph());
-  return node->func_graph()->has_flag("inline_inside");
-}
-
-bool IsCore(const FuncGraphPtr &fg, AnfNodePtr) { return fg->has_flag("core"); }
-
-bool NoCriterion(FuncGraphPtr, AnfNodePtr) { return true; }
-
-bool IsDirectParentCall(FuncGraphPtr fg, AnfNodePtr node) {
-  bool unique_use = IsUniqueUse(fg, nullptr);
-  bool is_recursive = fg->recursive();
-  if (fg->parent() != nullptr && is_recursive) {
-    if (fg->parent() == node->func_graph() && unique_use) {
-      return true;
-    }
-  }
-  return false;
-}
+bool IsTrivial(InlinerBase *, const FuncGraphPtr &fg, const AnfNodePtr &);
+bool IsInside(InlinerBase *, const FuncGraphPtr &, const AnfNodePtr &node);
+bool IsCore(InlinerBase *, const FuncGraphPtr &fg, const AnfNodePtr &);
+bool IsDirectParentCall(InlinerBase *, const FuncGraphPtr &fg, const AnfNodePtr &node);
+bool IsNotRecursive(InlinerBase *inliner, const FuncGraphPtr &fg, const AnfNodePtr &);
 
 // {G, Xs}
 class InlinerBase : public AnfVisitor {
  public:
-  explicit InlinerBase(std::vector<std::pair<CriterionFuncType, bool>> criterions, bool use_move = true)
+  explicit InlinerBase(std::vector<std::vector<CriterionFuncType>> criterions, bool use_move = true)
       : use_move_(use_move), criterions_(criterions) {}
   ~InlinerBase() override = default;
   AnfNodePtr operator()(const OptimizerPtr &, const AnfNodePtr &node) override {
@@ -124,7 +99,7 @@ class InlinerBase : public AnfVisitor {
 
     // G
     auto fg = GetValueNode<FuncGraphPtr>(inputs[0]);
-    if (fg->has_flag(FUNC_GRAPH_FLAG_DEFER_INLINE) || fg->stub()) {
+    if (fg->has_flag(FUNC_GRAPH_FLAG_DEFER_INLINE) || fg->stage() != -1 || fg->stub()) {
       return nullptr;
     }
 
@@ -135,50 +110,70 @@ class InlinerBase : public AnfVisitor {
         return nullptr;
       }
     }
-
     Reset();
+
+    // 'criterions_': {criterion_group_1:{criterion1, criterion2, ...}, criterion_group_2:{...}, ...}
+    // All the criterions of 'criterion group' are true would set 'criterion group' as 'true'. As [AND].
+    // Anyone of 'criterion group' in 'criterions_' is 'true' would be matched. As [OR].
     bool is_match = false;
-    for (auto &criterion : criterions_) {
-      if (!criterion.first(fg, node)) {
-        continue;
-      }
-
-      if (criterion.second && IsRecursive(fg)) {
-        continue;
-      }
-
+    for (auto &criterions : criterions_) {  // Each 'criterion group' in criterions_.
       is_match = true;
-      break;
+      for (auto &criterion : criterions) {  // Each criterion in 'criterion group'.
+        if (!criterion(this, fg, node)) {
+          is_match = false;
+          break;
+        }
+      }
+      if (is_match) {
+        break;
+      }
     }
-
     if (!is_match) {
       return nullptr;
     }
 
     std::vector<AnfNodePtr> args;
     (void)std::copy(inputs.begin() + 1, inputs.end(), std::back_inserter(args));
-    // compare size to avoid the case that the function has default value after grad.
+    // Compare size to avoid the case that the function has default value after grad.
     // for which after renormalize, the function default value will be an input
     if (fg->parameters().size() != args.size()) {
       return nullptr;
     }
-    // Not to inline after block if it has switch call inside, to avoid switch expansion.
-    if (fg->has_flag(FUNC_GRAPH_FLAG_AFTER_BLOCK)) {
-      auto has_branch_call = GraphHasBranch(fg);
-      if (has_branch_call) {
-        return TransformBranchCall(fg, node, args);
+
+    if (IsUniqueUse(nullptr, fg, nullptr)) {
+      // The other branch calling the last after block.
+      if (fg->has_flag(FUNC_GRAPH_FLAG_AFTER_BLOCK)) {
+        // Check if parameters' changed.
+        auto param_simplified_caller = SimplifyAfterParameter(fg, node, args);
+        if (param_simplified_caller != nullptr) {
+          return param_simplified_caller;
+        }
+      }
+
+      // For the single used fg, including non-after and after not matched above,
+      // we move the whole fg nodes.
+      if (use_move_) {
+        auto mng = fg->manager();
+        MS_EXCEPTION_IF_NULL(mng);
+        ReplaceParams(mng, args, fg);
+        auto out_node = fg->output();
+        mng->MoveAllCNodeDropGraph(fg, node->func_graph(), inputs[0]->scope());
+        return out_node;
+      }
+    } else {
+      // We don't expand the middle multiple used after block, except the last one.
+      if (GraphHasBranch(fg)) {
+        return nullptr;
+      }
+      // Check if parameters' changed for the first met branch calling.
+      if (fg->has_flag(FUNC_GRAPH_FLAG_AFTER_BLOCK)) {
+        auto param_simplified_caller = SimplifyAfterParameter(fg, node, args);
+        if (param_simplified_caller != nullptr) {
+          return param_simplified_caller;
+        }
       }
     }
-
-    if (use_move_ && IsUniqueUse(fg, nullptr)) {
-      auto mng = fg->manager();
-      MS_EXCEPTION_IF_NULL(mng);
-      ReplaceParams(mng, args, fg);
-      auto out_node = fg->output();
-      mng->MoveAllCNodeDropGraph(fg, node->func_graph(), inputs[0]->scope());
-      return out_node;
-    }
-
+    // Or, just make a clone for not single used fg.
     return InlineClone(fg, node->func_graph(), args, inputs[0]->scope());
   }
 
@@ -207,33 +202,40 @@ class InlinerBase : public AnfVisitor {
     is_checked_ = false;
     is_recursive_ = false;
   }
+
   // For after block which contains branch call, delete the parameters which is not used.
   // In most cases, it may be a `Module` or other constant input.
-  AnfNodePtr TransformBranchCall(const FuncGraphPtr &fg, const AnfNodePtr &node, const std::vector<AnfNodePtr> &args) {
+  AnfNodePtr SimplifyAfterParameter(const FuncGraphPtr &fg, const AnfNodePtr &node,
+                                    const std::vector<AnfNodePtr> &args) {
     auto &fg_params = fg->parameters();
-    std::vector<int> used_param_index;
+    std::vector<int64_t> used_param_index;
     auto mng = fg->manager();
+    bool should_simplify = false;
     for (size_t i = 0; i < fg_params.size(); i++) {
       if (mng->node_users()[fg_params[i]].size() != 0) {
         used_param_index.emplace_back(i);
+      } else {
+        MS_LOG(DEBUG) << "Not used parameter " << fg_params[i]->DebugString() << " for calling " << fg->ToString();
+        should_simplify = true;
       }
     }
-    if (used_param_index.size() != fg_params.size()) {
-      MS_LOG(DEBUG) << "Parameter not used found for graph :" << fg->ToString();
-      // clone a new graph and ignore the not used parameters
-      FuncGraphPtr new_fg = TransformableClone(fg);
-      auto &new_fg_params = new_fg->parameters();
-      std::vector<AnfNodePtr> new_params;
-      std::transform(used_param_index.begin(), used_param_index.end(), std::back_inserter(new_params),
-                     [&new_fg_params](size_t i) { return new_fg_params[i]; });
-      new_fg->set_parameters(new_params);
-      std::vector<AnfNodePtr> node_inputs;
-      node_inputs.push_back(NewValueNode(new_fg));
-      std::transform(used_param_index.begin(), used_param_index.end(), std::back_inserter(node_inputs),
-                     [&args](size_t i) { return args[i]; });
-      return node->func_graph()->NewCNode(node_inputs);
+    if (!should_simplify) {
+      return nullptr;
     }
-    return nullptr;
+    MS_LOG(DEBUG) << "Parameter not used found for graph :" << fg->ToString();
+    // Clone a new graph and ignore the not used parameters
+    auto new_fg = TransformableClone(fg);
+    auto &new_fg_params = new_fg->parameters();
+    std::vector<AnfNodePtr> new_params;
+    std::transform(used_param_index.begin(), used_param_index.end(), std::back_inserter(new_params),
+                   [&new_fg_params](size_t i) { return new_fg_params[i]; });
+    new_fg->set_parameters(new_params);
+
+    std::vector<AnfNodePtr> node_inputs;
+    node_inputs.push_back(NewValueNode(new_fg));
+    std::transform(used_param_index.begin(), used_param_index.end(), std::back_inserter(node_inputs),
+                   [&args](size_t i) { return args[i]; });
+    return node->func_graph()->NewCNode(node_inputs);
   }
 
   // This is a try-best algorithm to find a graph which may generate branch call.
@@ -288,23 +290,60 @@ class InlinerBase : public AnfVisitor {
  private:
   bool is_checked_{false}, is_recursive_{false};
   bool use_move_;
-  std::vector<std::pair<CriterionFuncType, bool>> criterions_;
+  std::vector<std::vector<CriterionFuncType>> criterions_;
   std::unordered_map<FuncGraphPtr, bool> graph_branch_cache_;
 };
+
+bool IsUniqueUse(InlinerBase *, const FuncGraphPtr &fg, const AnfNodePtr &) {
+  auto &cnodes = fg->func_graph_cnodes_index();
+  int64_t n_use = std::accumulate(
+    cnodes.begin(), cnodes.end(), 0,
+    [](int64_t sum, const std::pair<const CNodeIndexPairPtr, int64_t> &item) { return sum + item.second; });
+  return n_use == 1;
+}
+
+bool IsTrivial(InlinerBase *, const FuncGraphPtr &fg, const AnfNodePtr &) {
+  auto n_cnode = fg->nodes().size() - fg->parameters().size();
+  // There is at least one CNode(return, other_node).
+  return n_cnode <= 2;
+}
+
+bool IsInside(InlinerBase *, const FuncGraphPtr &, const AnfNodePtr &node) {
+  MS_EXCEPTION_IF_NULL(node->func_graph());
+  return node->func_graph()->has_flag("inline_inside");
+}
+
+bool IsCore(InlinerBase *, const FuncGraphPtr &fg, const AnfNodePtr &) { return fg->has_flag("core"); }
+
+bool IsDirectParentCall(InlinerBase *, const FuncGraphPtr &fg, const AnfNodePtr &node) {
+  bool unique_use = IsUniqueUse(nullptr, fg, nullptr);
+  bool is_recursive = fg->recursive();
+  if (fg->parent() != nullptr && is_recursive) {
+    if (fg->parent() == node->func_graph() && unique_use) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool IsNotRecursive(InlinerBase *inliner, const FuncGraphPtr &fg, const AnfNodePtr &) {
+  return !inliner->IsRecursive(fg);
+}
 
 class Inliner : public InlinerBase {
  public:
   explicit Inliner(bool use_move = true)
       : InlinerBase(
+          // Supports AND conditions in one criterion, Ex. {IsUniqueUse, IsNotRecursive}.
           {
-            {IsUniqueUse, true},
-            {IsTrivial, false},
-            {IsInside, false},
-            {IsCore, false},
-            {IsDirectParentCall, false},
-            {NoCriterion, true},
+            {IsTrivial},
+            {IsInside},
+            {IsCore},
+            {IsNotRecursive},
+            {IsDirectParentCall},
           },
           use_move) {}
+
   ~Inliner() override = default;
 };
 
@@ -312,8 +351,9 @@ class DirectInliner : public InlinerBase {
  public:
   explicit DirectInliner(bool use_move = true)
       : InlinerBase(
+          // Supports AND conditions in one criterion, Ex. {IsUniqueUse, IsNotRecursive}.
           {
-            {IsDirectParentCall, false},
+            {IsDirectParentCall},
           },
           use_move) {}
   ~DirectInliner() override = default;

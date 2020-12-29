@@ -17,28 +17,27 @@
 #ifndef MINDSPORE_CCSRC_UTILS_PRIMITIVE_PY_H_
 #define MINDSPORE_CCSRC_UTILS_PRIMITIVE_PY_H_
 
-#include <unordered_map>
-#include <vector>
+#include <map>
 #include <memory>
 #include <string>
 #include <tuple>
-#include <map>
+#include <unordered_map>
+#include <vector>
 
 #include "abstract/abstract_value.h"
-#include "utils/misc.h"
-#include "pybind11/pybind11.h"
-#include "utils/log_adapter.h"
+#include "frontend/parallel/ops_info/operator_info.h"
 #include "ir/primitive.h"
 #include "ir/signature.h"
-#include "frontend/parallel/ops_info/operator_info.h"
+#include "pybind11/pybind11.h"
+#include "utils/log_adapter.h"
+#include "utils/misc.h"
 
 namespace py = pybind11;
 namespace mindspore {
 class PrimitivePy : public Primitive {
  public:
-  PrimitivePy(const py::str &name, const py::object &python_obj)
-      : Primitive(name, false), python_obj_(python_obj), signatures_() {}
-  ~PrimitivePy() override = default;
+  PrimitivePy(const py::str &name, const py::object &python_obj);
+  ~PrimitivePy() override;
   MS_DECLARE_PARENT(PrimitivePy, Primitive);
   py::function GetBpropFunction();
 
@@ -59,6 +58,7 @@ class PrimitivePy : public Primitive {
   bool HasComputeFunction() const;
   const bool parse_info_ = true;
   const py::object &GetPyObj() const { return python_obj_; }
+  void SetPyObj(const py::object &obj);
   py::dict RunInfer(const py::tuple &args);
   void RunCheck(const py::tuple &args);
   py::object RunInferValue(const py::tuple &args);
@@ -69,6 +69,8 @@ class PrimitivePy : public Primitive {
 
  private:
   py::function GetComputeFunction() const;
+  void ConvertCTensorToPyTensor(const py::tuple &input_args, py::tuple *convert_args) const;
+  void CheckHookConsistency(const py::object &grad_out, const py::object &expected_grad_out) const;
   py::object python_obj_;
   py::function hook_;
   std::vector<Signature> signatures_;

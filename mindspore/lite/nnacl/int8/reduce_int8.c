@@ -20,6 +20,160 @@
 #include "nnacl/quantization/fixed_point.h"
 #include "nnacl/common_func.h"
 
+int ReduceMeanN(int n, int h, int w, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg) {
+  return NNACL_OK;
+}
+int ReduceMeanH(int n, int h, int w, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg) {
+  return NNACL_OK;
+}
+int ReduceMeanW(int n, int h, int w, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg) {
+  return NNACL_OK;
+}
+int ReduceMeanC(int n, int h, int w, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg) {
+  return NNACL_OK;
+}
+int ReduceMeanNH(int n, int h, int w, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg) {
+  return NNACL_OK;
+}
+int ReduceMeanNW(int n, int h, int w, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg) {
+  return NNACL_OK;
+}
+int ReduceMeanNC(int n, int h, int w, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg) {
+  return NNACL_OK;
+}
+int ReduceMeanHW(int n, int plane, int count, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg,
+                 int32_t bias) {
+  int stride = plane * UP_ROUND(c, C4NUM);
+  for (int batch = 0; batch < n; ++batch) {
+    int8_t *in_ptr = in_data + batch * stride;
+    int8_t *out_ptr = out_data + batch * c;
+    for (int i = 0; i < count; ++i) {
+      int32_t sum_array = 0;
+      int j = 0;
+#ifdef ENABLE_ARM64
+      for (; j < plane; j += 16) {
+        int8x16_t in_data_vec = vld1q_s8(in_ptr);
+        sum_array += vaddlvq_s8(in_data_vec);
+        in_ptr += 16;
+      }
+      for (; j < plane; j += 8) {
+        int8x8_t in_data_vec = vld1_s8(in_ptr);
+        sum_array += vaddlv_s8(in_data_vec);
+        in_ptr += 8;
+      }
+      for (; j < plane; j += 4) {
+        int32x4_t in_data_vec;
+        in_data_vec[0] = in_ptr[0];
+        in_data_vec[1] = in_ptr[1];
+        in_data_vec[2] = in_ptr[2];
+        in_data_vec[3] = in_ptr[3];
+        sum_array += vaddvq_s32(in_data_vec);
+        in_ptr += 4;
+      }
+#elif ENABLE_ARM32
+      int32x4_t accum = vmovq_n_s32(0);
+      for (; j < plane; j += 16) {
+        int32x4_t in_data_vec1;
+        int32x4_t in_data_vec2;
+        int32x4_t in_data_vec3;
+        int32x4_t in_data_vec4;
+        in_data_vec1[0] = in_ptr[0];
+        in_data_vec1[1] = in_ptr[1];
+        in_data_vec1[2] = in_ptr[2];
+        in_data_vec1[3] = in_ptr[3];
+        in_data_vec2[0] = in_ptr[4];
+        in_data_vec2[1] = in_ptr[5];
+        in_data_vec2[2] = in_ptr[6];
+        in_data_vec2[3] = in_ptr[7];
+        in_data_vec3[0] = in_ptr[8];
+        in_data_vec3[1] = in_ptr[9];
+        in_data_vec3[2] = in_ptr[10];
+        in_data_vec3[3] = in_ptr[11];
+        in_data_vec4[0] = in_ptr[12];
+        in_data_vec4[1] = in_ptr[13];
+        in_data_vec4[2] = in_ptr[14];
+        in_data_vec4[3] = in_ptr[15];
+        accum = vaddq_s32(accum, in_data_vec1);
+        accum = vaddq_s32(accum, in_data_vec2);
+        accum = vaddq_s32(accum, in_data_vec3);
+        accum = vaddq_s32(accum, in_data_vec4);
+        in_ptr += 16;
+      }
+      for (; j < plane; j += 8) {
+        int32x4_t in_data_vec1;
+        int32x4_t in_data_vec2;
+        in_data_vec1[0] = in_ptr[0];
+        in_data_vec1[1] = in_ptr[1];
+        in_data_vec1[2] = in_ptr[2];
+        in_data_vec1[3] = in_ptr[3];
+        in_data_vec2[0] = in_ptr[4];
+        in_data_vec2[1] = in_ptr[5];
+        in_data_vec2[2] = in_ptr[6];
+        in_data_vec2[3] = in_ptr[7];
+        accum = vaddq_s32(accum, in_data_vec1);
+        accum = vaddq_s32(accum, in_data_vec2);
+        in_ptr += 8;
+      }
+      for (; j < plane; j += 4) {
+        int32x4_t in_data_vec;
+        in_data_vec[0] = in_ptr[0];
+        in_data_vec[1] = in_ptr[1];
+        in_data_vec[2] = in_ptr[2];
+        in_data_vec[3] = in_ptr[3];
+        accum = vaddq_s32(accum, in_data_vec);
+        in_ptr += 4;
+      }
+      sum_array += accum[0];
+      sum_array += accum[1];
+      sum_array += accum[2];
+      sum_array += accum[3];
+#endif
+      for (; j < plane; j++) {
+        sum_array += in_ptr[0];
+        in_ptr++;
+      }
+      int32_t mean =
+        RoundingDivideByPOT(SaturatingRoundingDoublingHighMul(sum_array * (1 << (unsigned int)quant_arg.left_shift_),
+                                                              quant_arg.multiplier_),
+                            quant_arg.right_shift_);
+      mean += bias;
+      mean = MSMIN(mean, INT8_MAX);
+      mean = MSMAX(mean, INT8_MIN);
+      out_ptr[0] = mean;
+      out_ptr++;
+    }
+  }
+  return NNACL_OK;
+}
+
+int ReduceMeanHC(int n, int h, int w, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg) {
+  return NNACL_OK;
+}
+
+int ReduceMeanWC(int n, int h, int w, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg) {
+  return NNACL_OK;
+}
+
+int ReduceMeanNHW(int n, int h, int w, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg) {
+  return NNACL_OK;
+}
+
+int ReduceMeanNHC(int n, int h, int w, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg) {
+  return NNACL_OK;
+}
+
+int ReduceMeanNWC(int n, int h, int w, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg) {
+  return NNACL_OK;
+}
+
+int ReduceMeanHWC(int n, int h, int w, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg) {
+  return NNACL_OK;
+}
+
+int ReduceMeanNHWC(int n, int h, int w, int c, int8_t *in_data, int8_t *out_data, QuantMulArg quant_arg) {
+  return NNACL_OK;
+}
+
 // Get x such that (x-zp_in) * scale_in = mean
 // Assuming reduce n axes, this works for first n-1 reduce. One call for one reduce.
 int ReduceMeanInt8(const int outer_size, const int inner_size, const int axis_size, const int32_t *src_data,
@@ -35,8 +189,6 @@ int ReduceMeanInt8(const int outer_size, const int inner_size, const int axis_si
       const int32_t *inner_src = outer_src + k;
       int32_t *inner_dst = outer_dst + k;
       int32_t sum = 0;
-      // (x - zp_in) * scale_in = mean[(item - zp_in) * scale_in]
-      // x = mean(item-zp_in) + zp_in
       for (i = 0; i < axis_size; i++) {
         int32_t tmp = inner_src[i * inner_size] - quant->in_zp_;
         if (isAddOverflow(sum, tmp)) {
@@ -72,14 +224,12 @@ int ReduceMeanLastAxis(const int outer_size, const int inner_size, const int axi
       int8_t *inner_dst = outer_dst + k;
       int32_t sum = 0;
       for (i = 0; i < axis_size; i++) {
-        // y = mean(x-zp_in) * scale + zp_out
         int32_t tmp = inner_src[i * inner_size] - quant->in_zp_;
         if (isAddOverflow(tmp, sum)) {
           return NNACL_ERRCODE_ADD_OVERFLOW;
         }
         sum += tmp;
       }
-      // sum / num
       int32_t mean = RoundingDivideByPOT(
         SaturatingRoundingDoublingHighMul(sum * (1 << (unsigned int)quant->mean_left_shift_), quant->mean_multiplier_),
         quant->mean_right_shift_);
@@ -312,7 +462,6 @@ int ReduceProdLastAxis(const int outer_size, const int inner_size, const int axi
       int8_t *inner_dst = outer_dst + k;
       int32_t prod = 1;
       for (i = 0; i < axis_size; i++) {
-        // quant_out = prod(quant_in-zp) * (scale_in^num/scale_out) + zp_out
         int32_t tmp = inner_src[i * inner_size] - quant->in_zp_;
         if (isMulOverflow(prod, tmp)) {
           return NNACL_ERRCODE_MUL_OVERFLOW;
@@ -387,7 +536,6 @@ int ReduceSumSquareLastAxis(const int outer_size, const int inner_size, const in
       const int32_t *inner_src = outer_src + k;
       int8_t *inner_dst = outer_dst + k;
       int32_t sum = 0;
-      // quant_out = sum((quant_in - zp)^2) * scale_in^2 / scale_out + zp_out
       for (i = 0; i < axis_size; i++) {
         int32_t tmp;
         if (isMulOverflow(inner_src[i * inner_size] - quant->in_zp_, inner_src[i * inner_size] - quant->in_zp_)) {

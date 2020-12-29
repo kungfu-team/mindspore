@@ -30,11 +30,11 @@ using mindspore::schema::PrimitiveType_TupleGetItem;
 namespace mindspore::kernel {
 
 int TupleGetItemCPUKernel::Init() {
-  if (1 != in_tensors_.size()) {
+  if (in_tensors_.size() != 1) {
     MS_LOG(ERROR) << "Tuple Grad Filter should have one input";
     return RET_ERROR;
   }
-  if (1 != out_tensors_.size()) {
+  if (out_tensors_.size() != 1) {
     MS_LOG(ERROR) << "Tuple Grad Filter should have one output";
     return RET_ERROR;
   }
@@ -48,7 +48,6 @@ int TupleGetItemCPUKernel::Execute(int task_id) {
   auto out = reinterpret_cast<float *>(out_tensors_.at(0)->MutableData());
 
   memcpy(out, in, in_tensors_.at(0)->Size());
-
   return RET_OK;
 }
 
@@ -63,11 +62,6 @@ int TupleRun(void *cdata, int task_id) {
 }
 
 int TupleGetItemCPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "TupleGetItemCPUKernel Prepare failed.";
-    return RET_ERROR;
-  }
   int error_code = ParallelLaunch(this->context_->thread_pool_, TupleRun, this, 1);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "tuple function error error_code[" << error_code << "]";
@@ -83,7 +77,11 @@ kernel::LiteKernel *CpuTupleGetItemFp32KernelCreator(const std::vector<lite::Ten
   MS_ASSERT(opParameter != nullptr);
   MS_ASSERT(desc.type == schema::PrimitiveType_TupleGetItem);
   auto *kernel = new (std::nothrow) TupleGetItemCPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  MS_ASSERT(kernel != nullptr);
+  if (kernel == nullptr) {
+    MS_LOG(ERROR) << "new TupleGetItemCPUKernel failed!";
+    free(opParameter);
+    return nullptr;
+  }
 
   auto ret = kernel->Init();
   if (RET_OK != ret) {

@@ -25,28 +25,28 @@ namespace mindspore::kernel {
 
 class DepthwiseConv2dOpenCLKernel : public OpenCLKernel {
  public:
-  explicit DepthwiseConv2dOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                                       const std::vector<lite::Tensor *> &outputs)
-      : OpenCLKernel(parameter, inputs, outputs), packed_weight_(nullptr), bias_data_(nullptr), kernel_(nullptr) {}
+  DepthwiseConv2dOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
+                              const std::vector<lite::Tensor *> &outputs)
+      : OpenCLKernel(parameter, inputs, outputs) {}
 
-  ~DepthwiseConv2dOpenCLKernel() override{};
-
-  int Init() override;
-
-  int ReSize() override;
+  ~DepthwiseConv2dOpenCLKernel() override = default;
 
   int Run() override;
+  int Prepare() override;
 
-  int InitBuffer();
-
-  int GetImageSize(size_t idx, std::vector<size_t> *img_size) override;
-  int GetGlobalSize(size_t idx, std::vector<size_t> *global_size) override;
-  int GetLocalSize(size_t idx, const std::vector<size_t> &global_size, std::vector<size_t> *local_size) override;
+  int CheckSpecs() override;
+  int InitWeights() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
 
  private:
-  void *packed_weight_;
-  void *bias_data_;
-  cl::Kernel kernel_;
+  void *packed_weight_{nullptr};
+  void *bias_data_{nullptr};
+  struct {
+    int H{2};
+    int W{2};
+    int C{1};
+  } block_size_;
 };
 }  // namespace mindspore::kernel
 

@@ -41,7 +41,7 @@ class ParallelOp : public DatasetOp {
   // @param num_workers
   // @param op_connector_size - size of the output connector for this operator
   // @param sampler - The sampler for the op
-  ParallelOp(int32_t num_workers, int32_t op_connector_size, std::shared_ptr<Sampler> sampler = nullptr);
+  ParallelOp(int32_t num_workers, int32_t op_connector_size, std::shared_ptr<SamplerRT> sampler = nullptr);
 
   // Destructor
   ~ParallelOp() = default;
@@ -89,7 +89,7 @@ class ParallelOp : public DatasetOp {
   }
 
   // Override base class reset to provide reset actions specific to the ParallelOp class.
-  // @return Status - The error code return
+  // @return Status The status code returned
   Status Reset() override;
 
   // Getter
@@ -115,7 +115,7 @@ class ParallelOp : public DatasetOp {
  protected:
   // Interface for derived classes to implement. All derived classes must provide the entry
   // function with the main execution loop for worker threads.
-  // @return Status - The error code return
+  // @return Status The status code returned
   virtual Status WorkerEntry(int32_t workerId) = 0;
 
   /// This function is only intended to be called by CallbackManager within the master thread of ParallelOp

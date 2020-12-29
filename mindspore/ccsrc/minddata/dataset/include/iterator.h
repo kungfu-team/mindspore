@@ -17,10 +17,11 @@
 #ifndef MINDSPORE_CCSRC_MINDDATA_DATASET_INCLUDE_ITERATOR_H_
 #define MINDSPORE_CCSRC_MINDDATA_DATASET_INCLUDE_ITERATOR_H_
 
-#include <unordered_map>
 #include <memory>
-#include <vector>
 #include <string>
+#include <unordered_map>
+#include <vector>
+#include "minddata/dataset/engine/runtime_context.h"
 #include "minddata/dataset/include/status.h"
 
 namespace mindspore {
@@ -32,7 +33,8 @@ class DatasetIterator;
 class DatasetOp;
 class Tensor;
 
-namespace api {
+class NativeRuntimeContext;
+class IteratorConsumer;
 
 class Dataset;
 
@@ -43,10 +45,10 @@ using TensorVec = std::vector<std::shared_ptr<Tensor>>;
 class Iterator {
  public:
   /// \brief Constructor
-  Iterator() = default;
+  Iterator() : consumer_(nullptr) {}
 
   /// \brief Destructor
-  ~Iterator() = default;
+  ~Iterator() { Stop(); }
 
   /// \brief Method for building and launching the pipeline.
   /// \param[in] ops - a vector of DatasetOp in the data pipeline.
@@ -111,14 +113,9 @@ class Iterator {
   _Iterator end() { return _Iterator(nullptr); }
 
  private:
-  // Runtime tree.
-  // Use shared_ptr instead of unique_ptr because the DatasetIterator constructor takes in a shared_ptr type.
-  std::shared_ptr<ExecutionTree> tree_;
-
-  // Runtime iterator
-  std::unique_ptr<DatasetIterator> iterator_;
+  std::unique_ptr<NativeRuntimeContext> runtime_context_;
+  IteratorConsumer *consumer_;
 };
-}  // namespace api
 }  // namespace dataset
 }  // namespace mindspore
 #endif  // MINDSPORE_CCSRC_MINDDATA_DATASET_INCLUDE_ITERATOR_H_

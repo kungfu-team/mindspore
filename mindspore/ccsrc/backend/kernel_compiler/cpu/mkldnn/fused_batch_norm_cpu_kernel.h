@@ -15,9 +15,8 @@
  */
 #ifndef MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_CPU_FUSED_BATCH_NORM_CPU_KERNEL_H_
 #define MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_CPU_FUSED_BATCH_NORM_CPU_KERNEL_H_
-
-#include <vector>
 #include <memory>
+#include <vector>
 #include "backend/kernel_compiler/cpu/mkldnn/mkl_cpu_kernel.h"
 
 namespace mindspore {
@@ -74,4 +73,4 @@ MS_REG_CPU_KERNEL(BatchNorm,
 }  // namespace kernel
 }  // namespace mindspore
 
-#endif  // MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_CPU_CONV2D_CPU_KERNEL_H_
+#endif  // MINDSPORE_CCSRC_BACKEND_KERNEL_COMPILER_CPU_FUSED_BATCH_NORM_CPU_KERNEL_H_

@@ -19,23 +19,19 @@
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
+#include "src/ops/conv2d.h"
 
 using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_MEMORY_FAILED;
 using mindspore::lite::RET_OK;
 using mindspore::schema::ActivationType;
-using mindspore::schema::PadMode;
 
 namespace mindspore::kernel {
 ConvolutionBaseCPUKernel::~ConvolutionBaseCPUKernel() {
   if (bias_data_ != nullptr) {
     free(bias_data_);
     bias_data_ = nullptr;
-  }
-  if (nhwc4_input_ != nullptr) {
-    free(nhwc4_input_);
-    nhwc4_input_ = nullptr;
   }
 }
 
@@ -70,16 +66,24 @@ void ConvolutionBaseCPUKernel::FreeQuantParam() {
   }
   if (conv_quant_arg_->input_quant_args_ != nullptr) {
     free(conv_quant_arg_->input_quant_args_);
+    conv_quant_arg_->input_quant_args_ = nullptr;
   }
   if (conv_quant_arg_->filter_quant_args_ != nullptr) {
     free(conv_quant_arg_->filter_quant_args_);
+    conv_quant_arg_->filter_quant_args_ = nullptr;
   }
   if (conv_quant_arg_->output_quant_args_ != nullptr) {
     free(conv_quant_arg_->output_quant_args_);
+    conv_quant_arg_->output_quant_args_ = nullptr;
   }
 }
 
 int ConvolutionBaseCPUKernel::Init() {
+  auto conv2d_lite_primitive = (lite::Conv2D *)primitive_;
+  conv_param_->pad_u_ = conv2d_lite_primitive->PadUp();
+  conv_param_->pad_d_ = conv2d_lite_primitive->PadDown();
+  conv_param_->pad_l_ = conv2d_lite_primitive->PadLeft();
+  conv_param_->pad_r_ = conv2d_lite_primitive->PadRight();
   auto input = this->in_tensors_.front();
   auto output = this->out_tensors_.front();
   conv_param_->input_batch_ = input->Batch();
@@ -101,18 +105,6 @@ int ConvolutionBaseCPUKernel::CheckResizeValid() {
   int resize_in_channel = in_tensors_.at(kInputIndex)->Channel();
   if (filter_in_channel != resize_in_channel) {
     MS_LOG(ERROR) << "Channel of resized input should be equal to in channel of filter.";
-    return RET_ERROR;
-  }
-  return RET_OK;
-}
-
-int ConvolutionBaseCPUKernel::CheckLayout(lite::Tensor *input_tensor) {
-  auto data_type = input_tensor->data_type();
-  auto input_format = input_tensor->GetFormat();
-  schema::Format execute_format = schema::Format::Format_NHWC4;
-  convert_func_ = LayoutTransform(data_type, input_format, execute_format);
-  if (convert_func_ == nullptr) {
-    MS_LOG(ERROR) << "layout convert func is nullptr.";
     return RET_ERROR;
   }
   return RET_OK;
@@ -151,42 +143,14 @@ int ConvolutionBaseCPUKernel::SetIfPerChannel() {
   return RET_OK;
 }
 
-int ConvolutionBaseCPUKernel::SetIfAsymmetric() {
-  uint8_t asymmetric = 0b0;
-  auto filter_tensor = in_tensors_.at(kWeightIndex);
-  auto filter_ele_num = filter_tensor->ElementsNum();
-  auto filter_data = reinterpret_cast<int8_t *>(filter_tensor->MutableData());
-  int min_value = INT8_MAX;
-  int max_value = INT8_MIN;
-  for (int i = 0; i < filter_ele_num; ++i) {
-    min_value = min_value < filter_data[i] ? min_value : filter_data[i];
-    max_value = max_value > filter_data[i] ? max_value : filter_data[i];
-  }
-  if (conv_quant_arg_->filter_arg_num_ == kPerTensor) {
-    auto filter_zp = conv_quant_arg_->filter_quant_args_[0].zp_;
-    if (filter_zp != 0 && min_value >= -128 && max_value <= 127) {
-      asymmetric = asymmetric | FILTER_ASYMMETRIC;
-    }
-  } else {
-    auto filter_arg = conv_quant_arg_->filter_quant_args_;
-    for (int i = 0; i < conv_param_->output_channel_; ++i) {
-      if (filter_arg[i].zp_ != 0 && min_value >= -128 && max_value <= 127) {
-        asymmetric = asymmetric | FILTER_ASYMMETRIC;
-      }
-    }
-  }
-  conv_quant_arg_->asymmetric_ = asymmetric;
-  return RET_OK;
-}
-
 int ConvolutionBaseCPUKernel::MallocQuantParam() {
   conv_quant_arg_ = &conv_param_->conv_quant_arg_;
   auto input_tensor = in_tensors_.at(kInputIndex);
   auto weight_tensor = in_tensors_.at(kWeightIndex);
   auto output_tensor = out_tensors_.at(kOutputIndex);
-  size_t input_arg_num = input_tensor->GetQuantParams().size();
-  size_t filter_arg_num = weight_tensor->GetQuantParams().size();
-  size_t output_arg_num = output_tensor->GetQuantParams().size();
+  size_t input_arg_num = input_tensor->quant_params().size();
+  size_t filter_arg_num = weight_tensor->quant_params().size();
+  size_t output_arg_num = output_tensor->quant_params().size();
   conv_quant_arg_->input_arg_num_ = input_arg_num;
   conv_quant_arg_->filter_arg_num_ = filter_arg_num;
   conv_quant_arg_->output_arg_num_ = output_arg_num;
@@ -213,7 +177,7 @@ int ConvolutionBaseCPUKernel::SetInputTensorQuantParam() {
   auto input_tensor = in_tensors_.at(kInputIndex);
   auto in_arg_num = conv_quant_arg_->input_arg_num_;
   if (in_arg_num == kPerTensor) {
-    auto input_quant_arg = input_tensor->GetQuantParams().front();
+    auto input_quant_arg = input_tensor->quant_params().front();
     conv_quant_arg_->input_quant_args_[0].zp_ = input_quant_arg.zeroPoint;
     conv_quant_arg_->input_quant_args_[0].scale_ = input_quant_arg.scale;
   } else {
@@ -228,11 +192,11 @@ int ConvolutionBaseCPUKernel::SetFilterTensorQuantParam() {
   auto weight_tensor = in_tensors_.at(kWeightIndex);
   auto weight_arg_num = conv_quant_arg_->filter_arg_num_;
   if (weight_arg_num == kPerTensor) {
-    auto weight_quant_arg = weight_tensor->GetQuantParams().front();
+    auto weight_quant_arg = weight_tensor->quant_params().front();
     conv_quant_arg_->filter_quant_args_[0].zp_ = weight_quant_arg.zeroPoint;
     conv_quant_arg_->filter_quant_args_[0].scale_ = weight_quant_arg.scale;
   } else {
-    auto weight_quant_arg = weight_tensor->GetQuantParams();
+    auto weight_quant_arg = weight_tensor->quant_params();
     for (size_t i = 0; i < weight_arg_num; ++i) {
       conv_quant_arg_->filter_quant_args_[i].zp_ = weight_quant_arg[i].zeroPoint;
       conv_quant_arg_->filter_quant_args_[i].scale_ = weight_quant_arg[i].scale;
@@ -245,7 +209,7 @@ int ConvolutionBaseCPUKernel::SetOutputTensorQuantParam() {
   auto output_tensor = out_tensors_.at(kOutputIndex);
   auto out_arg_num = conv_quant_arg_->output_arg_num_;
   if (out_arg_num == kPerTensor) {
-    auto output_quant_arg = output_tensor->GetQuantParams().front();
+    auto output_quant_arg = output_tensor->quant_params().front();
     conv_quant_arg_->output_quant_args_[0].zp_ = output_quant_arg.zeroPoint;
     conv_quant_arg_->output_quant_args_[0].scale_ = output_quant_arg.scale;
   } else {
@@ -328,11 +292,6 @@ int ConvolutionBaseCPUKernel::SetQuantParam() {
   ret = SetIfPerChannel();
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Set if per tensor channel failed.";
-    return ret;
-  }
-  ret = SetIfAsymmetric();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Set if per asymmetric failed.";
     return ret;
   }
 

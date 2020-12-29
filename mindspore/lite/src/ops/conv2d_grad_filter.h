@@ -28,9 +28,10 @@ namespace mindspore {
 namespace lite {
 class Conv2DGradFilter : public PrimitiveC {
  public:
+  Conv2DGradFilter() = default;
+  ~Conv2DGradFilter() = default;
 #ifdef PRIMITIVE_WRITEABLE
   MS_DECLARE_PARENT(Conv2DGradFilter, PrimitiveC);
-  Conv2DGradFilter() = default;
   explicit Conv2DGradFilter(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
   void SetFormat(int format);
   void SetGroup(int group);
@@ -47,12 +48,9 @@ class Conv2DGradFilter : public PrimitiveC {
   void SetPadRight(int pad_right);
   void SetDilateW(int dilate_w);
   void SetDilateH(int dilate_h);
-  void SetHasBias(bool has_bias);
   void SetActivationType(int activation_type);
   int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
 #else
-  Conv2DGradFilter() = default;
-
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
   int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
@@ -71,8 +69,8 @@ class Conv2DGradFilter : public PrimitiveC {
   int GetPadRight() const;
   int GetDilateW() const;
   int GetDilateH() const;
-  bool GetHasBias() const;
   int GetActivationType() const;
+  std::vector<int> GetFilterShape() const;
 };
 }  // namespace lite
 }  // namespace mindspore

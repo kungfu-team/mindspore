@@ -18,20 +18,10 @@ Operators can be used in the construct function of Cell.
 
 Examples:
 
-    >>> from mindspore.ops import operations as P
-    >>> from mindspore.ops import composite as C
-    >>> from mindspore.ops import functional as F
     >>> import mindspore.ops as ops
-
-Note:
-    - The Primitive operators in operations need to be used after instantiation.
-    - The composite operators are the pre-defined combination of operators.
-    - The functional operators are the pre-instantiated Primitive operators, which can be used directly as a function.
-    - For functional operators usage, please refer to
-      https://gitee.com/mindspore/mindspore/blob/master/mindspore/ops/functional.py
 """
 
-from .primitive import Primitive, PrimitiveWithInfer, prim_attr_register
+from .primitive import Primitive, PrimitiveWithInfer, PrimitiveWithCheck, prim_attr_register
 from .vm_impl_registry import get_vm_impl_fn, vm_impl_registry
 from .op_info_register import op_info_register, AkgGpuRegOp, AkgAscendRegOp, AiCPURegOp, TBERegOp, DataType
 from .primitive import constexpr
@@ -42,7 +32,7 @@ from .operations import *
 from .functional import *
 
 __primitive__ = [
-    "prim_attr_register", "Primitive", "PrimitiveWithInfer", "signature"
+    "prim_attr_register", "Primitive", "PrimitiveWithInfer", "PrimitiveWithCheck", "signature"
 ]
 
 __all__ = ["get_vm_impl_fn", "vm_impl_registry",

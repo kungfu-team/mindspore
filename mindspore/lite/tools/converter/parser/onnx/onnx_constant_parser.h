@@ -25,8 +25,10 @@ namespace lite {
 class OnnxConstantParser : public OnnxNodeParser {
  public:
   OnnxConstantParser() : OnnxNodeParser("Constant") {}
+  ~OnnxConstantParser() override = default;
 
-  STATUS Parse(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node, schema::CNodeT *op) override;
+  STATUS AddDataInfoAttr(const onnx::TensorProto &onnx_const_tensor, lite::PrimitiveC *primitive_c);
+  lite::PrimitiveC *ParseLitePrimitive(const onnx::GraphProto &onnx_graph, const onnx::NodeProto &onnx_node) override;
 };
 }  // namespace lite
 }  // namespace mindspore

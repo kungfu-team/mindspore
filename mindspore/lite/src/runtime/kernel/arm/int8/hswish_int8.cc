@@ -35,10 +35,10 @@ int HswishInt8CPUKernel::Init() {
   MS_ASSERT(input);
   MS_ASSERT(output);
 
-  quant_arg_.input_scale = input->GetQuantParams().front().scale;
-  quant_arg_.input_zp = input->GetQuantParams().front().zeroPoint;
-  quant_arg_.output_scale = output->GetQuantParams().front().scale;
-  quant_arg_.output_zp = output->GetQuantParams().front().zeroPoint;
+  quant_arg_.input_scale = input->quant_params().front().scale;
+  quant_arg_.input_zp = input->quant_params().front().zeroPoint;
+  quant_arg_.output_scale = output->quant_params().front().scale;
+  quant_arg_.output_zp = output->quant_params().front().zeroPoint;
 
   const float output_multiplier = (1.0f / 128.0f) * quant_arg_.input_scale / quant_arg_.output_scale;
 
@@ -89,11 +89,6 @@ int HswishInt8Run(void *cdata, int task_id) {
 }
 
 int HswishInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare failed.";
-    return RET_ERROR;
-  }
   int error_code = ParallelLaunch(this->context_->thread_pool_, HswishInt8Run, this, thread_count_);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "HswishInt8Run function error error_code[" << error_code << "]";

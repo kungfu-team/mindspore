@@ -22,8 +22,10 @@
 #include "ir/anf.h"
 
 namespace mindspore {
+enum LocDumpMode { kOff = 0, kTopStack = 1, kWholeStack = 2 };
 constexpr char PARALLEL_STRATEGY[] = "strategy";
-void DumpIR(const std::string &filename, const FuncGraphPtr &func_graph, bool dump_full_name = false);
+void DumpIR(const std::string &filename, const FuncGraphPtr &func_graph, bool dump_full_name = false,
+            LocDumpMode dump_location = kOff);
 void PrintInputAndOutputInferType(std::ostringstream &buffer, const AnfNodePtr &nd);
 const std::string ToShortString(const TypeId &typeId);
 }  // namespace mindspore

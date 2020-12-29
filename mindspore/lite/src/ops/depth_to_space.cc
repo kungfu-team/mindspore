@@ -16,6 +16,10 @@
 
 #include "src/ops/depth_to_space.h"
 #include "src/common/common.h"
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -42,7 +46,13 @@ int DepthToSpace::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbu
 int DepthToSpace::GetBlockSize() const { return this->primitive_->value_as_DepthToSpace()->blockSize(); }
 int DepthToSpace::GetFormat() const { return this->primitive_->value_as_DepthToSpace()->format(); }
 
+PrimitiveC *DepthToSpaceCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<DepthToSpace>(primitive);
+}
+Registry DepthToSpaceRegistry(schema::PrimitiveType_DepthToSpace, DepthToSpaceCreator);
+
 #endif
+
 namespace {
 constexpr int kDepthToSpaceOutputNum = 1;
 constexpr int kDepthToSpaceInputNum = 1;
@@ -56,14 +66,14 @@ int DepthToSpace::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lit
   }
 
   auto input = inputs.at(0);
-  if (input->GetFormat() != schema::Format::Format_NHWC) {
+  if (input->format() != schema::Format::Format_NHWC) {
     MS_LOG(ERROR) << "depth_to_space only support NHWC now!";
     return RET_FORMAT_ERR;
   }
   outputs[0]->set_data_type(input->data_type());
-  outputs[0]->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  outputs[0]->set_format(input->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   auto input_shape = input->shape();
   if (input_shape.size() != kDimension_4d) {

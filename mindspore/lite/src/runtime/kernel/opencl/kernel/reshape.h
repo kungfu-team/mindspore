@@ -25,21 +25,18 @@
 namespace mindspore::kernel {
 class ReshapeOpenCLKernel : public OpenCLKernel {
  public:
-  explicit ReshapeOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
-                               const std::vector<lite::Tensor *> &outputs)
+  ReshapeOpenCLKernel(OpParameter *parameter, const std::vector<lite::Tensor *> &inputs,
+                      const std::vector<lite::Tensor *> &outputs)
       : OpenCLKernel(parameter, inputs, outputs) {}
-  ~ReshapeOpenCLKernel() override{};
+  ~ReshapeOpenCLKernel() override = default;
 
-  int Init() override;
-  int ReSize() override;
   int Run() override;
-  int GetImageSize(size_t idx, std::vector<size_t> *img_size) override;
+  int Prepare() override;
+  int CheckSpecs() override;
+  void SetConstArgs() override;
+  void SetGlobalLocal() override;
 
  private:
-  cl::Kernel kernel_;
-  bool enable_fp16_{false};
-  std::vector<int> inShape;
-  std::vector<int> outShape;
 };
 }  // namespace mindspore::kernel
 

@@ -30,6 +30,7 @@
 #include "schema/model_generated.h"
 #include "src/executor.h"
 #include "src/tensor.h"
+#include "src/tensorlist.h"
 #if SUPPORT_GPU
 #include "src/runtime/opencl/opencl_runtime.h"
 #endif
@@ -42,7 +43,7 @@ class LiteSession : public session::LiteSession {
 
   ~LiteSession() override;
 
-  virtual int Init(Context *context);
+  virtual int Init(const Context *context);
 
   void BindThread(bool if_bind) override;
 
@@ -52,8 +53,7 @@ class LiteSession : public session::LiteSession {
 
   mindspore::tensor::MSTensor *GetInputsByTensorName(const std::string &name) const override;
 
-  int RunGraph(const session::KernelCallBack &before = nullptr,
-               const session::KernelCallBack &after = nullptr) override;
+  int RunGraph(const KernelCallBack &before = nullptr, const KernelCallBack &after = nullptr) override;
 
   std::vector<mindspore::tensor::MSTensor *> GetOutputsByNodeName(const std::string &node_name) const override;
 
@@ -67,6 +67,13 @@ class LiteSession : public session::LiteSession {
              const std::vector<std::vector<int>> &dims) override;
 
  protected:
+  static void ConvertTensorsQuantParam(const schema::Tensor *src_tensor, lite::Tensor *dst_tensor);
+
+  int ConvertTensorsData(const lite::Model *model, size_t tensor_index, const schema::Tensor *src_tensor,
+                         lite::Tensor *dst_tensor);
+
+  lite::Tensor *ConvertTensor(const schema::Tensor &src_tensor);
+
   int ConvertTensors(const lite::Model *model);
 
   void InitGraphInOutTensors(const lite::Model *model);
@@ -81,14 +88,20 @@ class LiteSession : public session::LiteSession {
 
   void InitGraphOutputNodeMap(const lite::Model *model);
 
-  void InitGraphOutputTensorNames(const lite::Model *model);
-
   void InitGraphOutputTensorMap(const lite::Model *model);
+
+  void AdjustModelOutputTensorInitRefCount(const lite::Model *model);
 
   int ResizeInputs(const std::vector<mindspore::tensor::MSTensor *> &inputs, const std::vector<std::vector<int>> &dims);
 
+  int PrepareKernels(Model *model);
+
+  static int ReSizeKernels(const std::vector<kernel::LiteKernel *> &kernels);
+
  private:
   void ResetInputsShape(const std::vector<std::vector<int>> &dims);
+
+  int InitGPURuntime();
 
  protected:
   InnerContext *context_ = nullptr;
@@ -109,9 +122,9 @@ class LiteSession : public session::LiteSession {
   std::vector<std::string> output_tensor_names_;
   // graph output tensor name -- output tensor
   std::unordered_map<std::string, mindspore::tensor::MSTensor *> output_tensor_map_;
-  Executor *executor = nullptr;
+  Executor *executor_ = nullptr;
   std::atomic<bool> is_running_ = false;
-#if SUPPORT_GPU
+#if SUPPORT_GPU && !SUPPORT_TRAIN
   opencl::OpenCLRuntimeWrapper ocl_runtime_wrap_;
 #endif
 };

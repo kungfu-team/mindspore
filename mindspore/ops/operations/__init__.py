@@ -22,26 +22,26 @@ A collection of operators to build neural networks or to compute functions.
 from .image_ops import (CropAndResize)
 from .array_ops import (Argmax, Argmin, Cast, Concat, Pack, Unpack,
                         Diag, DiagPart, DType, ExpandDims, Eye,
-                        Fill, GatherNd, GatherV2, SparseGatherV2, InvertPermutation,
+                        Fill, Ones, Zeros, GatherNd, GatherV2, SparseGatherV2, InvertPermutation,
                         IsInstance, IsSubClass, ArgMaxWithValue, OnesLike, ZerosLike,
                         Rank, Reshape, ResizeNearestNeighbor, ArgMinWithValue, Meshgrid,
                         SameTypeShape, ScatterAdd, ScatterSub, ScatterMul, ScatterDiv, ScatterMax, ScatterMin,
                         ScatterUpdate, ScalarToArray, ScalarToTensor, ScatterNd, ScatterNdUpdate, Select,
-                        Shape, DynamicShape, Size, Slice, Split, TransShape, ParallelConcat, Padding,
+                        Shape, DynamicShape, Size, Slice, Split, TransShape, ParallelConcat, Padding, UniqueWithPad,
                         ScatterNdAdd, ScatterNdSub, ScatterNonAliasingAdd, ReverseV2, Rint,
                         Squeeze, StridedSlice, Tile, TensorScatterUpdate, EditDistance, Sort,
-                        Transpose, TruncatedNormal, TupleToArray, UnsortedSegmentMin, UnsortedSegmentProd,
-                        UnsortedSegmentSum, SpaceToDepth, DepthToSpace, SpaceToBatch, BatchToSpace,
+                        Transpose, TruncatedNormal, TupleToArray, UnsortedSegmentMin, UnsortedSegmentMax,
+                        UnsortedSegmentProd, UnsortedSegmentSum, SpaceToDepth, DepthToSpace, SpaceToBatch, BatchToSpace,
                         SpaceToBatchND, BatchToSpaceND, BroadcastTo, InplaceUpdate, ReverseSequence, EmbeddingLookup,
                         Unique, GatherD, Identity)
-from .comm_ops import (AllGather, AllReduce, _AlltoAll, ReduceScatter, Broadcast,
+from .comm_ops import (AllGather, AllReduce, _AlltoAll, AllSwap, ReduceScatter, Broadcast,
                        _MirrorOperator, ReduceOp, _VirtualDataset,
                        _VirtualDiv, _GetTensorSlice,
                        _HostAllGather, _HostReduceScatter)
 from .debug_ops import (ImageSummary, InsertGradientOf, HookBackward, ScalarSummary,
                         TensorSummary, HistogramSummary, Print, Assert)
 from .control_ops import ControlDepend, GeSwitch, Merge
-from .inner_ops import ScalarCast
+from .inner_ops import ScalarCast, Randperm, NoRepeatNGram
 
 from .math_ops import (Abs, ACos, Asin, Asinh, AddN, AccumulateNV2, AssignAdd, AssignSub, Atan2, BatchMatMul, BitwiseAnd, BitwiseOr,
                        BitwiseXor, Inv, Invert, ApproximateEqual, InplaceAdd, InplaceSub,
@@ -50,28 +50,29 @@ from .math_ops import (Abs, ACos, Asin, Asinh, AddN, AccumulateNV2, AssignAdd, A
                        Acosh, Greater, GreaterEqual, Less, LessEqual, Log, Log1p, LogicalAnd, Mod,
                        LogicalNot, LogicalOr, MatMul, Maximum,
                        Minimum, Mul, Neg, NMSWithMask, NotEqual,
-                       NPUAllocFloatStatus, NPUClearFloatStatus,
+                       NPUAllocFloatStatus, NPUClearFloatStatus, LinSpace,
                        NPUGetFloatStatus, Pow, RealDiv, IsNan, IsInf, IsFinite, FloatStatus,
                        Reciprocal, CumSum, HistogramFixedWidth, SquaredDifference, Xdivy, Xlogy,
-                       Sin, Sqrt, Rsqrt, BesselI0e, BesselI1e, TruncateDiv, TruncateMod, IFMR,
+                       Sin, Sqrt, Rsqrt, BesselI0e, BesselI1e, TruncateDiv, TruncateMod,
                        Square, Sub, TensorAdd, Sign, Round, SquareSumAll, Atan, Atanh, Cosh, Sinh, Eps, Tan)
 
 from .random_ops import (RandomChoiceWithMask, StandardNormal, Gamma, Poisson, UniformInt, UniformReal,
-                         RandomCategorical, StandardLaplace, Multinomial)
-from .nn_ops import (LSTM, SGD, Adam, FusedSparseAdam, FusedSparseLazyAdam, ApplyMomentum, BatchNorm,
+                         RandomCategorical, StandardLaplace, Multinomial, UniformCandidateSampler,
+                         LogUniformCandidateSampler)
+from .nn_ops import (LSTM, SGD, Adam, FusedSparseAdam, FusedSparseLazyAdam, AdamNoUpdateParam, ApplyMomentum, BatchNorm,
                      BiasAdd, Conv2D,
                      DepthwiseConv2dNative,
                      DropoutDoMask, Dropout,
                      DropoutGenMask, Flatten, FusedBatchNorm, FusedBatchNormEx, BNTrainingReduce, BNTrainingUpdate,
-                     Gelu, Elu,
+                     Gelu, FastGelu, Elu,
                      GetNext, L2Normalize, LayerNorm, L2Loss, CTCLoss, CTCGreedyDecoder,
                      LogSoftmax,
                      MaxPool, DataFormatDimMap,
-                     AvgPool, Conv2DBackpropInput,
+                     AvgPool, Conv2DBackpropInput, ComputeAccidentalHits,
                      MaxPoolWithArgmax, OneHot, Pad, MirrorPad, PReLU, ReLU, ReLU6, ReLUV2, HSwish, HSigmoid,
                      ResizeBilinear, Sigmoid,
                      SigmoidCrossEntropyWithLogits,
-                     SmoothL1Loss, Softmax, Softsign, Softplus, LRN, RNNTLoss, DynamicRNN,
+                     SmoothL1Loss, Softmax, Softsign, Softplus, LRN, RNNTLoss, DynamicRNN, DynamicGRUV2,
                      SoftmaxCrossEntropyWithLogits, ROIAlign,
                      SparseSoftmaxCrossEntropyWithLogits, Tanh,
                      TopK, BinaryCrossEntropy, KLDivLoss, SparseApplyAdagrad, LARSUpdate, ApplyFtrl, SparseApplyFtrl,
@@ -82,14 +83,17 @@ from .nn_ops import (LSTM, SGD, Adam, FusedSparseAdam, FusedSparseLazyAdam, Appl
                      ApplyRMSProp, ApplyCenteredRMSProp, BasicLSTMCell, InTopK)
 from . import _quant_ops
 from ._quant_ops import *
-from .other_ops import (Assign, IOU, BoundingBoxDecode, BoundingBoxEncode, PopulationCount,
+from .other_ops import (Assign, InplaceAssign, IOU, BoundingBoxDecode, BoundingBoxEncode,
+                        ConfusionMatrix, PopulationCount,
                         CheckValid, MakeRefKey, Partial, Depend, identity, CheckBprop, Push, Pull)
 from ._thor_ops import (CusBatchMatMul, CusCholeskyTrsm, CusFusedAbsMax1, CusImg2Col, CusMatMulCubeDenseLeft,
                         CusMatMulCubeFraczRightMul, CusMatMulCube, CusMatrixCombine, CusTranspose02314,
                         CusMatMulCubeDenseRight,
-                        CusMatMulCubeFraczLeftCast, Im2Col, UpdateThorGradient, Cholesky)
+                        CusMatMulCubeFraczLeftCast, Im2Col, UpdateThorGradient, Cholesky, CholeskyTrsm, DetTriangle,
+                        ProdForceSeA)
 from .sparse_ops import SparseToDense
-from ._cache_ops import CacheSwapHashmap, SearchCacheIdx, CacheSwapTable, UpdateCache, MapCacheIdx
+from ._embedding_cache_ops import (CacheSwapHashmap, SearchCacheIdx, CacheSwapTable, UpdateCache, MapCacheIdx, SubAndFilter,
+                                   MapUniform, DynamicAssign, PadAndShift)
 
 __all__ = [
     'Unique',
@@ -98,7 +102,6 @@ __all__ = [
     'EditDistance',
     'CropAndResize',
     'TensorAdd',
-    'IFMR',
     'Argmax',
     'Argmin',
     'ArgMaxWithValue',
@@ -117,6 +120,7 @@ __all__ = [
     'Rsqrt',
     'Sqrt',
     'Square',
+    'DynamicGRUV2',
     'SquaredDifference',
     'Xdivy',
     'Xlogy',
@@ -130,9 +134,11 @@ __all__ = [
     'BatchNorm',
     'MaxPool',
     'TopK',
+    'LinSpace',
     'Adam',
     'FusedSparseAdam',
     'FusedSparseLazyAdam',
+    'AdamNoUpdateParam',
     'Softplus',
     'Softmax',
     'Softsign',
@@ -156,12 +162,14 @@ __all__ = [
     'Padding',
     'GatherD',
     'Identity',
+    'UniqueWithPad',
     'Concat',
     'Pack',
     'Unpack',
     'Tile',
     'BiasAdd',
     'Gelu',
+    'FastGelu',
     'Minimum',
     'Maximum',
     'StridedSlice',
@@ -178,6 +186,8 @@ __all__ = [
     'Invert',
     'TruncatedNormal',
     'Fill',
+    'Ones',
+    'Zeros',
     'OnesLike',
     'ZerosLike',
     'Select',
@@ -191,6 +201,8 @@ __all__ = [
     'HSwish',
     'HSigmoid',
     'Tanh',
+    'NoRepeatNGram',
+    'Randperm',
     'RandomChoiceWithMask',
     'StandardNormal',
     'Multinomial',
@@ -289,9 +301,11 @@ __all__ = [
     'DepthwiseConv2dNative',
     'UnsortedSegmentSum',
     'UnsortedSegmentMin',
+    'UnsortedSegmentMax',
     'UnsortedSegmentProd',
     "AllGather",
     "AllReduce",
+    "AllSwap",
     "ReduceScatter",
     "Broadcast",
     "ReduceOp",
@@ -333,6 +347,7 @@ __all__ = [
     "SpaceToDepth",
     "DepthToSpace",
     "Conv2DBackpropInput",
+    "ComputeAccidentalHits",
     "Sign",
     "LARSUpdate",
     "Round",
@@ -374,14 +389,17 @@ __all__ = [
     "ApproximateEqual",
     "InplaceUpdate",
     "InTopK",
+    "UniformCandidateSampler",
+    "LogUniformCandidateSampler",
     "LRN",
     "Mod",
+    "ConfusionMatrix",
     "PopulationCount",
     "ParallelConcat",
     "Push",
     "Pull",
     "ReLUV2",
-    'SparseToDense',
+    "SparseToDense",
 ]
 
 __all__.sort()

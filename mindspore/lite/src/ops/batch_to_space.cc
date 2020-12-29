@@ -20,6 +20,10 @@
 #include "src/common/log_adapter.h"
 #include "src/tensor.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -66,7 +70,12 @@ std::vector<int> BatchToSpace::GetCrops() const {
   return std::vector<int>(fb_vector->begin(), fb_vector->end());
 }
 
+PrimitiveC *BatchToSpaceCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<BatchToSpace>(primitive);
+}
+Registry BatchToSpaceRegistry(schema::PrimitiveType_BatchToSpace, BatchToSpaceCreator);
 #endif
+
 namespace {
 constexpr int kBatchToSpaceOutputNum = 1;
 constexpr int kBatchToSpaceInputNum = 1;
@@ -82,14 +91,14 @@ int BatchToSpace::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lit
   }
 
   auto input = inputs.at(0);
-  if (input->GetFormat() != schema::Format::Format_NHWC) {
+  if (input->format() != schema::Format::Format_NHWC) {
     MS_LOG(ERROR) << "batch_to_space only support NHWC now!";
     return RET_FORMAT_ERR;
   }
-  outputs[0]->SetFormat(input->GetFormat());
+  outputs[0]->set_format(input->format());
   outputs[0]->set_data_type(input->data_type());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   auto input_shape = input->shape();
   if (input_shape.size() != kDimension_4d) {

@@ -36,13 +36,12 @@ class SoftmaxCrossEntropyWithLogitsInfo : public OperatorInfo {
  public:
   SoftmaxCrossEntropyWithLogitsInfo(const std::string &name, const Shapes &inputs_shape, const Shapes &outputs_shape,
                                     const PrimitiveAttrs &attrs)
-      : OperatorInfo(name, inputs_shape, outputs_shape, attrs,
-                     std::make_shared<SoftmaxCrossEntropyWithLogitsCost>(false)) {}
+      : OperatorInfo(name, inputs_shape, outputs_shape, attrs, std::make_shared<SoftmaxCrossEntropyWithLogitsCost>()) {}
   ~SoftmaxCrossEntropyWithLogitsInfo() override = default;
   Status Init(const StrategyPtr &strategy) override;
   Status InitForCostModel(const StrategyPtr &strategy) override;
 
-  Status GenerateStrategies(int32_t stage_id) override;
+  Status GenerateStrategies(int64_t stage_id) override;
   Status SetCostUnderStrategy(const StrategyPtr &strategy) override;
   void ReComputeBatchSplitFlagList() override;
 
@@ -59,7 +58,7 @@ class SoftmaxCrossEntropyWithLogitsInfo : public OperatorInfo {
   Status InferAsLossDivisor() override;
 
  private:
-  int32_t axis_ = -1;  // default -1
+  int64_t axis_ = -1;  // default -1
 };
 }  // namespace parallel
 }  // namespace mindspore

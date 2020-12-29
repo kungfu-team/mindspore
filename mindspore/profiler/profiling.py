@@ -14,11 +14,13 @@
 # ============================================================================
 """Profiling api file."""
 import os
+import stat
 import time
+import json
 from enum import Enum
 
 from mindspore import log as logger, context
-from mindspore.communication.management import release, init, get_rank
+from mindspore.communication.management import release, get_rank
 from mindspore.profiler.common.exceptions.exceptions import ProfilerFileNotFoundException, \
     ProfilerIOException, ProfilerException
 from mindspore.profiler.common.util import get_file_names, fwrite_format
@@ -33,10 +35,9 @@ from mindspore.profiler.parser.minddata_parser import MinddataParser
 from mindspore.profiler.parser.minddata_pipeline_parser import \
     MinddataPipelineParser
 from mindspore.profiler.parser.optime_parser import OPComputeTimeParser
-from mindspore.profiler.parser.step_trace_parser import StepTraceParser
+from mindspore.profiler.parser.step_trace_parser import GpuStepTraceParser, AscendStepTraceParser
 from mindspore.nn.cell import Cell
 
-PROFILING_LOG_BASE_PATH = "/var/log/npu/profiling"
 INIT_OP_NAME = 'Default/InitDataSetQueue'
 
 class ProfileOption(Enum):
@@ -71,7 +72,6 @@ class Profiler:
         >>> profiler.analyse()
     """
 
-    _base_profiling_container_path = "/var/log/npu/profiling/container"
     _hwts_output_filename_target = "output_format_data_hwts_"
     _opcompute_output_filename_target = "output_op_compute_time_"
     _aicpu_op_output_filename_target = "output_data_preprocess_aicpu_"
@@ -79,22 +79,29 @@ class Profiler:
     def __init__(self, **kwargs):
         # get device_id and device_target
         self._get_devid_and_devtarget()
-        output_path = kwargs.pop("output_path", "./data")
+        format_time = int(time.time())
+        output_path = kwargs.pop("output_path", f"data-{format_time}")
         self._output_path = validate_and_normalize_path(output_path)
-        self._output_path = os.path.join(self._output_path, "profiler")
+        self._output_path = os.path.join(self._output_path, f"profiler-{format_time}")
+        self._base_profiling_container_path = os.path.join(self._output_path, "container")
         if not os.path.exists(self._output_path):
             os.makedirs(self._output_path, exist_ok=True)
+            os.chmod(self._output_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
         else:
             logger.warning("The target dir already exists. "
                            "There may be some old profiling data, and they will be rewrote in the end.")
+
+        os.environ['PROFILING_MODE'] = 'true'
+        os.environ['MINDDATA_PROFILING_DIR'] = self._output_path
 
         if self._device_target and self._device_target == "GPU":
             from mindspore._c_expression import GPUProfiler
             self._gpu_profiler = GPUProfiler.get_instance()
             self._gpu_profiler.init(self._output_path)
             self._gpu_profiler.step_profiling_enable(True)
-            init()
-            self._dev_id = get_rank()
+            if context.get_auto_parallel_context('device_num') > 1:
+                self._dev_id = get_rank()
+            os.environ['DEVICE_ID'] = str(self._dev_id)
 
             if kwargs:
                 logger.warning("Params not be supported yet on GPU.")
@@ -106,13 +113,26 @@ class Profiler:
             if kwargs:
                 logger.warning("There are invalid params which don't work.")
 
-            os.environ['PROFILING_MODE'] = 'true'
-            os.environ['MINDDATA_PROFILING_DIR'] = self._output_path
             os.environ['DEVICE_ID'] = self._dev_id
-            os.environ['AICPU_PROFILING_MODE'] = 'true'
+            fp_point = os.environ.get("PROFILING_FP_START", "")
+            bp_point = os.environ.get("PROFILING_BP_END", "")
 
+            profiling_options = {
+                "result_path": self._output_path,
+                "fp_point": fp_point,
+                "bp_point": bp_point,
+                "training_trace": "on",
+                "task_trace": "on",
+                "ai_core_metrics": "PipeUtilization",
+                "aicpu_trace": "on"
+            }
+
+            profiling_options = json.dumps(profiling_options)
+            # Characters longer than 2048 are ignored, resulting in profiling option resolution errors
+            if len(profiling_options) > 2048:
+                raise ValueError("The parameter length exceeds the limit (2048)")
             # use context interface to open profiling, for the new mindspore version(after 2020.5.21)
-            context.set_context(enable_profiling=True, profiling_options="training_trace:task_trace")
+            context.set_context(enable_profiling=True, profiling_options=profiling_options)
 
             self._container_path = os.path.join(self._base_profiling_container_path, self._dev_id)
             data_path = os.path.join(self._container_path, "data")
@@ -142,15 +162,35 @@ class Profiler:
             >>> profiler.analyse()
         """
         if self._device_target and self._device_target == "GPU":
+            if context.get_auto_parallel_context('device_num') > 1 and self._dev_id != get_rank():
+                self._dev_id = get_rank()
+                logger.error('Please check the Profiler object initialized after set_auto_parallel_context() '
+                             'and init(). Profiler should be initialized after these code. ')
             self._gpu_profiler.stop()
-            self._generate_timeline()
+            timeline_generator = self._generate_timeline()
+
+            # parse minddata pipeline operator and queue for GPU
+            try:
+                pipeline_parser = MinddataPipelineParser(self._output_path, self._dev_id, self._output_path)
+                pipeline_parser.parse()
+            except ProfilerException as err:
+                logger.warning(err.message)
+
+            # analyse step trace info
+            try:
+                self._analyse_step_trace(is_training_mode_flag=timeline_generator.check_op_name('Gradients'))
+            except ProfilerException as err:
+                logger.warning(err.message)
+
+            os.environ['PROFILING_MODE'] = str("false")
+
         elif self._device_target and self._device_target == "Ascend":
             release()
 
             job_id = self._get_profiling_job_id()
             logger.info("Profiling: job id is %s ", job_id)
 
-            source_path = os.path.join(PROFILING_LOG_BASE_PATH, job_id)
+            source_path = os.path.join(self._output_path, job_id)
             # parse hwts.log.data.45.dev file, and get task profiling data
             hwts_output_filename = self._hwts_output_filename_target + self._dev_id + ".txt"
             hwts_output_filename = os.path.join(self._output_path, hwts_output_filename)
@@ -215,13 +255,14 @@ class Profiler:
             os.environ['PROFILING_MODE'] = str("false")
             context.set_context(enable_profiling=False)
 
-    def _analyse_step_trace(self, source_path, framework_parser):
+    def _analyse_step_trace(self, source_path=None, framework_parser=None, is_training_mode_flag=True):
         """
         Analyse step trace data and save the result.
 
         Args:
             source_path (str): The directory that contains the step trace original data.
             framework_parser (FrameworkParser): The framework parse instance.
+            is_training_mode_flag (bool): Whether in training mode or not.
         """
         logger.info("Begin to parse step trace.")
         # construct output path
@@ -235,18 +276,33 @@ class Profiler:
         )
         step_trace_intermediate_file_path = validate_and_normalize_path(step_trace_intermediate_file_path)
         point_info_file_path = validate_and_normalize_path(point_info_file_path)
-        # whether keep the first step
-        skip_first_step_flag = framework_parser.check_op_name(INIT_OP_NAME)
-        point_info = framework_parser.point_info
-        # parser the step trace files and save the result to disk
-        source_path = validate_and_normalize_path(source_path)
-        parser = StepTraceParser(input_dir=source_path,
-                                 output_file_path=step_trace_intermediate_file_path,
-                                 job_id=self._job_id_env,
-                                 skip_first_step=skip_first_step_flag)
-        parser.update_tag_op_type_map(point_info)
-        parser.parse_and_save()
-        point_info = parser.record_point_info(point_info, point_info_file_path)
+
+        if self._device_target and self._device_target == 'GPU':
+            input_file_path = os.path.join(
+                self._output_path,
+                f'step_trace_profiling_{self._dev_id}.txt'
+            )
+            parser = GpuStepTraceParser(input_dir=input_file_path,
+                                        output_file_path=step_trace_intermediate_file_path,
+                                        is_training_mode=is_training_mode_flag)
+            parser.parse_and_save()
+            point_info = parser.record_point_info(input_file_path, point_info_file_path)
+        else:
+            # whether keep the first step
+            skip_first_step_flag = framework_parser.check_op_name(INIT_OP_NAME)
+            point_info = framework_parser.point_info
+            # recognize inference or traning mode
+            is_traning_mode_flag = framework_parser.check_op_name("Gradients")
+            # parser the step trace files and save the result to disk
+            source_path = validate_and_normalize_path(source_path)
+            parser = AscendStepTraceParser(input_dir=source_path,
+                                           output_file_path=step_trace_intermediate_file_path,
+                                           job_id=self._job_id_env,
+                                           skip_first_step=skip_first_step_flag,
+                                           is_training_mode=is_traning_mode_flag)
+            parser.update_tag_op_type_map(point_info)
+            parser.parse_and_save()
+            point_info = parser.record_point_info(point_info, point_info_file_path)
         # print parser result
         parser.show()
         logger.info("Finish saving the intermediate result: %s", step_trace_intermediate_file_path)
@@ -297,6 +353,7 @@ class Profiler:
             timeline_generator.init_timeline()
             timeline_generator.write_timeline(size_limit)
             timeline_generator.write_timeline_summary()
+            return timeline_generator
         except (ProfilerIOException, ProfilerFileNotFoundException, RuntimeError) as err:
             logger.warning('Fail to write timeline data: %s', err)
             raise RuntimeError('Fail to write timeline data.')
@@ -312,12 +369,12 @@ class Profiler:
             return self._profiling_job_id
 
         job_id = ""
-        cmd = "ls -t " + PROFILING_LOG_BASE_PATH + "|grep JOB|awk '{print $1}'"
+        cmd = "ls -t " + self._output_path + "|grep JOB|awk '{print $1}'"
         r = os.popen(cmd)
         profiling_job_dirs = r.readlines()
         r.close()
         for item in profiling_job_dirs:
-            path = os.path.join(PROFILING_LOG_BASE_PATH, item.strip())
+            path = os.path.join(self._output_path, item.strip())
             log_file = get_file_names(path, "host_start.log")
             if not log_file:
                 logger.error("Profiling: job path %s, host_start.log not exist.", path)

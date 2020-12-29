@@ -87,19 +87,13 @@ void HcclDynamicKernel::StaticShapeExecute() {
 
 void HcclDynamicKernel::Execute() {
   MS_LOG(INFO) << "Start Execute";
-  if (!is_dynamic_shape_) {
-    MS_LOG(INFO) << "Not Dynamic, call hcom api";
-    StaticShapeExecute();
-    return;
-  }
-  auto handle = HcclExecutorManager::GetInstance().handle();
+
   auto EnqueueHcomOperation =
-    (HcclResult(*)(ge::HcomOpertion, std::function<void(HcclResult status)>))dlsym(handle, "EnqueueHcomOpertion");
+    (HcclResult(*)(ge::HcomOpertion, std::function<void(HcclResult status)>))HcclExecutorManager::GetInstance()
+      .GetHcomOpertion();
   if (EnqueueHcomOperation == nullptr) {
     MS_LOG(ERROR) << "Failed to get EnqueueHcomOperation function";
-    if (dlclose(handle) != 0) {
-      MS_LOG(WARNING) << "Failed to close hcom handle";
-    }
+    HcclExecutorManager::GetInstance().CloseHandle();
     MS_LOG(EXCEPTION) << "Hccl dynamic kernel execute failed";
     return;
   }
@@ -151,7 +145,7 @@ bool HcclExecutorManager::Initialize() {
     return false;
   }
 
-  auto HcomExecutorInitialize = (HcclResult(*)())dlsym(handle_, "HcomExcutorInitialize");
+  auto HcomExecutorInitialize = (HcclResult(*)())dlsym(handle_, "HcomExecInitialize");
   if (HcomExecutorInitialize == nullptr) {
     MS_LOG(ERROR) << "dlsym HcomExecutorInitialize failed";
     return false;
@@ -173,7 +167,7 @@ bool HcclExecutorManager::Finalize() {
   if (!initialized_) {
     return true;
   }
-  auto HcomExecutorFinalize = (HcclResult(*)())dlsym(handle_, "HcomExcutorFinalize");
+  auto HcomExecutorFinalize = (HcclResult(*)())dlsym(handle_, "HcomExecFinalize");
   if (HcomExecutorFinalize == nullptr) {
     MS_LOG(ERROR) << "Fail to dlsym HcomExecutorFinalize";
     return false;
@@ -189,6 +183,13 @@ bool HcclExecutorManager::Finalize() {
   }
   MS_LOG(INFO) << "Hccl DynamicKernel Finalize success";
   return true;
+}
+
+void *HcclExecutorManager::GetHcomOpertion() { return dlsym(handle_, "HcomExecEnqueueOperation"); }
+void HcclExecutorManager::CloseHandle() {
+  if (dlclose(handle_) != 0) {
+    MS_LOG(WARNING) << "Failed to close hcom handle";
+  }
 }
 }  // namespace ascend
 }  // namespace device

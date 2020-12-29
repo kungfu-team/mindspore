@@ -26,11 +26,11 @@ namespace lite {
 class CaffeScaleParser : public CaffeNodeParser {
  public:
   CaffeScaleParser() : CaffeNodeParser("scale") {}
+  ~CaffeScaleParser() override = default;
 
-  STATUS Parse(const caffe::LayerParameter &proto, const caffe::LayerParameter &weight, schema::CNodeT *op,
-               std::vector<schema::TensorT *> *weightVec) override;
+  PrimitiveC *ParseLitePrimitive(const caffe::LayerParameter &proto, const caffe::LayerParameter &weight) override;
 
-  STATUS GetAxisIndex(const int32_t &axis, uint32_t *axis_index);
+  static STATUS GetAxisIndex(const int32_t &axis, uint32_t *axis_index);
 };
 }  // namespace lite
 }  // namespace mindspore

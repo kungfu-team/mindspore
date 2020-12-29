@@ -16,6 +16,10 @@
 
 #include "src/ops/crop.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -51,7 +55,10 @@ std::vector<int64_t> Crop::GetOffsets() const {
   return std::vector<int64_t>(fb_vector->begin(), fb_vector->end());
 }
 
+PrimitiveC *CropCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Crop>(primitive); }
+Registry CropRegistry(schema::PrimitiveType_Crop, CropCreator);
 #endif
+
 namespace {
 constexpr int kCropOutputNum = 1;
 constexpr int kCropInputNum = 2;
@@ -61,10 +68,10 @@ int Crop::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outputs
     MS_LOG(ERROR) << "Invalid output/input size! output size: " << outputs.size() << ",input size: " << inputs.size();
     return RET_PARAM_INVALID;
   }
-  outputs[0]->SetFormat(inputs[0]->GetFormat());
+  outputs[0]->set_format(inputs[0]->format());
   outputs[0]->set_data_type(inputs[0]->data_type());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   outputs[0]->set_shape(inputs[1]->shape());
   return RET_OK;

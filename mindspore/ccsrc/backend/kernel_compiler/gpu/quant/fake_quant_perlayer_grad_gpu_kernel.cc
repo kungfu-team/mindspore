@@ -38,6 +38,7 @@ const std::vector<size_t> &FakeQuantPerLayerGradGpuKernel::GetOutputSizeList() c
 const std::vector<size_t> &FakeQuantPerLayerGradGpuKernel::GetWorkspaceSizeList() const { return workspace_size_list_; }
 
 bool FakeQuantPerLayerGradGpuKernel::Init(const CNodePtr &kernel_node) {
+  kernel_node_ = kernel_node;
   size_t input_num = AnfAlgo::GetInputTensorNum(kernel_node);
   if (input_num != 4) {
     MS_LOG(EXCEPTION) << "Input number is " << input_num << ", but FakeQuantGrad GpuKernel OP needs 4 output.";
@@ -48,12 +49,12 @@ bool FakeQuantPerLayerGradGpuKernel::Init(const CNodePtr &kernel_node) {
     MS_LOG(EXCEPTION) << "Output number is " << output_num << ", but FakeQuantGrad GpuKernel OP needs 1 output.";
   }
 
-  num_bits_ = GetValue<int>(AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr("num_bits"));
+  num_bits_ = static_cast<int>(GetValue<int64_t>(AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr("num_bits")));
   if (num_bits_ <= 2 || num_bits_ >= 16) {
     MS_LOG(EXCEPTION) << "Attr \'num_bits\' " << num_bits_ << " is out of range, expected between 2 and 16.";
   }
 
-  quant_delay_ = GetValue<int>(AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr("quant_delay"));
+  quant_delay_ = static_cast<int>(GetValue<int64_t>(AnfAlgo::GetCNodePrimitive(kernel_node)->GetAttr("quant_delay")));
   if (quant_delay_ < 0) {
     MS_LOG(EXCEPTION) << "Attr \'quant_delay_\' " << quant_delay_ << " is less then 0, require larger than 0.";
   }
@@ -120,7 +121,8 @@ bool FakeQuantPerLayerGradGpuKernel::Launch(const std::vector<AddressPtr> &input
     CalFakeQuantPerLayerGrad(input, gradient, output, quant_num_, nudge_min, nudge_max,
                              reinterpret_cast<cudaStream_t>(stream_ptr));
   } else {
-    CHECK_CUDA_RET_WITH_ERROR(cudaMemcpyAsync(output, gradient, input_size_, cudaMemcpyDeviceToDevice,
+    CHECK_CUDA_RET_WITH_ERROR(kernel_node_,
+                              cudaMemcpyAsync(output, gradient, input_size_, cudaMemcpyDeviceToDevice,
                                               reinterpret_cast<cudaStream_t>(stream_ptr)),
                               "Copy gpu memory failed");
   }

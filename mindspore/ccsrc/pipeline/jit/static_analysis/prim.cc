@@ -88,10 +88,9 @@ EvalResultPtr DoSignatureEvaluator::Run(AnalysisEnginePtr engine, const ConfigPt
 
   AnfNodePtr new_cnode = nullptr;
   if (bound_node() != nullptr) {
-    TraceManager::DebugTrace(std::make_shared<TraceDoSignature>(bound_node()->debug_info()));
+    TraceGuard trace_guard(std::make_shared<TraceDoSignature>(bound_node()->debug_info()));
     new_cnode = prim::GenerateCNode(out_node->func_graph(), prim_->ToString(), do_signature->function(), args_spec_list,
                                     args_inputs);
-    TraceManager::EndTrace();
   } else {
     new_cnode = prim::GenerateCNode(out_node->func_graph(), prim_->ToString(), do_signature->function(), args_spec_list,
                                     args_inputs);
@@ -195,7 +194,7 @@ AnfNodePtr MixedPrecisionCastHelper(const AnfNodePtr &source_node, const Abstrac
     auto &items = x->elements();
     std::vector<AnfNodePtr> nodes;
     nodes.emplace_back(NewValueNode(prim::kPrimMakeTuple));
-    int idx = 0;
+    int64_t idx = 0;
     for (const auto &item : items) {
       AnfNodePtr tuple_node =
         func_graph->NewCNode({NewValueNode(prim::kPrimTupleGetItem), source_node, NewValueNode(idx)});
@@ -244,7 +243,6 @@ EvalResultPtr MixedPrecisionCastEvaluator::Run(AnalysisEnginePtr engine, const C
                       << " args size should equal to inputs size minus 1, but args size " << args_conf_list.size()
                       << ", inputs size " << out_node_inputs.size();
   }
-  AnfNodePtrList args_inputs{out_node_inputs.begin() + 1, out_node_inputs.end()};
   (void)std::transform(args_conf_list.begin(), args_conf_list.end(), std::back_inserter(args_spec_list),
                        [](const ConfigPtr &ref) -> AbstractBasePtr { return ref->GetEvaluatedValue()->abstract(); });
 
@@ -269,11 +267,109 @@ py::object BuildValue(const ValuePtr &value_ptr) {
     return ValuePtrToPyData(value_ptr);
   }
 }
+
+py::dict AbstractTupleToPython(const AbstractBasePtr &abs_base) {
+  auto arg_tuple = dyn_cast<AbstractTuple>(abs_base);
+  size_t len = arg_tuple->size();
+  py::tuple shape_tuple(len);
+  py::tuple dtype_tuple(len);
+  py::tuple value_tuple(len);
+  py::tuple min_value_tuple(len);
+  py::tuple max_value_tuple(len);
+  py::tuple min_shape_tuple(len);
+  py::tuple max_shape_tuple(len);
+  auto dic = py::dict();
+  bool dyn_shape = false;
+  bool is_build_value = true;
+
+  for (size_t i = 0; i < len; i++) {
+    auto arg = arg_tuple->elements()[i];
+    py::dict out = ConvertAbstractToPython(arg);
+    shape_tuple[i] = out[ATTR_SHAPE];
+    dtype_tuple[i] = out[ATTR_DTYPE];
+
+    // Elements in tuple is tensor shape value.
+    if (out.contains(py::str(ATTR_MIN_VALUE)) && out.contains(py::str(ATTR_MAX_VALUE))) {
+      value_tuple[i] = out[ATTR_VALUE];
+      min_value_tuple[i] = out[ATTR_MIN_VALUE];
+      max_value_tuple[i] = out[ATTR_MAX_VALUE];
+      is_build_value = false;
+    } else {
+      value_tuple[i] = BuildValue(arg->BuildValue());
+      min_value_tuple[i] = value_tuple[i];
+      max_value_tuple[i] = value_tuple[i];
+    }
+
+    // Elements in tuple is tensor, which shape is dynamic.
+    if (out.contains(py::str(ATTR_MIN_SHAPE)) && out.contains(py::str(ATTR_MAX_SHAPE))) {
+      min_shape_tuple[i] = out[ATTR_MIN_SHAPE];
+      max_shape_tuple[i] = out[ATTR_MAX_SHAPE];
+      dyn_shape = true;
+    } else {
+      min_shape_tuple[i] = out[ATTR_SHAPE];
+      max_shape_tuple[i] = out[ATTR_SHAPE];
+    }
+  }
+  dic[ATTR_SHAPE] = shape_tuple;
+  dic[ATTR_DTYPE] = dtype_tuple;
+  if (is_build_value) {
+    dic[ATTR_VALUE] = BuildValue(arg_tuple->BuildValue());
+  } else {
+    dic[ATTR_VALUE] = value_tuple;
+    dic[ATTR_MIN_VALUE] = min_value_tuple;
+    dic[ATTR_MAX_VALUE] = max_value_tuple;
+  }
+
+  if (dyn_shape) {
+    dic[ATTR_MIN_SHAPE] = min_shape_tuple;
+    dic[ATTR_MAX_SHAPE] = max_shape_tuple;
+  }
+
+  return dic;
+}
+
+py::dict AbstractListToPython(const AbstractBasePtr &abs_base) {
+  auto arg_list = dyn_cast<AbstractList>(abs_base);
+  size_t len = arg_list->size();
+  py::list shape_list(len);
+  py::list dtype_list(len);
+  py::list min_shape_list(len);
+  py::list max_shape_list(len);
+  auto dic = py::dict();
+  bool dyn_shape = false;
+
+  for (size_t i = 0; i < len; i++) {
+    py::dict out = ConvertAbstractToPython(arg_list->elements()[i]);
+    shape_list[i] = out[ATTR_SHAPE];
+    dtype_list[i] = out[ATTR_DTYPE];
+
+    // Elements in list is tensor, which shape is dynamic.
+    if (out.contains(py::str(ATTR_MIN_SHAPE)) && out.contains(py::str(ATTR_MAX_SHAPE))) {
+      min_shape_list[i] = out[ATTR_MIN_SHAPE];
+      max_shape_list[i] = out[ATTR_MAX_SHAPE];
+      dyn_shape = true;
+    } else {
+      min_shape_list[i] = out[ATTR_SHAPE];
+      max_shape_list[i] = out[ATTR_SHAPE];
+    }
+  }
+
+  if (dyn_shape) {
+    dic[ATTR_MIN_SHAPE] = min_shape_list;
+    dic[ATTR_MAX_SHAPE] = max_shape_list;
+  }
+
+  dic[ATTR_SHAPE] = shape_list;
+  dic[ATTR_DTYPE] = dtype_list;
+  dic[ATTR_VALUE] = BuildValue(arg_list->BuildValue());
+
+  return dic;
+}
 }  // end anonymous namespace
 
 py::dict ConvertAbstractToPython(const AbstractBasePtr &abs_base) {
   MS_EXCEPTION_IF_NULL(abs_base);
-  py::dict dic;
+  auto dic = py::dict();
   if (abs_base->isa<AbstractTensor>()) {
     auto arg_tensor = dyn_cast<AbstractTensor>(abs_base);
     dic[ATTR_SHAPE] = arg_tensor->shape()->shape();
@@ -285,6 +381,14 @@ py::dict ConvertAbstractToPython(const AbstractBasePtr &abs_base) {
         dic[ATTR_MAX_SHAPE] = max_shape;
       }
     }
+
+    auto min_value = arg_tensor->get_min_value();
+    auto max_value = arg_tensor->get_max_value();
+    if (min_value != nullptr && max_value != nullptr) {
+      dic[ATTR_MIN_VALUE] = BuildValue(min_value);
+      dic[ATTR_MAX_VALUE] = BuildValue(max_value);
+    }
+
     dic[ATTR_DTYPE] = arg_tensor->BuildType();
     dic[ATTR_VALUE] = BuildValue(arg_tensor->BuildValue());
   } else if (abs_base->isa<AbstractRowTensor>()) {
@@ -313,33 +417,9 @@ py::dict ConvertAbstractToPython(const AbstractBasePtr &abs_base) {
     dic[ATTR_DTYPE] = py::ellipsis();
     dic[ATTR_VALUE] = py::ellipsis();
   } else if (abs_base->isa<AbstractTuple>()) {
-    auto arg_tuple = dyn_cast<AbstractTuple>(abs_base);
-    size_t len = arg_tuple->size();
-    py::tuple shape_tuple(len);
-    py::tuple dtype_tuple(len);
-
-    for (size_t i = 0; i < len; i++) {
-      py::dict out = ConvertAbstractToPython(arg_tuple->elements()[i]);
-      shape_tuple[i] = out[ATTR_SHAPE];
-      dtype_tuple[i] = out[ATTR_DTYPE];
-    }
-    dic[ATTR_SHAPE] = shape_tuple;
-    dic[ATTR_DTYPE] = dtype_tuple;
-    dic[ATTR_VALUE] = BuildValue(arg_tuple->BuildValue());
+    return AbstractTupleToPython(abs_base);
   } else if (abs_base->isa<AbstractList>()) {
-    auto arg_list = dyn_cast<AbstractList>(abs_base);
-    size_t len = arg_list->size();
-    py::list shape_list(len);
-    py::list dtype_list(len);
-
-    for (size_t i = 0; i < len; i++) {
-      py::dict out = ConvertAbstractToPython(arg_list->elements()[i]);
-      shape_list[i] = out[ATTR_SHAPE];
-      dtype_list[i] = out[ATTR_DTYPE];
-    }
-    dic[ATTR_SHAPE] = shape_list;
-    dic[ATTR_DTYPE] = dtype_list;
-    dic[ATTR_VALUE] = BuildValue(arg_list->BuildValue());
+    return AbstractListToPython(abs_base);
   } else if (abs_base->isa<AbstractNone>()) {
     dic[ATTR_SHAPE] = py::none();
     dic[ATTR_DTYPE] = py::none();
@@ -396,12 +476,7 @@ AbstractBasePtr PyInferRes2Abstract(const PrimitivePyPtr &prim_py, const py::dic
   auto out_dtype = output[ATTR_DTYPE];
   if (output[ATTR_VALUE].is_none()) {
     auto out_shape = output[ATTR_SHAPE];
-    py::object min_shape =
-      output.contains(py::str(ATTR_MIN_SHAPE)) ? (py::object)output[ATTR_MIN_SHAPE] : (py::object)py::none();
-    py::object max_shape =
-      output.contains(py::str(ATTR_MAX_SHAPE)) ? (py::object)output[ATTR_MAX_SHAPE] : (py::object)py::none();
-
-    return PyListDtype2AbstractTensor(out_shape, out_dtype, min_shape, max_shape);
+    return PyListDtype2AbstractTensor(out_shape, out_dtype, output);
   }
   // Convert pyobject to Value, then to AbstractValue
   ValuePtr converted_ret = nullptr;
@@ -416,15 +491,16 @@ AbstractBasePtr PyInferRes2Abstract(const PrimitivePyPtr &prim_py, const py::dic
     // Replace to tensor constant node in specialize
     auto res_tensor = res_spec->cast<AbstractTensorPtr>();
     res_tensor->set_value(converted_ret);
+    SetValueRange(res_tensor, output);
   }
   if (prim_py->IsCustomPrim()) {
     // Raise error if output_num is not match the infer result.
-    int output_num = GetValue<int>(prim_py->GetAttr("output_num"));
+    int64_t output_num = GetValue<int64_t>(prim_py->GetAttr("output_num"));
     if (res_spec->isa<AbstractTensor>() && output_num != 1) {
       MS_LOG(EXCEPTION) << "Custom primitive " << prim_py->ToString() << " output_num " << output_num
                         << " not matches the infer result.";
     } else if (res_spec->isa<AbstractTuple>() &&
-               (res_spec->cast<AbstractTuplePtr>()->size() != IntToSize(output_num))) {
+               (res_spec->cast<AbstractTuplePtr>()->size() != LongToSize(output_num))) {
       MS_LOG(EXCEPTION) << "Custom primitive " << prim_py->ToString() << " output_num " << output_num
                         << " not matches the infer result.";
     }
@@ -607,10 +683,10 @@ EvaluatorPtr InitUniformPrimEvaluator(const PrimitivePtr &primitive, PrimitiveIm
   return uniform_primitive_evaluator;
 }
 
-const int kResolveCaseUserDefineClass = 1;
-const int kResolveCaseBuiltInType = 2;
-const int kResolveCaseFunction = 3;
-int GetResolveCase(const TypePtr &data_type) {
+const int64_t kResolveCaseUserDefineClass = 1;
+const int64_t kResolveCaseBuiltInType = 2;
+const int64_t kResolveCaseFunction = 3;
+int64_t GetResolveCase(const TypePtr &data_type) {
   MS_EXCEPTION_IF_NULL(data_type);
   if (data_type->type_id() == kObjectTypeClass) {
     return kResolveCaseUserDefineClass;
@@ -814,7 +890,7 @@ EvalResultPtr StaticGetter(const AnalysisEnginePtr &engine, const AbstractBasePt
     MS_LOG(EXCEPTION) << "The value of the attribute could not be inferred: " << item_value->ToString();
   }
 
-  int case_v = GetResolveCase(data_type);
+  int64_t case_v = GetResolveCase(data_type);
   if (case_v == kResolveCaseUserDefineClass) {
     return GetEvaluatedValueForClassAttrOrMethod(engine, args_spec_list, item_value, data_conf, out_conf);
   } else if (case_v == kResolveCaseBuiltInType) {
@@ -937,9 +1013,8 @@ class GetAttrEvaluator : public TransitionPrimEvaluator {
     }
     EvalResultPtr ret = nullptr;
     if (bound_node() != nullptr) {
-      TraceManager::DebugTrace(std::make_shared<TraceResolve>(bound_node()->debug_info()));
+      TraceGuard trace_guard(std::make_shared<TraceResolve>(bound_node()->debug_info()));
       ret = StaticGetter(engine, args_spec_list, in_conf0, out_conf);
-      TraceManager::EndTrace();
     } else {
       ret = StaticGetter(engine, args_spec_list, in_conf0, out_conf);
     }
@@ -963,9 +1038,8 @@ class ResolveEvaluator : public TransitionPrimEvaluator {
     }
     EvalResultPtr ret = nullptr;
     if (bound_node() != nullptr) {
-      TraceManager::DebugTrace(std::make_shared<TraceResolve>(bound_node()->debug_info()));
+      TraceGuard trace_guard(std::make_shared<TraceResolve>(bound_node()->debug_info()));
       ret = StaticGetter(engine, args_spec_list, in_conf0, out_conf);
-      TraceManager::EndTrace();
     } else {
       ret = StaticGetter(engine, args_spec_list, in_conf0, out_conf);
     }

@@ -58,7 +58,7 @@ Status CacheTransformPass::CachePass::PreRunOnNode(std::shared_ptr<CacheOp> node
   *modified = false;
   MS_LOG(INFO) << "Cache transform pass: CacheOp found, identified descendant tree.";
   if (is_caching_) {
-    RETURN_STATUS_UNEXPECTED("Nested cache operations is not supported!");
+    return Status(StatusCode::kNotImplementedYet, __LINE__, __FILE__, "Nested cache operations is not supported!");
   }
   is_caching_ = true;
   return Status::OK();
@@ -85,7 +85,7 @@ Status CacheTransformPass::CachePass::RunOnNode(std::shared_ptr<CacheOp> node, b
       // We're a cache op but no sampler was saved from leaf, so create a default sampler
       const int64_t num_samples = 0;
       const int64_t start_index = 0;
-      sampler_ = std::make_shared<SequentialSampler>(num_samples, start_index);
+      sampler_ = std::make_shared<SequentialSamplerRT>(num_samples, start_index);
       node->SetSampler(std::move(sampler_));
       MS_LOG(INFO) << "Cache transform pass: Creating default sequential sampler for cache op.";
     }
@@ -102,7 +102,8 @@ Status CacheTransformPass::CachePass::RunOnNode(std::shared_ptr<CacheOp> node, b
 Status CacheTransformPass::CachePass::MappableCacheLeafSetup(std::shared_ptr<DatasetOp> leaf_op) {
   // If a leaf has already been assigned, then we have more than one leaf inside this cache descendant tree.
   if (is_caching_ && leaf_op_) {
-    RETURN_STATUS_UNEXPECTED("There is currently no support for multiple leaf nodes under cache.");
+    return Status(StatusCode::kNotImplementedYet, __LINE__, __FILE__,
+                  "There is currently no support for multiple leaf nodes under cache.");
   }
 
   // If we are a leaf in the caching path, then save this leaf.
@@ -117,10 +118,11 @@ Status CacheTransformPass::CachePass::MappableCacheLeafSetup(std::shared_ptr<Dat
 Status CacheTransformPass::CachePass::NonMappableCacheLeafSetup(std::shared_ptr<DatasetOp> leaf_op) {
   // If a leaf has already been assigned, then we have more than one leaf inside this cache descendant tree.
   if (is_caching_ && leaf_op_) {
-    RETURN_STATUS_UNEXPECTED("There is currently no support for multiple leaf nodes under cache.");
+    return Status(StatusCode::kNotImplementedYet, __LINE__, __FILE__,
+                  "There is currently no support for multiple leaf nodes under cache.");
   }
 
-  // Sampler for non mapable dataset only works if there is a downstream cache. Remove it from the leaf
+  // Sampler for non mappable dataset only works if there is a downstream cache. Remove it from the leaf
   // as save it for use by cache op in ascendant tree.
   if (is_caching_) {
     RETURN_IF_NOT_OK(leaf_op->FetchRemoveSampler(&sampler_));
@@ -128,7 +130,7 @@ Status CacheTransformPass::CachePass::NonMappableCacheLeafSetup(std::shared_ptr<
   } else {
     // If we are a non-mappable leaf and are not in a cache tree, then this sampler is not used so we can
     // remove it here.  The leaf itself will provide it's own methods of fetching the data (not sampler-based)
-    std::shared_ptr<Sampler> sampler_from_leaf;
+    std::shared_ptr<SamplerRT> sampler_from_leaf;
     RETURN_IF_NOT_OK(leaf_op->FetchRemoveSampler(&sampler_from_leaf));
   }
   return Status::OK();
@@ -188,10 +190,7 @@ Status CacheTransformPass::CachePass::RunOnNode(std::shared_ptr<ImageFolderOp> n
 
 // Perform leaf node cache transform identification
 Status CacheTransformPass::CachePass::RunOnNode(std::shared_ptr<AlbumOp> node, bool *modified) {
-  if (is_caching_) {
-    RETURN_STATUS_UNEXPECTED("There is currently no support for AlbumOp under cache.");
-  }
-  return Status::OK();
+  return MappableCacheLeafSetup(std::static_pointer_cast<DatasetOp>(node));
 }
 
 // Perform leaf node cache transform identification
@@ -218,7 +217,8 @@ Status CacheTransformPass::CachePass::RunOnNode(std::shared_ptr<CelebAOp> node, 
 // Perform leaf node cache transform identification
 Status CacheTransformPass::CachePass::RunOnNode(std::shared_ptr<MindRecordOp> node, bool *modified) {
   if (is_caching_) {
-    RETURN_STATUS_UNEXPECTED("There is currently no support for MindRecordOp under cache.");
+    return Status(StatusCode::kNotImplementedYet, __LINE__, __FILE__,
+                  "There is currently no support for MindRecordOp under cache.");
   }
   return Status::OK();
 }
@@ -228,7 +228,8 @@ Status CacheTransformPass::CachePass::RunOnNode(std::shared_ptr<MindRecordOp> no
 // Perform leaf node cache transform identification
 Status CacheTransformPass::CachePass::RunOnNode(std::shared_ptr<GeneratorOp> node, bool *modified) {
   if (is_caching_) {
-    RETURN_STATUS_UNEXPECTED("There is currently no support for GeneratorOp under cache.");
+    return Status(StatusCode::kNotImplementedYet, __LINE__, __FILE__,
+                  "There is currently no support for GeneratorOp under cache.");
   }
   return Status::OK();
 }
@@ -264,7 +265,8 @@ Status CacheTransformPass::RunOnTree(ExecutionTree *tree, bool *modified) {
   // Then, execute the transform for each pair
   for (auto cache_pair : cache_pass.cache_pairs()) {
     MS_LOG(DEBUG) << "Cache transform pass: Executing a cache op mappable transform.";
-    ExecuteCacheTransform(tree, cache_pair.first, cache_pair.second, cache_pair.second->cache_client());
+    RETURN_IF_NOT_OK(
+      ExecuteCacheTransform(tree, cache_pair.first, cache_pair.second, cache_pair.second->cache_client()));
   }
   MS_LOG(INFO) << "Pre pass: Cache transform pass complete.";
   return Status::OK();
@@ -281,7 +283,7 @@ Status CacheTransformPass::ExecuteCacheTransform(ExecutionTree *tree, std::share
   cache_op->Parent(&cache_parent, 0);  // fetch the cache op's parent
 
   // Extract the sampler from the leaf.  We will overwrite this sampler with the lookup op later.
-  std::shared_ptr<Sampler> leaf_sampler = leaf_op->sampler();
+  std::shared_ptr<SamplerRT> leaf_sampler = leaf_op->sampler();
 
   // Construct the merge op with defaults
   std::shared_ptr<CacheMergeOp> merge_op;

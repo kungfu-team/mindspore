@@ -24,59 +24,27 @@
 
 using mindspore::kernel::KERNEL_ARCH::kGPU;
 using mindspore::lite::KernelRegistrar;
+using mindspore::lite::RET_ERROR;
+using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_BatchNorm;
 
 namespace mindspore::kernel {
 
-int BatchNormOpenCLKernel::GetImageSize(size_t idx, std::vector<size_t> *img_size) {
-  size_t CO4 = UP_DIV(out_tensors_[0]->Channel(), C4NUM);
-  size_t im_dst_x, im_dst_y;
-  if (in_tensors_[0]->GetFormat() == schema::Format::Format_NHWC4) {
-    im_dst_x = out_tensors_[0]->Width() * CO4;
-    im_dst_y = out_tensors_[0]->Height();
-  } else {
-    im_dst_y = out_tensors_[0]->Batch() * out_tensors_[0]->Height() * CO4;
-    im_dst_x = out_tensors_[0]->Width();
-  }
-  size_t img_dtype = CL_FLOAT;
-  auto enable_fp16_ = ocl_runtime_->GetFp16Enable();
-  if (enable_fp16_) {
-    img_dtype = CL_HALF_FLOAT;
-  }
-  img_size->clear();
-  std::vector<size_t> vec{im_dst_x, im_dst_y, img_dtype};
-  *img_size = vec;
-  return RET_OK;
-}
-
-int BatchNormOpenCLKernel::Init() {
-  auto in_format = op_format_;
-  if (in_format != schema::Format_NHWC4 && in_format != schema::Format_NC4HW4) {
-    MS_LOG(ERROR) << "input format(" << in_format << ") "
-                  << "format not support!";
+int BatchNormOpenCLKernel::CheckSpecs() {
+  if (in_tensors_.size() != 5 || out_tensors_.size() != 1) {
+    MS_LOG(ERROR) << "in size: " << in_tensors_.size() << ", out size: " << out_tensors_.size();
     return RET_ERROR;
   }
-  in_ori_format_ = in_tensors_[0]->GetFormat();
-  in_tensors_[0]->SetFormat(op_format_);
-  out_ori_format_ = out_tensors_[0]->GetFormat();
-  out_tensors_[0]->SetFormat(op_format_);
-  std::string kernel_name = "Batch_normalization";
-  if (in_format == schema::Format_NC4HW4) {
-    kernel_name += "_NC4HW4";
-  } else if (in_format == schema::Format_NHWC4) {
-    kernel_name += "_NHWC4";
+  if (in_tensors_.at(0)->shape().size() == 4) {
+    MS_LOG(ERROR) << "The dim of in_tensors->shape must be 4 but your dim is : " << in_tensors_.at(0)->shape().size();
+    return RET_ERROR;
   }
-
-  std::set<std::string> build_options;
-  std::string source = batchnorm_source;
-  std::string program_name = "Batch_normalization";
-  ocl_runtime_->LoadSource(program_name, source);
-  ocl_runtime_->BuildKernel(kernel_, program_name, kernel_name, build_options);
-
+  if (in_tensors_.at(0)->shape()[0] > 1) {
+    MS_LOG(ERROR) << "  Unsupported batch_size >1 ";
+    return RET_ERROR;
+  }
   return RET_OK;
 }
-
-int BatchNormOpenCLKernel::ReSize() { return RET_OK; }
 
 void BatchNormGetWorkGroup(const std::vector<size_t> &global, std::vector<size_t> *local, int max_size) {
   const int max_divider = 8;
@@ -92,53 +60,141 @@ void BatchNormGetWorkGroup(const std::vector<size_t> &global, std::vector<size_t
   local->push_back(z);
 }
 
-int BatchNormOpenCLKernel::Run() {
-  MS_LOG(DEBUG) << this->name() << " Running! ";
+void BatchNormOpenCLKernel::SetConstArgs() {
+  int arg_cn = 6;
   auto param = reinterpret_cast<BatchNormParameter *>(this->op_parameter_);
-  auto input0_shape = in_tensors_[0]->shape();
-  auto output_shape = out_tensors_[0]->shape();
-  cl_int4 input_shape_ = {input0_shape[0], input0_shape[1], input0_shape[2], UP_DIV(input0_shape[3], C4NUM)};
-
-  uint32_t OH = output_shape[1];
-  uint32_t OW = output_shape[2];
-  uint32_t OC = UP_DIV(output_shape[3], C4NUM);
-
-  const std::vector<size_t> &max_global = ocl_runtime_->GetWorkItemSize();
-  std::vector<size_t> local = {1, 1, 1};  // init local
-  std::vector<size_t> global = {OH, OW, OC};
-  BatchNormGetWorkGroup(global, &local, max_global[0]);
-  int arg_cn = 0;
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, in_tensors_[0]->data_c());   // input tensor
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, in_tensors_[1]->data_c());   // scale
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, in_tensors_[2]->data_c());   // offest
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, in_tensors_[3]->data_c());   // mean
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, in_tensors_[4]->data_c());   // variance
-  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, out_tensors_[0]->data_c());  // out tensor
+  auto input0_shape = in_tensors_.at(0)->shape();
+  cl_int4 input_shape_ = {input0_shape.at(0), input0_shape.at(1), input0_shape.at(2),
+                          UP_DIV(input0_shape.at(3), C4NUM)};
   ocl_runtime_->SetKernelArg(kernel_, arg_cn++, input_shape_);
   ocl_runtime_->SetKernelArg(kernel_, arg_cn++, param->epsilon_);
-  ocl_runtime_->RunKernel(kernel_, global, local, nullptr);
+  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, input0_shape.at(3));
+}
+
+void BatchNormOpenCLKernel::SetGlobalLocal() {
+  auto output_shape = out_tensors_.at(0)->shape();
+  uint32_t OH = output_shape.at(1);
+  uint32_t OW = output_shape.at(2);
+  uint32_t OC = UP_DIV(output_shape.at(3), C4NUM);
+
+  const std::vector<size_t> &max_global = ocl_runtime_->GetWorkItemSize();
+  local_size_ = {1, 1, 1};  // init local
+  global_size_ = {OH, OW, OC};
+  BatchNormGetWorkGroup(global_size_, &local_size_, max_global[0]);
+  OpenCLKernel::AlignGlobalLocal(global_size_, local_size_);
+}
+
+int BatchNormOpenCLKernel::Initweight() {
+  auto allocator = ocl_runtime_->GetAllocator();
+  GpuTensorInfo img_info(in_tensors_.at(1));
+  auto weight_tensor = in_tensors_.at(1);
+  size_t weight_size = img_info.OriginSize;
+  // allocated memory for weight and init value
+  scale_ = allocator->Malloc(weight_size);
+  offset_ = allocator->Malloc(weight_size);
+  mean_ = allocator->Malloc(weight_size);
+  variance_ = allocator->Malloc(weight_size);
+
+  allocator->MapBuffer(scale_, CL_MAP_WRITE, nullptr, true);
+  allocator->MapBuffer(offset_, CL_MAP_WRITE, nullptr, true);
+  allocator->MapBuffer(mean_, CL_MAP_WRITE, nullptr, true);
+  allocator->MapBuffer(variance_, CL_MAP_WRITE, nullptr, true);
+
+  memset(scale_, 1, weight_size);
+  memset(offset_, 0x00, weight_size);
+  memset(mean_, 0x00, weight_size);
+  memset(variance_, 0x00, weight_size);
+
+  if (weight_tensor->data_type() == kNumberTypeFloat16) {
+    if (use_fp16_enable_) {
+      memcpy(scale_, in_tensors_.at(1)->data_c(), weight_size);
+      memcpy(offset_, in_tensors_.at(2)->data_c(), weight_size);
+      memcpy(mean_, in_tensors_.at(3)->data_c(), weight_size);
+      memcpy(variance_, in_tensors_.at(4)->data_c(), weight_size);
+
+    } else {
+      auto scale_fp32 = reinterpret_cast<float *>(scale_);
+      auto offset_fp32 = reinterpret_cast<float *>(offset_);
+      auto mean_fp32 = reinterpret_cast<float *>(mean_);
+      auto variance_fp32 = reinterpret_cast<float *>(variance_);
+
+      auto origin_scale_fp16 = reinterpret_cast<float16_t *>(in_tensors_.at(1)->data_c());
+      auto origin_offset_fp16 = reinterpret_cast<float16_t *>(in_tensors_.at(2)->data_c());
+      auto origin_mean_fp16 = reinterpret_cast<float16_t *>(in_tensors_.at(3)->data_c());
+      auto origin_variance_fp16 = reinterpret_cast<float16_t *>(in_tensors_.at(4)->data_c());
+
+      for (int i = 0; i < img_info.ElementsNum; ++i) {
+        scale_fp32[i] = static_cast<float>(origin_scale_fp16[i]);
+        offset_fp32[i] = static_cast<float>(origin_offset_fp16[i]);
+        mean_fp32[i] = static_cast<float>(origin_mean_fp16[i]);
+        variance_fp32[i] = static_cast<float>(origin_variance_fp16[i]);
+      }
+    }
+  } else {
+    if (use_fp16_enable_) {
+      auto scale_fp16 = reinterpret_cast<float16_t *>(scale_);
+      auto offset_fp16 = reinterpret_cast<float16_t *>(offset_);
+      auto mean_fp16 = reinterpret_cast<float16_t *>(mean_);
+      auto variance_fp16 = reinterpret_cast<float16_t *>(variance_);
+
+      auto origin_scale_fp32 = reinterpret_cast<float *>(in_tensors_.at(1)->data_c());
+      auto origin_offset_fp32 = reinterpret_cast<float *>(in_tensors_.at(2)->data_c());
+      auto origin_mean_fp32 = reinterpret_cast<float *>(in_tensors_.at(3)->data_c());
+      auto origin_variance_fp32 = reinterpret_cast<float *>(in_tensors_.at(4)->data_c());
+
+      for (int i = 0; i < img_info.ElementsNum; ++i) {
+        scale_fp16[i] = static_cast<float16_t>(origin_scale_fp32[i]);
+        offset_fp16[i] = static_cast<float16_t>(origin_offset_fp32[i]);
+        mean_fp16[i] = static_cast<float16_t>(origin_mean_fp32[i]);
+        variance_fp16[i] = static_cast<float16_t>(origin_variance_fp32[i]);
+      }
+    } else {
+      memcpy(scale_, in_tensors_.at(1)->data_c(), weight_size);
+      memcpy(offset_, in_tensors_.at(2)->data_c(), weight_size);
+      memcpy(mean_, in_tensors_.at(3)->data_c(), weight_size);
+      memcpy(variance_, in_tensors_.at(4)->data_c(), weight_size);
+    }
+  }
+  allocator->UnmapBuffer(scale_);
+  allocator->UnmapBuffer(offset_);
+  allocator->UnmapBuffer(mean_);
+  allocator->UnmapBuffer(variance_);
+  return RET_OK;
+}
+
+int BatchNormOpenCLKernel::Prepare() {
+  use_fp16_enable_ = ocl_runtime_->GetFp16Enable();
+  std::string kernel_name = "Batch_normalization_NHWC4";
+  std::set<std::string> build_options;
+  std::string source = batchnorm_source;
+  std::string program_name = "Batch_normalization";
+  ocl_runtime_->LoadSource(program_name, source);
+  ocl_runtime_->BuildKernel(kernel_, program_name, kernel_name, build_options);
+  MS_LOG(DEBUG) << kernel_name << " Init Done!";
+  int ret = Initweight();
+  if (ret) {
+    MS_LOG(ERROR) << "Initweight failed ";
+    return RET_ERROR;
+  }
+  SetConstArgs();
+  SetGlobalLocal();
 
   return RET_OK;
 }
 
-kernel::LiteKernel *OpenCLBatchnormKernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                 const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                 const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                 const mindspore::lite::PrimitiveC *primitive) {
-  auto *kernel = new (std::nothrow) BatchNormOpenCLKernel(opParameter, inputs, outputs);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << " new BatchnormOpenCLKernel failed ";
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << " Init kernel failed, name: Batchnorm ";
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
+int BatchNormOpenCLKernel::Run() {
+  MS_LOG(DEBUG) << this->name() << " Running! ";
+  int arg_cn = 0;
+  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, in_tensors_.at(0)->data_c());            // input tensor
+  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, scale_, lite::opencl::MemType::BUF);     // scale
+  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, offset_, lite::opencl::MemType::BUF);    // offest
+  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, mean_, lite::opencl::MemType::BUF);      // mean
+  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, variance_, lite::opencl::MemType::BUF);  // variance
+  ocl_runtime_->SetKernelArg(kernel_, arg_cn++, out_tensors_.at(0)->data_c());           // out tensor
+  ocl_runtime_->RunKernel(kernel_, global_range_, local_range_, nullptr, &event_);
+  return RET_OK;
 }
 
-REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_BatchNorm, OpenCLBatchnormKernelCreator);
-REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_BatchNorm, OpenCLBatchnormKernelCreator);
+REG_KERNEL(kGPU, kNumberTypeFloat32, PrimitiveType_BatchNorm, OpenCLKernelCreator<BatchNormOpenCLKernel>)
+REG_KERNEL(kGPU, kNumberTypeFloat16, PrimitiveType_BatchNorm, OpenCLKernelCreator<BatchNormOpenCLKernel>)
 }  // namespace mindspore::kernel

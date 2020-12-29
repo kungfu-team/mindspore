@@ -16,7 +16,7 @@
 #include <iostream>
 #include "src/common/log_adapter.h"
 #include "common/common_test.h"
-#include "mindspore/lite/nnacl/fp32/activation.h"
+#include "mindspore/lite/nnacl/fp32/activation_fp32.h"
 #include "mindspore/lite/src/kernel_registry.h"
 #include "mindspore/lite/src/lite_kernel.h"
 
@@ -73,6 +73,17 @@ TEST_F(TestActivationFp32, SigmoidFp32) {
   MS_LOG(INFO) << "TestSigmoidFp32 passed";
 }
 
+TEST_F(TestActivationFp32, SwishFp32) {
+  float input[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+  float output[8] = {0};
+  Swish(input, 8, output);
+
+  float expect[8] = {0, 0.731059, 1.761594, 2.857722, 3.928056, 4.966535, 5.985162, 6.993623};
+  for (int i = 0; i < 8; ++i) {
+    EXPECT_NEAR(output[i], expect[i], 0.00001);
+  }
+}
+
 TEST_F(TestActivationFp32, TanhFp32) {
   float input[7] = {-3, -2, -1, 0, 1, 2, 3};
   float output[7] = {0};
@@ -98,7 +109,7 @@ TEST_F(TestActivationFp32, HSwishFp32) {
 
   lite::Tensor input0_tensor;
   inputs_tensor.push_back(&input0_tensor);
-  input0_tensor.SetData(input.data());
+  input0_tensor.set_data(input.data());
   input0_tensor.set_shape(in_shape);
 
   std::vector<float> output(8);
@@ -106,7 +117,7 @@ TEST_F(TestActivationFp32, HSwishFp32) {
 
   lite::Tensor output0_tensor;
   outputs_tensor.push_back(&output0_tensor);
-  output0_tensor.SetData(output.data());
+  output0_tensor.set_data(output.data());
 
   kernel::KernelKey desc = {kernel::KERNEL_ARCH::kCPU, kNumberTypeFloat32, schema::PrimitiveType_Activation};
   auto creator = lite::KernelRegistry::GetInstance()->GetCreator(desc);
@@ -121,10 +132,10 @@ TEST_F(TestActivationFp32, HSwishFp32) {
   kernel->Run();
 
   std::vector<float> expect_output = {-0, -0.33333334, -0.33333334, 0, 0.6666667, 5, 6, 7};
-  CompareOutputData(output.data(), expect_output.data(), 8, 0.00001);
+  ASSERT_EQ(0, CompareOutputData(output.data(), expect_output.data(), 8, 0.00001));
 
-  input0_tensor.SetData(nullptr);
-  output0_tensor.SetData(nullptr);
+  input0_tensor.set_data(nullptr);
+  output0_tensor.set_data(nullptr);
 }
 
 TEST_F(TestActivationFp32, HardTanh1) {
@@ -142,7 +153,7 @@ TEST_F(TestActivationFp32, HardTanh1) {
 
   lite::Tensor input0_tensor;
   inputs_tensor.push_back(&input0_tensor);
-  input0_tensor.SetData(input.data());
+  input0_tensor.set_data(input.data());
   input0_tensor.set_shape(in_shape);
 
   std::vector<float> output(8);
@@ -150,7 +161,7 @@ TEST_F(TestActivationFp32, HardTanh1) {
 
   lite::Tensor output0_tensor;
   outputs_tensor.push_back(&output0_tensor);
-  output0_tensor.SetData(output.data());
+  output0_tensor.set_data(output.data());
 
   kernel::KernelKey desc = {kernel::KERNEL_ARCH::kCPU, kNumberTypeFloat32, schema::PrimitiveType_Activation};
   auto creator = lite::KernelRegistry::GetInstance()->GetCreator(desc);
@@ -165,10 +176,10 @@ TEST_F(TestActivationFp32, HardTanh1) {
   kernel->Run();
 
   std::vector<float> expect_output = {-1.0, -1.0, -0.5, 0.0, 0.5, 1.0, 1.0, 1.0};
-  CompareOutputData(output.data(), expect_output.data(), 8, 0.00001);
+  ASSERT_EQ(0, CompareOutputData(output.data(), expect_output.data(), 8, 0.00001));
 
-  input0_tensor.SetData(nullptr);
-  output0_tensor.SetData(nullptr);
+  input0_tensor.set_data(nullptr);
+  output0_tensor.set_data(nullptr);
 }
 
 TEST_F(TestActivationFp32, HardTanh2) {
@@ -186,7 +197,7 @@ TEST_F(TestActivationFp32, HardTanh2) {
 
   lite::Tensor input0_tensor;
   inputs_tensor.push_back(&input0_tensor);
-  input0_tensor.SetData(input.data());
+  input0_tensor.set_data(input.data());
   input0_tensor.set_shape(in_shape);
 
   std::vector<float> output(8);
@@ -194,7 +205,7 @@ TEST_F(TestActivationFp32, HardTanh2) {
 
   lite::Tensor output0_tensor;
   outputs_tensor.push_back(&output0_tensor);
-  output0_tensor.SetData(output.data());
+  output0_tensor.set_data(output.data());
 
   kernel::KernelKey desc = {kernel::KERNEL_ARCH::kCPU, kNumberTypeFloat32, schema::PrimitiveType_Activation};
   auto creator = lite::KernelRegistry::GetInstance()->GetCreator(desc);
@@ -209,10 +220,10 @@ TEST_F(TestActivationFp32, HardTanh2) {
   kernel->Run();
 
   std::vector<float> expect_output = {-2.0, -2.0, -1.0, 0.0, 1.0, 2.0, 2.0, 2.0};
-  CompareOutputData(output.data(), expect_output.data(), 8, 0.00001);
+  ASSERT_EQ(0, CompareOutputData(output.data(), expect_output.data(), 8, 0.00001));
 
-  input0_tensor.SetData(nullptr);
-  output0_tensor.SetData(nullptr);
+  input0_tensor.set_data(nullptr);
+  output0_tensor.set_data(nullptr);
 }
 
 }  // namespace mindspore

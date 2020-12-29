@@ -24,11 +24,11 @@ from .optimizer import Optimizer
 _momentum_opt = C.MultitypeFuncGraph("momentum_opt")
 
 
-@_momentum_opt.register("Function", "Tensor", "Tensor", "Tensor", "Tensor", "Tensor", "Bool")
-def _tensor_run_opt_ext(opt, momentum, learning_rate, gradient, weight, moment, ps_parameter):
+@_momentum_opt.register("Function", "Tensor", "Tensor", "Tensor", "Tensor", "Tensor", "Bool", "Bool")
+def _tensor_run_opt_ext(opt, momentum, learning_rate, gradient, weight, moment, ps_parameter, cache_enable):
     """Apply momentum optimizer to the weight parameter using Tensor."""
     success = True
-    if ps_parameter:
+    if ps_parameter and not cache_enable:
         op_shape = P.Shape()
         _ps_pull = P.Pull()
         _ps_push = P.Push("ApplyMomentum", [])
@@ -104,6 +104,9 @@ class Momentum(Optimizer):
     Raises:
         ValueError: If the momentum is less than 0.0.
 
+    Supported Platforms:
+        ``Ascend`` ``GPU`` ``CPU``
+
     Examples:
         >>> net = Net()
         >>> #1) All parameters use the same learning rate and weight decay
@@ -113,8 +116,8 @@ class Momentum(Optimizer):
         >>> conv_params = list(filter(lambda x: 'conv' in x.name, net.trainable_params()))
         >>> no_conv_params = list(filter(lambda x: 'conv' not in x.name, net.trainable_params()))
         >>> group_params = [{'params': conv_params, 'weight_decay': 0.01},
-        >>>                 {'params': no_conv_params, 'lr': 0.01},
-        >>>                 {'order_params': net.trainable_params()}]
+        ...                 {'params': no_conv_params, 'lr': 0.01},
+        ...                 {'order_params': net.trainable_params()}]
         >>> optim = nn.Momentum(group_params, learning_rate=0.1, momentum=0.9, weight_decay=0.0)
         >>> # The conv_params's parameters will use a learning rate of default value 0.1 and a weight decay of 0.01.
         >>> # The no_conv_params's parameters will use a learning rate of 0.01 and a weight decay of default value 0.0.
@@ -143,8 +146,8 @@ class Momentum(Optimizer):
         lr = self.get_lr()
         if self.is_group_lr:
             success = self.hyper_map(F.partial(_momentum_opt, self.opt, self.momentum), lr, gradients, params, moments,
-                                     self.ps_parameters)
+                                     self.ps_parameters, self.cache_enable)
         else:
             success = self.hyper_map(F.partial(_momentum_opt, self.opt, self.momentum, lr), gradients, params, moments,
-                                     self.ps_parameters)
+                                     self.ps_parameters, self.cache_enable)
         return success

@@ -20,10 +20,14 @@
 #include "nnacl/int8/split_int8.h"
 #include "include/errorcode.h"
 #include "src/runtime/runtime_api.h"
+#include "src/kernel_registry.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
+
+using mindspore::lite::KernelRegistrar;
+using mindspore::schema::PrimitiveType_Split;
 
 namespace mindspore::kernel {
 
@@ -32,15 +36,18 @@ int SplitInt8CPUKernel::Init() {
   if (ret != RET_OK) {
     return ret;
   }
+
+  output_ptr_.resize(param->num_split_);
+
   auto in_tensor = in_tensors_.at(kInputIndex);
 
-  auto in_quant_args = in_tensor->GetQuantParams();
+  auto in_quant_args = in_tensor->quant_params();
   param->quant_arg_.in_args_.scale_ = in_quant_args.front().scale;
   param->quant_arg_.in_args_.zp_ = in_quant_args.front().zeroPoint;
-  MS_ASSERT(param->num_split_ == outputs_.size());
+  MS_ASSERT(param->num_split_ == this->out_tensors_.size());
   for (int i = 0; i < param->num_split_; i++) {
     auto *out_tensor = out_tensors_.at(i);
-    auto out_quant_args = out_tensor->GetQuantParams();
+    auto out_quant_args = out_tensor->quant_params();
     param->quant_arg_.out_args_[i].scale_ = out_quant_args.front().scale;
     param->quant_arg_.out_args_[i].zp_ = out_quant_args.front().zeroPoint;
   }
@@ -62,6 +69,8 @@ int SplitInt8CPUKernel::Split(int task_id) {
     return RET_OK;
   }
   int thread_offset = task_id * thread_n_stride_;
+  MS_ASSERT(input_ptr_);
+  MS_ASSERT(param);
   auto ret = Int8DoSplit(input_ptr_, output_ptr_.data(), in_tensors_.front()->shape().data(), thread_offset,
                          num_unit_thread, param);
   if (ret != RET_OK) {
@@ -82,19 +91,14 @@ int SplitInt8Run(void *cdata, int task_id) {
 }
 
 int SplitInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare failed.";
-    return ret;
-  }
   auto in_tensor = in_tensors_.at(kInputIndex);
   input_ptr_ = reinterpret_cast<int8_t *>(in_tensor->MutableData());
-  MS_ASSERT(param->num_split_ == outputs_.size());
+  MS_ASSERT(param->num_split_ == this->out_tensors_.size());
   for (int i = 0; i < param->num_split_; i++) {
-    output_ptr_.push_back(reinterpret_cast<int8_t *>(out_tensors_.at(i)->MutableData()));
+    output_ptr_[i] = reinterpret_cast<int8_t *>(out_tensors_.at(i)->data_c());
   }
 
-  ret = ParallelLaunch(this->context_->thread_pool_, SplitInt8Run, this, thread_n_num_);
+  auto ret = ParallelLaunch(this->context_->thread_pool_, SplitInt8Run, this, thread_n_num_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "Scale error error_code[" << ret << "]";
     return RET_ERROR;
@@ -102,4 +106,6 @@ int SplitInt8CPUKernel::Run() {
 
   return RET_OK;
 }
+
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Split, LiteKernelCreator<SplitInt8CPUKernel>)
 }  // namespace mindspore::kernel

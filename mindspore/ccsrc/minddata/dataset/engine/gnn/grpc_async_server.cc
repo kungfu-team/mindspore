@@ -16,9 +16,8 @@
 #include "minddata/dataset/engine/gnn/grpc_async_server.h"
 
 #include <limits>
-
+#include "minddata/dataset/util/log_adapter.h"
 #include "minddata/dataset/util/task_manager.h"
-#include "utils/log_adapter.h"
 
 namespace mindspore {
 namespace dataset {

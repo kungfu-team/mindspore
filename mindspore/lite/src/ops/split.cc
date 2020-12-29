@@ -16,11 +16,15 @@
 
 #include "src/ops/split.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
 int Split::GetNumberSplit() const { return this->primitive_->value.AsSplit()->numberSplit; }
-std::vector<int> Split::GetSizeSplits() const { return this->primitive_->value.AsSplit()->sizeSplits; }
+std::vector<int> Split::GetSizeSplit() const { return this->primitive_->value.AsSplit()->sizeSplits; }
 int Split::GetSplitDim() const { return this->primitive_->value.AsSplit()->splitDim; }
 
 void Split::SetNumberSplit(int number_split) { this->primitive_->value.AsSplit()->numberSplit = number_split; }
@@ -48,8 +52,8 @@ int Split::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inpu
       MS_LOG(ERROR) << "new primitiveT value failed";
       return RET_ERROR;
     }
-    attr->splitDim = GetValue<int32_t>(prim.GetAttr("axis"));
-    attr->numberSplit = GetValue<int32_t>(prim.GetAttr("output_num"));
+    attr->splitDim = CastToInt(prim.GetAttr("axis")).front();
+    attr->numberSplit = CastToInt(prim.GetAttr("output_num")).front();
     this->primitive_->value.value = attr;
     if (this->primitive_->value.value == nullptr) {
       MS_LOG(ERROR) << "primitive value is nullptr";
@@ -63,7 +67,7 @@ int Split::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inpu
 #else
 
 int Split::GetNumberSplit() const { return this->primitive_->value_as_Split()->numberSplit(); }
-std::vector<int> Split::GetSizeSplits() const {
+std::vector<int> Split::GetSizeSplit() const {
   auto fb_vector = this->primitive_->value_as_Split()->sizeSplits();
   return std::vector<int>(fb_vector->begin(), fb_vector->end());
 }
@@ -88,6 +92,9 @@ int Split::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *SplitCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Split>(primitive); }
+Registry SplitRegistry(schema::PrimitiveType_Split, SplitCreator);
 #endif
 
 namespace {
@@ -97,52 +104,60 @@ int Split::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outpu
   MS_ASSERT(this->primitive_ != nullptr);
   auto input = inputs_.front();
   MS_ASSERT(input != nullptr);
-  MS_ASSERT(spilt_prim != nullptr);
-  if (inputs_.size() != kSplitInputNum) {
-    MS_LOG(ERROR) << "inputs number is not equal to " << kSplitInputNum;
+  if (inputs_.size() < kSplitInputNum) {
+    MS_LOG(ERROR) << "inputs number is less to " << kSplitInputNum;
     return RET_ERROR;
   }
-  auto output = outputs_.front();
-  if (output == nullptr) {
-    MS_LOG(ERROR) << "output null pointer dereferencing.";
+  if (outputs_.empty()) {
+    MS_LOG(ERROR) << "split has no output.";
     return RET_ERROR;
   }
-  int number_split = GetNumberSplit();
-  if (static_cast<int>(outputs_.size()) != number_split) {
-    MS_LOG(ERROR) << "outputs number is not equal to " << number_split;
-    return RET_ERROR;
+  for (auto &output : outputs_) {
+    output->set_data_type(input->data_type());
+    output->set_format(input->format());
   }
-  for (int i = 0; i < number_split; ++i) {
-    outputs_[i]->set_data_type(input->data_type());
-    outputs_[i]->SetFormat(input->GetFormat());
+  size_splits_ = GetSizeSplit();
+  num_split_ = GetNumberSplit() == 0 ? static_cast<int>(outputs_.size()) : GetNumberSplit();
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
-  if (!GetInferFlag()) {
-    return RET_OK;
-  }
-  size_t split_dim = GetSplitDim() == -1 ? input->shape().size() - 1 : GetSplitDim();
+  size_t split_dim = GetSplitDim() < 0 ? input->shape().size() + GetSplitDim() : GetSplitDim();
   std::vector<int> input_shape = input->shape();
-  std::vector<int> size_split;
-  for (size_t i = 0; i < GetSizeSplits().size(); ++i) {
-    size_split.push_back(GetSizeSplits()[i]);
+  if (split_dim > input_shape.size()) {
+    MS_LOG(ERROR) << "split dim is out of range, which is " << input_shape.size();
+    return RET_INPUT_PARAM_INVALID;
   }
-  for (int i = 0; i < number_split; ++i) {
+  if (static_cast<int>(outputs_.size()) != num_split_) {
+    MS_LOG(ERROR) << "outputs number is not equal to " << num_split_;
+    return RET_ERROR;
+  }
+  if (size_splits_.empty()) {
+    if (input_shape[split_dim] % num_split_ != 0) {
+      MS_LOG(ERROR) << "cannot split to equal size, which dim is " << input_shape[split_dim] << ", num split is "
+                    << num_split_;
+      return RET_INPUT_PARAM_INVALID;
+    }
+    for (int i = 0; i < num_split_; ++i) {
+      size_splits_.push_back(input_shape[split_dim] / num_split_);
+    }
+  }
+  for (int i = 0; i < num_split_; ++i) {
     std::vector<int> output_shape;
     output_shape.insert(output_shape.begin(), input_shape.begin(), input_shape.end());
-    int split_dim_i = input_shape[split_dim];
+    int split_dim_i = input_shape.at(split_dim);
     // support split size is -1 in the end.
-    if (size_split.empty()) {
-      split_dim_i = input_shape[split_dim] / number_split;
-    } else if (i == number_split - 1 && size_split[i] == -1) {
-      for (size_t j = 0; j < size_split.size() - 1; ++j) {
-        split_dim_i -= size_split[j];
+    if (i == num_split_ - 1 && size_splits_[i] == -1) {
+      for (size_t j = 0; j < size_splits_.size() - 1; ++j) {
+        split_dim_i -= size_splits_[j];
       }
+      size_splits_[i] = split_dim_i;
     } else {
-      split_dim_i = size_split[i];
+      split_dim_i = size_splits_[i];
     }
-    output_shape[split_dim] = split_dim_i;
-    outputs_[i]->set_shape(output_shape);
-    outputs_[i]->set_data_type(input->data_type());
-    outputs_[i]->SetFormat(input->GetFormat());
+    output_shape.at(split_dim) = split_dim_i;
+    outputs_.at(i)->set_shape(output_shape);
+    outputs_.at(i)->set_data_type(input->data_type());
+    outputs_.at(i)->set_format(input->format());
   }
   return RET_OK;
 }

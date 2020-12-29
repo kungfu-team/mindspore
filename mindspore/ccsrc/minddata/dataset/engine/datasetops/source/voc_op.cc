@@ -62,7 +62,7 @@ Status VOCOp::Builder::Build(std::shared_ptr<VOCOp> *ptr) {
   if (builder_sampler_ == nullptr) {
     const int64_t num_samples = 0;
     const int64_t start_index = 0;
-    builder_sampler_ = std::make_shared<SequentialSampler>(start_index, num_samples);
+    builder_sampler_ = std::make_shared<SequentialSamplerRT>(start_index, num_samples);
   }
   builder_schema_ = std::make_unique<DataSchema>();
   if (builder_task_type_ == TaskType::Segmentation) {
@@ -102,7 +102,8 @@ Status VOCOp::Builder::SanityCheck() {
 
 VOCOp::VOCOp(const TaskType &task_type, const std::string &task_mode, const std::string &folder_path,
              const std::map<std::string, int32_t> &class_index, int32_t num_workers, int32_t rows_per_buffer,
-             int32_t queue_size, bool decode, std::unique_ptr<DataSchema> data_schema, std::shared_ptr<Sampler> sampler)
+             int32_t queue_size, bool decode, std::unique_ptr<DataSchema> data_schema,
+             std::shared_ptr<SamplerRT> sampler)
     : ParallelOp(num_workers, queue_size, std::move(sampler)),
       decode_(decode),
       row_cnt_(0),
@@ -190,7 +191,8 @@ void VOCOp::Print(std::ostream &out, bool show_all) const {
     // Call the super class for displaying any common detailed info
     ParallelOp::Print(out, show_all);
     // Then show any custom derived-internal stuff
-    out << "\nNumber of rows: " << num_rows_ << "\nVOC Directory: " << folder_path_ << "\n\n";
+    out << "\nNumber of rows: " << num_rows_ << "\nVOC Directory: " << folder_path_
+        << "\nDecode: " << (decode_ ? "yes" : "no") << "\n\n";
   }
 }
 
@@ -445,16 +447,9 @@ Status VOCOp::ReadAnnotationToTensor(const std::string &path, TensorRow *row) {
   return Status::OK();
 }
 
-#ifdef ENABLE_PYTHON
 Status VOCOp::CountTotalRows(const std::string &dir, const std::string &task_type, const std::string &task_mode,
-                             const py::dict &dict, int64_t *count) {
+                             const std::map<std::string, int32_t> &input_class_indexing, int64_t *count) {
   if (task_type == "Detection") {
-    std::map<std::string, int32_t> input_class_indexing;
-    for (auto p : dict) {
-      (void)input_class_indexing.insert(std::pair<std::string, int32_t>(py::reinterpret_borrow<py::str>(p.first),
-                                                                        py::reinterpret_borrow<py::int_>(p.second)));
-    }
-
     std::shared_ptr<VOCOp> op;
     RETURN_IF_NOT_OK(
       Builder().SetDir(dir).SetTask(task_type).SetUsage(task_mode).SetClassIndex(input_class_indexing).Build(&op));
@@ -471,6 +466,7 @@ Status VOCOp::CountTotalRows(const std::string &dir, const std::string &task_typ
   return Status::OK();
 }
 
+#ifdef ENABLE_PYTHON
 Status VOCOp::GetClassIndexing(const std::string &dir, const std::string &task_type, const std::string &task_mode,
                                const py::dict &dict, std::map<std::string, int32_t> *output_class_indexing) {
   std::map<std::string, int32_t> input_class_indexing;
@@ -510,6 +506,29 @@ Status VOCOp::ComputeColMap() {
     }
   } else {
     MS_LOG(WARNING) << "Column name map is already set!";
+  }
+  return Status::OK();
+}
+
+Status VOCOp::GetClassIndexing(std::vector<std::pair<std::string, std::vector<int32_t>>> *output_class_indexing) {
+  if ((*output_class_indexing).empty()) {
+    if (task_type_ != TaskType::Detection) {
+      MS_LOG(ERROR) << "Class index only valid in \"Detection\" task.";
+      RETURN_STATUS_UNEXPECTED("GetClassIndexing: Get Class Index failed in VOCOp.");
+    }
+    std::shared_ptr<VOCOp> op;
+    RETURN_IF_NOT_OK(
+      Builder().SetDir(folder_path_).SetTask("Detection").SetUsage(usage_).SetClassIndex(class_index_).Build(&op));
+    RETURN_IF_NOT_OK(op->ParseImageIds());
+    RETURN_IF_NOT_OK(op->ParseAnnotationIds());
+    for (const auto label : op->label_index_) {
+      if (!class_index_.empty()) {
+        (*output_class_indexing)
+          .emplace_back(std::make_pair(label.first, std::vector<int32_t>(1, class_index_[label.first])));
+      } else {
+        (*output_class_indexing).emplace_back(std::make_pair(label.first, std::vector<int32_t>(1, label.second)));
+      }
+    }
   }
   return Status::OK();
 }

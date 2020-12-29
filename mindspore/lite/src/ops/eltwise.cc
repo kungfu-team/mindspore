@@ -16,6 +16,10 @@
 
 #include "src/ops/eltwise.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -39,6 +43,9 @@ int Eltwise::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers
 }
 int Eltwise::GetMode() const { return this->primitive_->value_as_Eltwise()->mode(); }
 
+PrimitiveC *EltwiseCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Eltwise>(primitive); }
+Registry EltwiseRegistry(schema::PrimitiveType_Eltwise, EltwiseCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

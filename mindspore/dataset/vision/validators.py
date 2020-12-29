@@ -20,7 +20,7 @@ import numpy as np
 from mindspore._c_dataengine import TensorOp
 
 from mindspore.dataset.core.validator_helpers import check_value, check_uint8, FLOAT_MAX_INTEGER, check_pos_float32, \
-    check_2tuple, check_range, check_positive, INT32_MAX, parse_user_args, type_check, type_check_list, \
+    check_float32, check_2tuple, check_range, check_positive, INT32_MAX, parse_user_args, type_check, type_check_list, \
     check_tensor_op, UINT8_MAX, check_value_normalize_std
 from .utils import Inter, Border, ImageBatchFormat
 
@@ -78,17 +78,19 @@ def check_mix_up_batch_c(method):
 
 
 def check_normalize_c_param(mean, std):
+    type_check(mean, (list, tuple), "mean")
+    type_check(std, (list, tuple), "std")
     if len(mean) != len(std):
-        raise ValueError("Length of mean and std must be equal")
+        raise ValueError("Length of mean and std must be equal.")
     for mean_value in mean:
-        check_pos_float32(mean_value)
+        check_value(mean_value, [0, 255], "mean_value")
     for std_value in std:
-        check_pos_float32(std_value)
+        check_value_normalize_std(std_value, [0, 255], "std_value")
 
 
 def check_normalize_py_param(mean, std):
     if len(mean) != len(std):
-        raise ValueError("Length of mean and std must be equal")
+        raise ValueError("Length of mean and std must be equal.")
     for mean_value in mean:
         check_value(mean_value, [0., 1.], "mean_value")
     for std_value in std:
@@ -221,15 +223,18 @@ def check_size_scale_ration_max_attempts_paras(size, scale, ratio, max_attempts)
     if scale is not None:
         type_check(scale, (tuple,), "scale")
         type_check_list(scale, (float, int), "scale")
-        check_range(scale, [0, FLOAT_MAX_INTEGER])
         if scale[0] > scale[1]:
             raise ValueError("scale should be in (min,max) format. Got (max,min).")
+        check_range(scale, [0, FLOAT_MAX_INTEGER])
+        check_positive(scale[1], "scale[1]")
     if ratio is not None:
         type_check(ratio, (tuple,), "ratio")
         type_check_list(ratio, (float, int), "ratio")
-        check_range(ratio, [0, FLOAT_MAX_INTEGER])
         if ratio[0] > ratio[1]:
             raise ValueError("ratio should be in (min,max) format. Got (max,min).")
+        check_range(ratio, [0, FLOAT_MAX_INTEGER])
+        check_positive(ratio[0], "ratio[0]")
+        check_positive(ratio[1], "ratio[1]")
     if max_attempts is not None:
         check_value(max_attempts, (1, FLOAT_MAX_INTEGER))
 
@@ -283,6 +288,40 @@ def check_normalize_py(method):
     def new_method(self, *args, **kwargs):
         [mean, std], _ = parse_user_args(method, *args, **kwargs)
         check_normalize_py_param(mean, std)
+
+        return method(self, *args, **kwargs)
+
+    return new_method
+
+
+def check_normalizepad_c(method):
+    """A wrapper that wraps a parameter checker around the original function(normalizepad operation written in C++)."""
+
+    @wraps(method)
+    def new_method(self, *args, **kwargs):
+        [mean, std, dtype], _ = parse_user_args(method, *args, **kwargs)
+        check_normalize_c_param(mean, std)
+        if not isinstance(dtype, str):
+            raise TypeError("dtype should be string.")
+        if dtype not in ["float32", "float16"]:
+            raise ValueError("dtype only support float32 or float16.")
+
+        return method(self, *args, **kwargs)
+
+    return new_method
+
+
+def check_normalizepad_py(method):
+    """A wrapper that wraps a parameter checker around the original function(normalizepad operation written in Python)."""
+
+    @wraps(method)
+    def new_method(self, *args, **kwargs):
+        [mean, std, dtype], _ = parse_user_args(method, *args, **kwargs)
+        check_normalize_py_param(mean, std)
+        if not isinstance(dtype, str):
+            raise TypeError("dtype should be string.")
+        if dtype not in ["float32", "float16"]:
+            raise ValueError("dtype only support float32 or float16.")
 
         return method(self, *args, **kwargs)
 
@@ -372,7 +411,7 @@ def check_num_channels(method):
         if num_output_channels is not None:
             if num_output_channels not in (1, 3):
                 raise ValueError("Number of channels of the output grayscale image"
-                                 "should be either 1 or 3. Got {0}".format(num_output_channels))
+                                 "should be either 1 or 3. Got {0}.".format(num_output_channels))
 
         return method(self, *args, **kwargs)
 
@@ -434,8 +473,15 @@ def check_random_erasing(method):
         [prob, scale, ratio, value, inplace, max_attempts], _ = parse_user_args(method, *args, **kwargs)
 
         check_value(prob, [0., 1.], "prob")
+        if scale[0] > scale[1]:
+            raise ValueError("scale should be in (min,max) format. Got (max,min).")
         check_range(scale, [0, FLOAT_MAX_INTEGER])
+        check_positive(scale[1], "scale[1]")
+        if ratio[0] > ratio[1]:
+            raise ValueError("ratio should be in (min,max) format. Got (max,min).")
         check_range(ratio, [0, FLOAT_MAX_INTEGER])
+        check_positive(ratio[0], "ratio[0]")
+        check_positive(ratio[1], "ratio[1]")
         check_erasing_value(value)
         type_check(inplace, (bool,), "inplace")
         check_value(max_attempts, (1, FLOAT_MAX_INTEGER))
@@ -471,7 +517,7 @@ def check_linear_transform(method):
 
         if transformation_matrix.shape[0] != transformation_matrix.shape[1]:
             raise ValueError("transformation_matrix should be a square matrix. "
-                             "Got shape {} instead".format(transformation_matrix.shape))
+                             "Got shape {} instead.".format(transformation_matrix.shape))
         if mean_vector.shape[0] != transformation_matrix.shape[0]:
             raise ValueError("mean_vector length {0} should match either one dimension of the square"
                              "transformation_matrix {1}.".format(mean_vector.shape[0], transformation_matrix.shape))
@@ -501,10 +547,10 @@ def check_random_affine(method):
             type_check(scale, (tuple, list), "scale")
             type_check_list(scale, (int, float), "scale")
             if len(scale) == 2:
-                for i, s in enumerate(scale):
-                    check_positive(s, "scale[{}]".format(i))
                 if scale[0] > scale[1]:
                     raise ValueError("Input scale[1] must be equal to or greater than scale[0].")
+                check_range(scale, [0, FLOAT_MAX_INTEGER])
+                check_positive(scale[1], "scale[1]")
             else:
                 raise TypeError("scale should be a list or tuple of length 2.")
 
@@ -538,8 +584,10 @@ def check_rescale(method):
     @wraps(method)
     def new_method(self, *args, **kwargs):
         [rescale, shift], _ = parse_user_args(method, *args, **kwargs)
-        check_pos_float32(rescale)
+        type_check(rescale, (numbers.Number,), "rescale")
         type_check(shift, (numbers.Number,), "shift")
+        check_float32(rescale)
+        check_float32(shift)
 
         return method(self, *args, **kwargs)
 
@@ -556,7 +604,7 @@ def check_uniform_augment_cpp(method):
         check_positive(num_ops, "num_ops")
 
         if num_ops > len(transforms):
-            raise ValueError("num_ops is greater than transforms list size")
+            raise ValueError("num_ops is greater than transforms list size.")
         type_check_list(transforms, (TensorOp,), "tensor_ops")
 
         return method(self, *args, **kwargs)
@@ -693,11 +741,11 @@ def check_random_solarize(method):
         type_check(threshold, (tuple,), "threshold")
         type_check_list(threshold, (int,), "threshold")
         if len(threshold) != 2:
-            raise ValueError("threshold must be a sequence of two numbers")
+            raise ValueError("threshold must be a sequence of two numbers.")
         for element in threshold:
             check_value(element, (0, UINT8_MAX))
         if threshold[1] < threshold[0]:
-            raise ValueError("threshold must be in min max format numbers")
+            raise ValueError("threshold must be in min max format numbers.")
 
         return method(self, *args, **kwargs)
 

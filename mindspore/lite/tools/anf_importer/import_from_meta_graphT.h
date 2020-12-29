@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_LITE_SRC_ANF_IMPORTER_IMPORTER_FROM_META_GRAPHT_H_
-#define MINDSPORE_LITE_SRC_ANF_IMPORTER_IMPORTER_FROM_META_GRAPHT_H_
+#ifndef MINDSPORE_LITE_TOOLS_COMMON_ANF_IMPORTER_IMPORTER_FROM_META_GRAPHT_H_
+#define MINDSPORE_LITE_TOOLS_COMMON_ANF_IMPORTER_IMPORTER_FROM_META_GRAPHT_H_
 
 #include <utility>
 #include <memory>
@@ -27,7 +27,7 @@
 namespace mindspore::lite {
 class AnfImporterFromMetaGraphT : public AnfImporter {
  public:
-  explicit AnfImporterFromMetaGraphT(schema::MetaGraphT *meta_graph, FuncGraphPtr func_graph)
+  AnfImporterFromMetaGraphT(schema::MetaGraphT *meta_graph, FuncGraphPtr func_graph)
       : meta_graph_(meta_graph), func_graph_(std::move(func_graph)) {}
 
   ~AnfImporterFromMetaGraphT() override = default;
@@ -40,7 +40,9 @@ class AnfImporterFromMetaGraphT : public AnfImporter {
   int ConverterCNode() override;
 
   ValueNodePtr ConvertPrimitive(const std::unique_ptr<schema::CNodeT> &cNode);
-  abstract::AbstractTensorPtr ConvertTensorToAbstractTensor(const std::unique_ptr<schema::TensorT> &tensor);
+
+  static abstract::AbstractTensorPtr ConvertTensorToAbstractTensor(const std::unique_ptr<schema::TensorT> &tensor);
+
   int ConvertAbstract(const std::unique_ptr<schema::CNodeT> &src_cnode, const CNodePtr &dst_cnode);
 
   int AddReturnCNode() override;
@@ -51,4 +53,4 @@ class AnfImporterFromMetaGraphT : public AnfImporter {
 };
 }  // namespace mindspore::lite
 
-#endif  // MINDSPORE_LITE_SRC_ANF_IMPORTER_IMPORTER_FROM_META_GRAPHT_H_
+#endif  // MINDSPORE_LITE_TOOLS_COMMON_ANF_IMPORTER_IMPORTER_FROM_META_GRAPHT_H_

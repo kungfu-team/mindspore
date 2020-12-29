@@ -35,23 +35,24 @@ int SoftmaxGradCPUKernel::Init() {
   int ele_size = 1;
   param->n_dim_ = in_dims;
   for (size_t i = 0; i < in_dims; i++) {
-    param->input_shape_[i] = in_shape[i];
-    ele_size *= in_shape[i];
+    param->input_shape_[i] = in_shape.at(i);
+    ele_size *= in_shape.at(i);
   }
   param->element_size_ = ele_size;
 
   auto axis = param->axis_;
   if ((axis < -1) || (axis > param->n_dim_)) {
     MS_LOG(ERROR) << "SoftmaxGrad axis is invalid!";
+    return RET_ERROR;
   } else if (axis == -1) {
     axis = param->axis_ = (in_dims - 1);
   }
 
   inner_size_ = 1;
   for (size_t i = axis + 1; i < in_dims; i++) {
-    inner_size_ *= in_shape[i];
+    inner_size_ *= in_shape.at(i);
   }
-  SetWorkspaceSize(inner_size_ * (1 + in_shape[axis]) * sizeof(float));
+  set_workspace_size(inner_size_ * (1 + in_shape.at(axis)) * sizeof(float));
   return RET_OK;
 }
 
@@ -61,7 +62,7 @@ int SoftmaxGradCPUKernel::Execute(int task_id) {
   auto input_ptr = reinterpret_cast<float *>(in_tensors_.at(kInputIndex)->MutableData());
   auto yt_ptr = reinterpret_cast<float *>(in_tensors_.at(1)->MutableData());
   auto output_ptr = reinterpret_cast<float *>(out_tensors_.at(kOutputIndex)->MutableData());
-  float *sum_data_ = static_cast<float *>(GetWorkspace());
+  float *sum_data_ = static_cast<float *>(workspace());
   float *sum_mul_ = sum_data_ + inner_size_;
   SoftmaxGrad(input_ptr, yt_ptr, output_ptr, sum_data_, sum_mul_, reinterpret_cast<SoftmaxParameter *>(op_parameter_));
 
@@ -79,12 +80,6 @@ int SoftmaxGradRun(void *cdata, int task_id) {
 }
 
 int SoftmaxGradCPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "SoftmaxGradCPUKernel Prepare failed.";
-    return ret;
-  }
-
   int error_code = ParallelLaunch(this->context_->thread_pool_, SoftmaxGradRun, this, 1);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "SoftmaxGradRun function error error_code[" << error_code << "]";
@@ -102,6 +97,7 @@ kernel::LiteKernel *CpuSoftmaxGradFp32KernelCreator(const std::vector<lite::Tens
   auto *kernel = new (std::nothrow) SoftmaxGradCPUKernel(opParameter, inputs, outputs, ctx, primitive);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "new SoftmaxGradCPUKernel fail!";
+    free(opParameter);
     return nullptr;
   }
   auto ret = kernel->Init();
@@ -113,5 +109,4 @@ kernel::LiteKernel *CpuSoftmaxGradFp32KernelCreator(const std::vector<lite::Tens
   }
   return kernel;
 }
-
 }  // namespace mindspore::kernel

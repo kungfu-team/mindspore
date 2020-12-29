@@ -16,6 +16,10 @@
 
 #include "src/ops/local_response_normalization.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -75,6 +79,12 @@ int LocalResponseNormalization::UnPackToFlatBuilder(const schema::Primitive *pri
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *LocalResponseNormalizationCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<LocalResponseNormalization>(primitive);
+}
+Registry LocalResponseNormalizationRegistry(schema::PrimitiveType_LocalResponseNormalization,
+                                            LocalResponseNormalizationCreator);
 
 #endif
 }  // namespace lite

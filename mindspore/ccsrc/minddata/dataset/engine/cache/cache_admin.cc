@@ -19,6 +19,8 @@
 #include <glog/logging.h>
 #endif
 #include "minddata/dataset/engine/cache/cache_admin_arg.h"
+#include "minddata/dataset/engine/cache/cache_common.h"
+#include "minddata/dataset/util/path.h"
 
 namespace ds = mindspore::dataset;
 
@@ -28,26 +30,25 @@ int main(int argc, char **argv) {
   std::stringstream arg_stream;
 
 #ifdef USE_GLOG
-  FLAGS_log_dir = "/tmp";
+  FLAGS_minloglevel = google::WARNING;
+  FLAGS_log_dir = ds::DefaultLogDir();
+  // Create default log dir
+  ds::Path log_dir = ds::Path(FLAGS_log_dir);
+  rc = log_dir.CreateDirectories();
+  if (!rc.IsOk()) {
+    std::cerr << rc.ToString() << std::endl;
+    return 1;
+  }
   google::InitGoogleLogging(argv[0]);
 #endif
 
-  std::string warningMsg;
-  warningMsg.reserve(512);
-  warningMsg += "WARNING:\n";
-  warningMsg += "cache_admin and the cache server that it controls are currently only used for experimental research";
-  warningMsg += " purposes at this time.\n";
-  auto env_enable_cache = std::getenv("MS_ENABLE_CACHE");
-  if (env_enable_cache == nullptr || strcmp(env_enable_cache, "TRUE") != 0) {
-    // temporary disable cache feature in the current release
-    warningMsg += "This command is currently disabled.  Quitting.\n";
-    std::cerr << warningMsg << std::endl;
-    return 0;
+  // Create default spilling dir
+  ds::Path spill_dir = ds::Path(ds::DefaultSpillDir());
+  rc = spill_dir.CreateDirectories();
+  if (!rc.IsOk()) {
+    std::cerr << rc.ToString() << std::endl;
+    return 1;
   }
-  warningMsg += "It is not intended for general availability yet as it may not be stable.  Use it at your own risk.\n";
-
-  // A warning message until the code is mature enough.
-  std::cerr << warningMsg << std::endl;
 
   if (argc == 1) {
     args.Help();

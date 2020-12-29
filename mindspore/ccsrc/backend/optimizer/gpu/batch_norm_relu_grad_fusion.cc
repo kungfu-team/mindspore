@@ -24,6 +24,7 @@
 #include "utils/utils.h"
 #include "backend/optimizer/common/helper.h"
 #include "runtime/device/gpu/kernel_info_setter.h"
+#include "utils/ms_context.h"
 
 namespace mindspore {
 namespace opt {
@@ -38,8 +39,19 @@ const AnfNodePtr BatchNormReluGradFusion::Process(const FuncGraphPtr &graph, con
                                                   const EquivPtr &equiv) const {
   MS_EXCEPTION_IF_NULL(graph);
   MS_EXCEPTION_IF_NULL(node);
-
-  if (AnfAlgo::GetInputFormat(node, 0) != kOpFormat_NHWC) {
+  auto format_attr = AnfAlgo::GetCNodePrimitive(node)->GetAttr("data_format");
+  MS_EXCEPTION_IF_NULL(format_attr);
+  auto format = GetValue<std::string>(format_attr);
+  auto ms_context = MsContext::GetInstance();
+  MS_EXCEPTION_IF_NULL(ms_context);
+  if (ms_context->get_param<int>(MS_CTX_EXECUTION_MODE) == kPynativeMode) {
+    return nullptr;
+  }
+  if (AnfAlgo::GetInputFormat(node, 0) != kOpFormat_NHWC && format != "NHWC") {
+    return nullptr;
+  }
+  auto shape = AnfAlgo::GetInputDeviceShape(node, 0);
+  if (shape.back() % kBNChannelMultipleFactor != 0) {
     return nullptr;
   }
 

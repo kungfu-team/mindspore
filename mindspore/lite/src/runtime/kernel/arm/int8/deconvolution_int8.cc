@@ -16,7 +16,8 @@
 
 #include "src/runtime/kernel/arm/int8/deconvolution_int8.h"
 #include "src/runtime/runtime_api.h"
-#include "nnacl/optimized_kernel.h"
+#include "src/common/utils.h"
+#include "src/runtime/kernel/arm/int8/opt_op_handler.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
@@ -95,21 +96,12 @@ void DeConvInt8CPUKernel::CheckSupportOptimize() {
   support_optimize_ = true;
   matmul_func_ = MatMulInt8_16x4;
 #ifdef ENABLE_ARM64
-  void *optimize_op_handler = OptimizeModule::GetInstance()->optimized_op_handler_;
-  if (optimize_op_handler != nullptr) {
-    dlerror();
-    *(reinterpret_cast<void **>(&matmul_func_)) = dlsym(optimize_op_handler, "MatMulR4Int8_optimize_handler");
-    auto dlopen_error = dlerror();
-    if (dlopen_error != nullptr) {
-      MS_LOG(ERROR) << "load matmul func failed! " << dlopen_error << ".";
-      support_optimize_ = false;
-      matmul_func_ = nullptr;
-    } else {
-      support_optimize_ = true;
-    }
+  if (mindspore::lite::IsSupportSDot()) {
+    support_optimize_ = true;
+    matmul_func_ = MatMulR4Int8_optimize_handler;
   } else {
     support_optimize_ = false;
-    matmul_func_ = nullptr;
+    matmul_func_ = MatMulR4Int8Neon64;
   }
 #endif
   return;
@@ -140,7 +132,7 @@ int DeConvInt8CPUKernel::InitBiasWeight() {
   }
   memset(bias_data_, 0, size);
   if (in_tensors_.size() == 3) {
-    memcpy(bias_data_, in_tensors_[0]->MutableData(), conv_param_->output_channel_ * sizeof(int32_t));
+    memcpy(bias_data_, in_tensors_.at(0)->MutableData(), conv_param_->output_channel_ * sizeof(int32_t));
   }
 
   size = UP_ROUND(conv_param_->output_channel_, C4NUM) * UP_ROUND(conv_param_->input_channel_, C16NUM) *
@@ -150,8 +142,8 @@ int DeConvInt8CPUKernel::InitBiasWeight() {
     MS_LOG(ERROR) << "deconv int8 malloc weight_ptr_ error!";
     return RET_ERROR;
   }
-  memset(weight_ptr_, static_cast<int8_t>(conv_param_->conv_quant_arg_.filter_quant_args_[0].zp_), size);
-  DeConvWeightTransInt8(reinterpret_cast<int8_t *>(in_tensors_[1]->MutableData()), weight_ptr_,
+  memset(weight_ptr_, 0, size);
+  DeConvWeightTransInt8(reinterpret_cast<int8_t *>(in_tensors_.at(1)->MutableData()), weight_ptr_,
                         conv_param_->input_channel_, conv_param_->output_channel_,
                         conv_param_->kernel_h_ * conv_param_->kernel_w_, support_optimize_);
 
@@ -163,8 +155,8 @@ int DeConvInt8CPUKernel::InitBiasWeight() {
   }
   memset(weight_sum_, 0, size * sizeof(int32_t));
   DeConvPackWeightSum(weight_ptr_, weight_sum_, conv_param_->conv_quant_arg_.input_quant_args_[0].zp_,
-                      conv_param_->conv_quant_arg_.filter_quant_args_[0].zp_, UP_ROUND(matmul_param_->deep_, C16NUM),
-                      size, support_optimize_);
+                      conv_param_->conv_quant_arg_.filter_quant_args_[0].zp_, matmul_param_->deep_, size,
+                      support_optimize_);
 
   return RET_OK;
 }
@@ -258,17 +250,13 @@ int DeConvInt8CPUKernel::DoDeconv(int task_id) {
 }
 
 int DeConvInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare failed.";
-    return RET_ERROR;
-  }
   int8_t *src_in = reinterpret_cast<int8_t *>(in_tensors_[0]->MutableData());
   int8_t *src_out = reinterpret_cast<int8_t *>(out_tensors_[0]->MutableData());
 
   int error_code = InitRunBuf();
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "deconv int8 InitRunBuf error! error_code[" << error_code << "]";
+    FreeRunBuf();
     return RET_ERROR;
   }
 
@@ -283,12 +271,10 @@ int DeConvInt8CPUKernel::Run() {
     error_code = ParallelLaunch(this->context_->thread_pool_, DeConvInt8Run, this, thread_count_);
     if (error_code != RET_OK) {
       MS_LOG(ERROR) << "deconv int8 run error! error_code[" << error_code << "]";
-      return RET_ERROR;
     }
   }
-
   FreeRunBuf();
-  return RET_OK;
+  return error_code;
 }
 
 kernel::LiteKernel *CpuDeConvInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
@@ -300,13 +286,14 @@ kernel::LiteKernel *CpuDeConvInt8KernelCreator(const std::vector<lite::Tensor *>
   auto kernel = new (std::nothrow) kernel::DeConvInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "kernel is nullptr.";
+    free(opParameter);
     return nullptr;
   }
   auto ret = kernel->Init();
   if (ret != RET_OK) {
-    delete kernel;
     MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
                   << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
+    delete kernel;
     return nullptr;
   }
   return kernel;

@@ -81,7 +81,7 @@ class CacheOp : public CacheBase, public RandomAccessOp {
     /// \brief Setter method
     /// \param sampler
     /// \return Builder setter method returns reference to the builder.
-    Builder &SetSampler(std::shared_ptr<Sampler> sampler) {
+    Builder &SetSampler(std::shared_ptr<SamplerRT> sampler) {
       build_sampler_ = std::move(sampler);
       return *this;
     }
@@ -96,10 +96,10 @@ class CacheOp : public CacheBase, public RandomAccessOp {
     int32_t rows_per_buffer_;
     int32_t build_op_connector_size_;
     std::shared_ptr<CacheClient> build_cache_client_;
-    std::shared_ptr<Sampler> build_sampler_;
+    std::shared_ptr<SamplerRT> build_sampler_;
 
     /// \brief Check if the required parameters are set by the builder.
-    /// \return Status The error code return
+    /// \return Status The status code returned
     Status SanityCheck() const;
   };
 
@@ -108,7 +108,7 @@ class CacheOp : public CacheBase, public RandomAccessOp {
   /// \param num_workers The number of worker threads.
   /// \param op_connector_size The size of each queue in the connector.
   CacheOp(int32_t num_workers, int32_t op_connector_size, int32_t rows_per_buf,
-          std::shared_ptr<CacheClient> cache_client, std::shared_ptr<Sampler> sampler);
+          std::shared_ptr<CacheClient> cache_client, std::shared_ptr<SamplerRT> sampler);
 
   // Destructor
   ~CacheOp();
@@ -119,7 +119,7 @@ class CacheOp : public CacheBase, public RandomAccessOp {
   /// \brief Base-class override for special eoe handler.
   /// CacheOp must override this because it shall not perform default handling of eoe. Instead
   /// the CacheOp manages actions related to the end of the epoch.
-  /// \return Status - The error code return
+  /// \return Status The status code returned
   Status EoeReceived(int32_t worker_id) override;
   /// \brief Base-class override for NodePass pre-visit acceptor
   /// \param[in] p The node to visit
@@ -133,7 +133,7 @@ class CacheOp : public CacheBase, public RandomAccessOp {
   Status Accept(NodePass *p, bool *modified) override;
   /// \brief Base-class override for handling cases when an eof is received.
   /// \param worker_id - The worker id
-  /// \return Status - The error code return
+  /// \return Status The status code returned
   Status EofReceived(int32_t worker_id) override;
   Status operator()() override;
   Status WorkerEntry(int32_t worker_id) override;
@@ -159,7 +159,7 @@ class CacheOp : public CacheBase, public RandomAccessOp {
   Status CacheAllRows(int32_t worker_id);
   Status RegisterResources() override;
   /// \brief Private function for cache setup/init work just after construction
-  /// \return Status The error code return
+  /// \return Status The status code returned
   Status InitCache();
 };
 }  // namespace dataset

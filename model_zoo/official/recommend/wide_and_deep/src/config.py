@@ -30,6 +30,7 @@ def argparse_init():
     parser.add_argument("--eval_batch_size", type=int, default=16000, help="Eval batch size.")
     parser.add_argument("--field_size", type=int, default=39, help="The number of features.")
     parser.add_argument("--vocab_size", type=int, default=200000, help="The total features of dataset.")
+    parser.add_argument("--vocab_cache_size", type=int, default=0, help="The total features of hash table.")
     parser.add_argument("--emb_dim", type=int, default=80, help="The dense embedding dimension of sparse feature.")
     parser.add_argument("--deep_layer_dim", type=int, nargs='+', default=[1024, 512, 256, 128],
                         help="The dimension of all deep layers.")
@@ -39,14 +40,16 @@ def argparse_init():
     parser.add_argument("--dropout_flag", type=int, default=0, help="Enable dropout")
     parser.add_argument("--output_path", type=str, default="./output/")
     parser.add_argument("--ckpt_path", type=str, default="./", help="The location of the checkpoint file.")
-    parser.add_argument("--stra_ckpt", type=str, default="./checkpoints/strategy.ckpt",
+    parser.add_argument("--stra_ckpt", type=str, default="./checkpoints",
                         help="The strategy checkpoint file.")
     parser.add_argument("--eval_file_name", type=str, default="eval.log", help="Eval output file.")
     parser.add_argument("--loss_file_name", type=str, default="loss.log", help="Loss output file.")
     parser.add_argument("--host_device_mix", type=int, default=0, help="Enable host device mode or not")
-    parser.add_argument("--dataset_type", type=str, default="tfrecord", help="tfrecord/mindrecord/hd5")
+    parser.add_argument("--dataset_type", type=str, default="mindrecord", help="tfrecord/mindrecord/hd5")
     parser.add_argument("--parameter_server", type=int, default=0, help="Open parameter server of not")
     parser.add_argument("--field_slice", type=int, default=0, help="Enable split field mode or not")
+    parser.add_argument("--sparse", type=int, default=0, help="Enable sparse or not")
+    parser.add_argument("--deep_table_slice_mode", type=str, default="column_slice", help="column_slice/row_slice")
     return parser
 
 
@@ -64,6 +67,7 @@ class WideDeepConfig():
         self.eval_batch_size = 16000
         self.field_size = 39
         self.vocab_size = 200000
+        self.vocab_cache_size = 100000
         self.emb_dim = 80
         self.deep_layer_dim = [1024, 512, 256, 128]
         self.deep_layer_act = 'relu'
@@ -80,10 +84,12 @@ class WideDeepConfig():
         self.ckpt_path = "./"
         self.stra_ckpt = './checkpoints/strategy.ckpt'
         self.host_device_mix = 0
-        self.dataset_type = "tfrecord"
+        self.dataset_type = "mindrecord"
         self.parameter_server = 0
         self.field_slice = False
         self.manual_shape = None
+        self.sparse = False
+        self.deep_table_slice_mode = "column_slice"
 
     def argparse_init(self):
         """
@@ -99,6 +105,7 @@ class WideDeepConfig():
         self.eval_batch_size = args.eval_batch_size
         self.field_size = args.field_size
         self.vocab_size = args.vocab_size
+        self.vocab_cache_size = args.vocab_cache_size
         self.emb_dim = args.emb_dim
         self.deep_layer_dim = args.deep_layer_dim
         self.deep_layer_act = args.deep_layer_act
@@ -118,3 +125,7 @@ class WideDeepConfig():
         self.dataset_type = args.dataset_type
         self.parameter_server = args.parameter_server
         self.field_slice = bool(args.field_slice)
+        self.sparse = bool(args.sparse)
+        self.deep_table_slice_mode = args.deep_table_slice_mode
+        if self.host_device_mix == 1:
+            self.sparse = True

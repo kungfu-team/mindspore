@@ -17,11 +17,10 @@
 #include "src/runtime/kernel/arm/fp32_grad/pooling_grad.h"
 #include "schema/model_generated.h"
 #include "src/kernel_registry.h"
-#include "nnacl/fp32/pooling.h"
+#include "nnacl/fp32/pooling_fp32.h"
 #include "nnacl/fp32_grad/pooling_grad.h"
 #include "include/errorcode.h"
 #include "src/runtime/runtime_api.h"
-// #include "src/train/ops/train_ops.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
 using mindspore::lite::KernelRegistrar;
@@ -37,9 +36,9 @@ int PoolingGradCPUKernel::Init() {
   auto out_shape = in_tensors_.at(1)->shape();
 
   if (pool_param->pool_mode_ == PoolMode_AvgPool) {
-    in_shape = in_tensors_.at(1)->shape();
-    out_shape = in_tensors_.at(0)->shape();
+    out_shape = in_tensors_.at(2)->shape();
   }
+
   int input_h = in_shape.at(1);
   int input_w = in_shape.at(2);
 
@@ -72,12 +71,14 @@ int PoolingGradCPUKernel::Execute(int task_id) {
     auto dy_ptr = reinterpret_cast<float *>(in_tensors_.at(2)->MutableData());
     MaxPoolingGrad(input_ptr, dx_ptr, dy_ptr, output_ptr, pool_param, task_id);
   } else {
+    input_ptr = reinterpret_cast<float *>(in_tensors_.at(2)->MutableData());
     AvgPoolingGrad(input_ptr, output_ptr, pool_param, task_id);
   }
   return RET_OK;
 }
 
 int PoolingGradImpl(void *cdata, int task_id) {
+  MS_ASSERT(cdata != nullptr);
   auto pooling = reinterpret_cast<PoolingGradCPUKernel *>(cdata);
   auto error_code = pooling->Execute(task_id);
   if (error_code != RET_OK) {
@@ -88,19 +89,6 @@ int PoolingGradImpl(void *cdata, int task_id) {
 }
 
 int PoolingGradCPUKernel::Run() {
-  auto prepare_ret = Prepare();
-  if (prepare_ret != RET_OK) {
-    MS_LOG(ERROR) << "PoolingGradCPUKernel Prepare fail!ret: " << prepare_ret;
-    return prepare_ret;
-  }
-
-  // clear output buffer before parallel run
-  PoolingParameter *pooling_param = reinterpret_cast<PoolingParameter *>(op_parameter_);
-  auto output_ptr = reinterpret_cast<float *>(out_tensors_.at(0)->MutableData());
-  int size =
-    pooling_param->input_w_ * pooling_param->input_h_ * pooling_param->input_channel_ * pooling_param->output_batch_;
-  for (int i = 0; i < size; i++) output_ptr[i] = 0.0;
-
   int error_code = ParallelLaunch(this->context_->thread_pool_, PoolingGradImpl, this, 1);
   if (error_code != RET_OK) {
     MS_LOG(ERROR) << "pooling error error_code[" << error_code << "]";
@@ -120,6 +108,7 @@ kernel::LiteKernel *CpuPoolingGradFp32KernelCreator(const std::vector<lite::Tens
   auto *kernel = new (std::nothrow) PoolingGradCPUKernel(opParameter, inputs, outputs, ctx, primitive);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "new PoolingGradCPUKernel fail!";
+    free(opParameter);
     return nullptr;
   }
 

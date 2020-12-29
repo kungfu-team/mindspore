@@ -30,8 +30,6 @@
 #include "src/runtime/kernel/arm/base/layout_transform.h"
 
 using mindspore::lite::InnerContext;
-using mindspore::schema::PadMode;
-using mindspore::schema::QuantType;
 
 namespace mindspore::kernel {
 class ConvolutionBaseCPUKernel : public LiteKernel {
@@ -48,8 +46,6 @@ class ConvolutionBaseCPUKernel : public LiteKernel {
   int Init() override;
   int ReSize() override { return 0; }
   int Run() override { return 0; }
-  virtual int CheckLayout(lite::Tensor *input_tensor);
-  int SetIfAsymmetric();
   int SetIfPerChannel();
   int MallocQuantParam();
   int SetQuantParam();
@@ -61,14 +57,12 @@ class ConvolutionBaseCPUKernel : public LiteKernel {
   void FreeQuantParam();
 
  protected:
-  int tile_num_;
   void *bias_data_ = nullptr;
-  void *nhwc4_input_ = nullptr;
-  const InnerContext *ctx_;
-  int thread_count_;
-  ConvParameter *conv_param_;
-  ConvQuantArg *conv_quant_arg_;
-  LayoutConvertor convert_func_ = nullptr;
+  const InnerContext *ctx_ = nullptr;
+  ConvParameter *conv_param_ = nullptr;
+  ConvQuantArg *conv_quant_arg_ = nullptr;
+  int tile_num_ = 0;
+  int thread_count_ = 1;
 };
 }  // namespace mindspore::kernel
 

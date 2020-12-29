@@ -22,133 +22,184 @@
 #include "src/runtime/runtime_api.h"
 #include "src/kernel_registry.h"
 #include "include/errorcode.h"
+#include "src/common/file_utils.h"
 
 using mindspore::lite::KernelRegistrar;
+using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
 using mindspore::schema::PrimitiveType_Add;
 
 namespace mindspore::kernel {
 int QuantizedAddCPUKernel::Init() {
-  lite::Tensor *input0 = in_tensors_.at(0);
-  lite::Tensor *input1 = in_tensors_.at(1);
-  lite::Tensor *output = out_tensors_.at(0);
-  MS_ASSERT(input0);
-  MS_ASSERT(input1);
-  MS_ASSERT(output);
+  auto *input0 = in_tensors_.at(0);
+  auto *input1 = in_tensors_.at(1);
+  auto *output = out_tensors_.at(0);
 
-  para_.input0_scale_ = input0->GetQuantParams().front().scale;
-  para_.input0_offset_ = input0->GetQuantParams().front().zeroPoint * -1;
-  para_.input1_scale_ = input1->GetQuantParams().front().scale;
-  para_.input1_offset_ = input1->GetQuantParams().front().zeroPoint * -1;
-  para_.output_scale_ = output->GetQuantParams().front().scale;
-  para_.output_offset_ = output->GetQuantParams().front().zeroPoint;
+  para_.in0_args_.zp_ = input0->quant_params().front().zeroPoint * -1;
+  para_.in1_args_.zp_ = input1->quant_params().front().zeroPoint * -1;
+  para_.out_zp_ = output->quant_params().front().zeroPoint;
 
-  const int left_shift = 20;  // 1 << 20, 2/20
-  const double twice_max_input_scale = 2 * std::max(para_.input0_scale_, para_.input1_scale_);
-  const double real_input0_multiplier = para_.input0_scale_ / twice_max_input_scale;
-  const double real_input1_multiplier = para_.input1_scale_ / twice_max_input_scale;
-  const double real_output_multiplier = twice_max_input_scale / ((1 << left_shift) * para_.output_scale_);
+  const double in0_scale = input0->quant_params().front().scale;
+  const double in1_scale = input1->quant_params().front().scale;
+  const double out_scale = output->quant_params().front().scale;
 
-  QuantizeMultiplierSmallerThanOne(real_input0_multiplier, &para_.input0_multiplier_, &para_.input0_shift_);
-  QuantizeMultiplierSmallerThanOne(real_input1_multiplier, &para_.input1_multiplier_, &para_.input1_shift_);
-  QuantizeMultiplierSmallerThanOne(real_output_multiplier, &para_.output_multiplier_, &para_.output_shift_);
+  para_.left_shift_ = 20;
+  const double twice_max_input_scale = 2 * std::max(in0_scale, in1_scale);
+  const double in0_multiplier = in0_scale / twice_max_input_scale;
+  const double in1_multiplier = in1_scale / twice_max_input_scale;
+  const double out_multiplier = twice_max_input_scale / ((1 << para_.left_shift_) * out_scale);
 
-  para_.output_activation_min_ = std::numeric_limits<int8_t>::min();
-  para_.output_activation_max_ = std::numeric_limits<int8_t>::max();
+  QuantizeMultiplierSmallerThanOne(in0_multiplier, &para_.in0_args_.multiplier_, &para_.in0_args_.left_shift_);
+  QuantizeMultiplierSmallerThanOne(in1_multiplier, &para_.in1_args_.multiplier_, &para_.in1_args_.left_shift_);
+  QuantizeMultiplierSmallerThanOne(out_multiplier, &para_.out_multiplier_, &para_.out_left_shift_);
 
-  int left_shift0 = -para_.input0_shift_ > 0 ? -para_.input0_shift_ : 0;
-  para_.right_shift0_ = -para_.input0_shift_ > 0 ? 0 : para_.input0_shift_;
+  para_.in0_args_.right_shift_ = -para_.in0_args_.left_shift_ > 0 ? 0 : para_.in0_args_.left_shift_;
+  para_.in1_args_.right_shift_ = -para_.in1_args_.left_shift_ > 0 ? 0 : para_.in1_args_.left_shift_;
+  para_.out_right_shift_ = -para_.out_left_shift_ > 0 ? 0 : para_.out_left_shift_;
 
-  int left_shift1 = -para_.input1_shift_ > 0 ? -para_.input1_shift_ : 0;
-  para_.right_shift1_ = -para_.input1_shift_ > 0 ? 0 : para_.input1_shift_;
+  para_.in0_args_.left_shift_ = -para_.in0_args_.left_shift_ > 0 ? -para_.in0_args_.left_shift_ : 0;
+  para_.in1_args_.left_shift_ = -para_.in1_args_.left_shift_ > 0 ? -para_.in1_args_.left_shift_ : 0;
+  para_.out_left_shift_ = -para_.out_left_shift_ > 0 ? -para_.out_left_shift_ : 0;
 
-  para_.left_shift_out_ = -para_.output_shift_ > 0 ? -para_.output_shift_ : 0;
-  para_.right_shift_out_ = -para_.output_shift_ > 0 ? 0 : para_.output_shift_;
+  auto act = arith_para_->activation_type_;
+  CalculateActivationRangeQuantized(act == ActType_Relu, act == ActType_Relu6, para_.out_zp_,
+                                    static_cast<float>(out_scale), &para_.min_, &para_.max_);
 
-  para_.left_shift_result0_ = (1 << left_shift) * ((1 << left_shift0));
-  para_.left_shift_result1_ = (1 << left_shift) * ((1 << left_shift1));
-
-  MS_ASSERT(left_shift + left_shift0 == left_shift);
-  MS_ASSERT(left_shift + left_shift1 == left_shift);
-  return 0;
+  if (!InferShapeDone()) {
+    return RET_OK;
+  }
+  return ReSize();
 }
 
-int QuantizedAddCPUKernel::ReSize() { return 0; }
-
-int QuantizedAddCPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare failed.";
-    return RET_ERROR;
+int QuantizedAddCPUKernel::ReSize() {
+  auto *input0 = in_tensors_.at(0);
+  auto *input1 = in_tensors_.at(1);
+  auto *output = out_tensors_.at(0);
+  support_opt_add_ = (input0->ElementsNum() == 1) || (input1->ElementsNum() == 1);
+  if (support_opt_add_) {
+    arith_para_->broadcasting_ = false;
   }
-  input0_data_ = static_cast<int8_t *>(in_tensors_.at(0)->MutableData());
-  input1_data_ = static_cast<int8_t *>(in_tensors_.at(1)->MutableData());
-  output_data_ = static_cast<int8_t *>(out_tensors_.at(0)->MutableData());
 
-  elements_num_ = in_tensors_.at(0)->ElementsNum();
-  count_unit_ = thread_count_ > 1 ? UP_DIV(elements_num_, thread_count_) : elements_num_;
+  elements_num_ = output->ElementsNum();
+  thread_count_ = MSMIN(elements_num_, op_parameter_->thread_num_);
 
-  if (in_tensors_.at(0)->ElementsNum() != in_tensors_.at(1)->ElementsNum()) {
-    input0_data_ = static_cast<int8_t *>(ctx_->allocator->Malloc(out_tensors_.at(0)->Size()));
-    input1_data_ = static_cast<int8_t *>(ctx_->allocator->Malloc(out_tensors_.at(0)->Size()));
-    if (!input0_data_ || !input1_data_) {
-      MS_LOG(ERROR) << "malloc input0_data_ || input1_data_ failed.";
-      return RET_ERROR;
+  arith_para_->in_elements_num0_ = in_tensors_[0]->ElementsNum();
+  arith_para_->in_elements_num1_ = in_tensors_[1]->ElementsNum();
+  arith_para_->out_elements_num_ = out_tensors_[0]->ElementsNum();
+
+  for (size_t i = 0; i < in_tensors_[0]->shape().size(); i++) {
+    if (arith_para_->in_shape0_[i] == -1) {
+      memcpy(arith_para_->in_shape0_, input0->shape().data(), input0->shape().size() * sizeof(int));
+      break;
+    }
+  }
+  for (size_t i = 0; i < in_tensors_[1]->shape().size(); i++) {
+    if (arith_para_->in_shape1_[i] == -1) {
+      memcpy(arith_para_->in_shape1_, input1->shape().data(), input1->shape().size() * sizeof(int));
+      break;
+    }
+  }
+  for (size_t i = 0; i < out_tensors_[0]->shape().size(); i++) {
+    if (arith_para_->out_shape_[i] == -1) {
+      memcpy(arith_para_->out_shape_, output->shape().data(), output->shape().size() * sizeof(int));
+      break;
+    }
+  }
+
+  if (arith_para_->broadcasting_) {
+    size_t break_pos_ = 0;
+    for (auto i = arith_para_->ndim_ - 1; i >= 0; --i) {
+      if (arith_para_->in_shape0_[i] != arith_para_->in_shape1_[i]) {
+        break_pos_ = i;
+        break;
+      }
+    }
+    in_size_ = 1;
+    out_size_ = 1;
+    for (size_t i = 0; i < arith_para_->ndim_; i++) {
+      if (i > break_pos_) {
+        in_size_ *= arith_para_->out_shape_[i];
+      } else {
+        out_size_ *= arith_para_->out_shape_[i];
+      }
     }
 
-    TileDimensionsUint8(static_cast<uint8_t *>(in_tensors_.at(0)->MutableData()),
-                        static_cast<uint8_t *>(in_tensors_.at(1)->MutableData()),
-                        reinterpret_cast<uint8_t *>(input0_data_), reinterpret_cast<uint8_t *>(input1_data_),
-                        arith_para_);
-    ret = ParallelLaunch(this->context_->thread_pool_, AddInt8Run, this, thread_count_);
-    ctx_->allocator->Free(input0_data_);
-    ctx_->allocator->Free(input1_data_);
-    return ret;
+    ComputeStrides(arith_para_->in_shape0_, arith_para_->in_strides0_, arith_para_->ndim_);
+    ComputeStrides(arith_para_->in_shape1_, arith_para_->in_strides1_, arith_para_->ndim_);
+    ComputeStrides(arith_para_->out_shape_, arith_para_->out_strides_, arith_para_->ndim_);
   }
-
-  ret = ParallelLaunch(this->context_->thread_pool_, AddInt8Run, this, thread_count_);
-  return ret;
+  return RET_OK;
 }
 
 int AddInt8Run(void *cdata, int task_id) {
   auto add = reinterpret_cast<QuantizedAddCPUKernel *>(cdata);
   add->DoExecute(task_id);
-  return lite::RET_OK;
+  return RET_OK;
 }
 
-int QuantizedAddCPUKernel::DoExecute(int tId) {
-  int64_t real_dst_count = MSMIN(elements_num_ - tId * count_unit_, count_unit_);
-  int8_t *cur_input0_data = input0_data_ + tId * count_unit_;
-  int8_t *cur_input1_data = input1_data_ + tId * count_unit_;
-  int8_t *cur_output_data = output_data_ + tId * count_unit_;
-
-  AddInt8(cur_input0_data, cur_input1_data, cur_output_data, real_dst_count, &para_);
-  return lite::RET_OK;
+void QuantizedAddCPUKernel::BroadcastRun(int task_id) {
+  int stride = UP_DIV(out_size_, thread_count_);
+  int real_out_count = MSMIN(stride, out_size_ - stride * task_id);
+  if (real_out_count <= 0) {
+    return;
+  }
+  int8_t *cur_in0 = nullptr;
+  int8_t *cur_in1 = nullptr;
+  int8_t *cur_out = nullptr;
+  for (int i = 0; i < real_out_count; i++) {
+    if (arith_para_->in_elements_num0_ == arith_para_->out_elements_num_) {
+      cur_in0 = input0_data_ + task_id * stride * in_size_ + i * in_size_;
+      cur_in1 = input1_data_;
+      cur_out = output_data_ + task_id * stride * in_size_ + i * in_size_;
+    } else {
+      cur_in0 = input0_data_;
+      cur_in1 = input1_data_ + task_id * stride * in_size_ + i * in_size_;
+      cur_out = output_data_ + task_id * stride * in_size_ + i * in_size_;
+    }
+    AddInt8(cur_in0, cur_in1, cur_out, in_size_, &para_);
+  }
+  return;
 }
 
-kernel::LiteKernel *CpuAddInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                            const std::vector<lite::Tensor *> &outputs, OpParameter *parameter,
-                                            const lite::InnerContext *ctx, const KernelKey &desc,
-                                            const mindspore::lite::PrimitiveC *primitive) {
-  if (parameter == nullptr || ctx == nullptr) {
-    MS_LOG(ERROR) << "parameter or ctx is nullptr";
-    return nullptr;
+int QuantizedAddCPUKernel::DoExecute(int task_id) {
+  /* need broadcast */
+  if (arith_para_->broadcasting_) {
+    BroadcastRun(task_id);
+    return RET_OK;
   }
-  MS_ASSERT(desc.type == PrimitiveType_Add);
-  auto *kernel = new (std::nothrow) QuantizedAddCPUKernel(parameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "kernel is nullptr.";
-    return nullptr;
+
+  /* no need broadcast */
+  int stride = UP_DIV(elements_num_, thread_count_);
+  int rest_count = elements_num_ - task_id * stride;
+  int real_count = MSMIN(stride, rest_count);
+  if (real_count <= 0) {
+    return RET_OK;
   }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << parameter->name_
-                  << ", type: " << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(parameter->type_));
-    delete kernel;
-    return nullptr;
+  int8_t *cur_in0 = input0_data_ + stride * task_id;
+  int8_t *cur_in1 = input1_data_ + stride * task_id;
+  int8_t *cur_out = output_data_ + stride * task_id;
+  if (support_opt_add_) {
+    int8_t *ptr_in = arith_para_->in_elements_num0_ == 1 ? cur_in1 : cur_in0;
+    int8_t element_in = arith_para_->in_elements_num0_ == 1 ? input0_data_[0] : input1_data_[0];
+    AddQuantQrgs *ptr_args = arith_para_->in_elements_num0_ == 1 ? &para_.in1_args_ : &para_.in0_args_;
+    AddQuantQrgs *ele_args = arith_para_->in_elements_num0_ == 1 ? &para_.in0_args_ : &para_.in1_args_;
+    AddOptInt8(ptr_in, element_in, cur_out, rest_count, &para_, ptr_args, ele_args);
+  } else {
+    AddInt8(cur_in0, cur_in1, cur_out, rest_count, &para_);
   }
-  return kernel;
+
+  return RET_OK;
 }
 
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Add, CpuAddInt8KernelCreator)
+int QuantizedAddCPUKernel::Run() {
+  input0_data_ = static_cast<int8_t *>(in_tensors_.at(0)->data_c());
+  input1_data_ = static_cast<int8_t *>(in_tensors_.at(1)->data_c());
+  output_data_ = static_cast<int8_t *>(out_tensors_.at(0)->data_c());
+
+  ParallelLaunch(this->context_->thread_pool_, AddInt8Run, this, thread_count_);
+
+  return RET_OK;
+}
+
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Add, LiteKernelCreator<QuantizedAddCPUKernel>)
 }  // namespace mindspore::kernel

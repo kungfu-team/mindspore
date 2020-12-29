@@ -15,7 +15,7 @@
  */
 #include "src/common/log_adapter.h"
 #include "common/common_test.h"
-#include "mindspore/lite/src/runtime/kernel/arm/fp32/l2_norm.h"
+#include "mindspore/lite/src/runtime/kernel/arm/fp32/l2_norm_fp32.h"
 #include "src/kernel_registry.h"
 #include "src/lite_kernel.h"
 using mindspore::schema::Format_NHWC;
@@ -42,23 +42,22 @@ class TestL2NormFp32 : public mindspore::CommonTest {
 };
 
 void TestL2NormFp32::TearDown() {
-  in_tensor_.SetData(nullptr);
-  out_tensor_.SetData(nullptr);
+  in_tensor_.set_data(nullptr);
+  out_tensor_.set_data(nullptr);
 }
 
 void TestL2NormFp32::Init(const std::vector<int> &input_shape, const std::vector<int> &output_shape, float *input_data,
                           float *output_data, const int axis_num, ActType activation_type, const int thread_num) {
   in_tensor_.set_data_type(kNumberTypeFloat32);
-  in_tensor_.SetFormat(Format_NHWC);
+  in_tensor_.set_format(Format_NHWC);
   in_tensor_.set_shape(input_shape);
   out_tensor_.set_data_type(kNumberTypeFloat32);
   out_tensor_.set_shape(output_shape);
-  in_tensor_.SetData(input_data);
-  out_tensor_.SetData(output_data);
+  in_tensor_.set_data(input_data);
+  out_tensor_.set_data(output_data);
 
   param_.axis_num_ = axis_num;
   if (axis_num == 1) {
-    param_.axis_ = reinterpret_cast<int *>(malloc(sizeof(int)));
     param_.axis_[0] = -1;
   }
   param_.epsilon_ = 1e-6;
@@ -92,7 +91,7 @@ TEST_F(TestL2NormFp32, Test1) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol_);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol_));
 }
 
 // 2thread  all axis relu
@@ -113,7 +112,7 @@ TEST_F(TestL2NormFp32, Test2) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol_);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol_));
 }
 
 // 4 thread  trailing axis  no activation
@@ -134,7 +133,7 @@ TEST_F(TestL2NormFp32, Test3) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol_);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol_));
 }
 
 // 1 thread  trailing axis  no activation
@@ -155,7 +154,7 @@ TEST_F(TestL2NormFp32, Test4) {
   auto ret = kernel_->Run();
   EXPECT_EQ(0, ret);
 
-  CompareOutputData(output_data, expect.data(), output_size, err_tol_);
+  ASSERT_EQ(0, CompareOutputData(output_data, expect.data(), output_size, err_tol_));
 }
 
 }  // namespace mindspore

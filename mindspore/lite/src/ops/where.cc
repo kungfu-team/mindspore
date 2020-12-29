@@ -16,6 +16,10 @@
 
 #include "src/ops/where.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -50,6 +54,10 @@ int Where::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *WhereCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Where>(primitive); }
+Registry WhereRegistry(schema::PrimitiveType_Where, WhereCreator);
+
 #endif
 
 int Where::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
@@ -71,9 +79,9 @@ int Where::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outpu
   auto input1 = inputs_.at(1);
   auto input2 = inputs_.at(2);
   output->set_data_type(input->data_type());
-  output->SetFormat(input->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output->set_format(input->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   int num = input0->ElementsNum();
   int num1 = input1->ElementsNum();
@@ -85,28 +93,28 @@ int Where::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outpu
   int axisout = 0;
   size_t temp = 0;
   for (size_t j = 0; j < shape_tmp.size(); j++) {
-    if (shape_tmp[j] == shape_tmp1[j] && shape_tmp[j] != shape_tmp2[j]) {
+    if (shape_tmp.at(j) == shape_tmp1.at(j) && shape_tmp.at(j) != shape_tmp2.at(j)) {
       axisout = j;
       break;
     }
-    if (shape_tmp[j] == shape_tmp2[j] && shape_tmp[j] != shape_tmp1[j]) {
+    if (shape_tmp.at(j) == shape_tmp2.at(j) && shape_tmp.at(j) != shape_tmp1.at(j)) {
       axisout = j;
       break;
     }
-    if (shape_tmp1[j] == shape_tmp2[j] && shape_tmp[j] != shape_tmp1[j]) {
+    if (shape_tmp1.at(j) == shape_tmp2.at(j) && shape_tmp.at(j) != shape_tmp1.at(j)) {
       axisout = j;
       break;
     }
     temp += 1;
     if (temp == shape_tmp.size()) {
-      outputs_[0]->set_shape(shape_tmp);
+      outputs_.at(0)->set_shape(shape_tmp);
       output->set_data_type(input->data_type());
       return RET_OK;
     }
   }
   auto output_shape = shape_tmp;
-  output_shape[axisout] = nummax;
-  outputs_[0]->set_shape(output_shape);
+  output_shape.at(axisout) = nummax;
+  outputs_.at(0)->set_shape(output_shape);
   return RET_OK;
 }
 }  // namespace lite

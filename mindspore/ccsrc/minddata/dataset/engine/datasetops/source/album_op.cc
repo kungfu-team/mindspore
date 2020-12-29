@@ -22,11 +22,15 @@
 #include "minddata/dataset/engine/db_connector.h"
 #include "minddata/dataset/engine/execution_tree.h"
 #include "minddata/dataset/engine/opt/pass.h"
+#ifndef ENABLE_ANDROID
 #include "minddata/dataset/kernels/image/image_utils.h"
+#else
+#include "minddata/dataset/kernels/image/lite_image_utils.h"
+#endif
 
 namespace mindspore {
 namespace dataset {
-AlbumOp::Builder::Builder() : builder_decode_(false), builder_sampler_(nullptr), builder_schema_file_("") {
+AlbumOp::Builder::Builder() : builder_decode_(false), builder_sampler_(nullptr) {
   std::shared_ptr<ConfigManager> cfg = GlobalContext::config_manager();
   builder_num_workers_ = cfg->num_parallel_workers();
   builder_rows_per_buffer_ = cfg->rows_per_buffer();
@@ -38,7 +42,7 @@ Status AlbumOp::Builder::Build(std::shared_ptr<AlbumOp> *ptr) {
   if (builder_sampler_ == nullptr) {
     const int64_t num_samples = 0;  // default num samples of 0 means to sample entire set of data
     const int64_t start_index = 0;
-    builder_sampler_ = std::make_shared<SequentialSampler>(start_index, num_samples);
+    builder_sampler_ = std::make_shared<SequentialSamplerRT>(start_index, num_samples);
   }
 
   builder_schema_ = std::make_unique<DataSchema>();
@@ -58,9 +62,8 @@ Status AlbumOp::Builder::Build(std::shared_ptr<AlbumOp> *ptr) {
 Status AlbumOp::Builder::SanityCheck() {
   Path dir(builder_dir_);
   std::string err_msg;
-  err_msg += dir.IsDirectory() == false
-               ? "Invalid parameter, Album path is invalid or not set, path: " + builder_dir_ + ".\n"
-               : "";
+  err_msg +=
+    !dir.IsDirectory() ? "Invalid parameter, Album path is invalid or not set, path: " + builder_dir_ + ".\n" : "";
   err_msg += builder_num_workers_ <= 0 ? "Invalid parameter, num_parallel_workers must be greater than 0, but got " +
                                            std::to_string(builder_num_workers_) + ".\n"
                                        : "";
@@ -69,7 +72,7 @@ Status AlbumOp::Builder::SanityCheck() {
 
 AlbumOp::AlbumOp(int32_t num_wkrs, int32_t rows_per_buffer, std::string file_dir, int32_t queue_size, bool do_decode,
                  const std::set<std::string> &exts, std::unique_ptr<DataSchema> data_schema,
-                 std::shared_ptr<Sampler> sampler)
+                 std::shared_ptr<SamplerRT> sampler)
     : ParallelOp(num_wkrs, queue_size, std::move(sampler)),
       rows_per_buffer_(rows_per_buffer),
       folder_path_(file_dir),
@@ -88,11 +91,14 @@ AlbumOp::AlbumOp(int32_t num_wkrs, int32_t rows_per_buffer, std::string file_dir
 }
 
 // Helper function for string comparison
+// album sorts the files via numerical values, so this is not a simple string comparison
 bool StrComp(const std::string &a, const std::string &b) {
-  // returns 1 if string a is alphabetically
-  // less than string b
-  // quite similar to strcmp operation
-  return a < b;
+  // returns 1 if string "a" represent a numeric value less than string "b"
+  // the following will always return name, provided there is only one "." character in name
+  // "." character is guaranteed to exist since the extension is checked befor this function call.
+  int64_t value_a = std::stoi(a.substr(1, a.find(".")).c_str());
+  int64_t value_b = std::stoi(b.substr(1, b.find(".")).c_str());
+  return value_a < value_b;
 }
 
 // Single thread to go through the folder directory and gets all file names
@@ -137,7 +143,7 @@ Status AlbumOp::operator()() {
     while (sampler_buffer->eoe() == false) {
       TensorRow sample_row;
       RETURN_IF_NOT_OK(sampler_buffer->PopRow(&sample_row));
-      std::shared_ptr<Tensor> sample_ids = sample_row[0];
+      TensorPtr sample_ids = sample_row[0];
       for (auto itr = sample_ids->begin<int64_t>(); itr != sample_ids->end<int64_t>(); ++itr) {
         if ((*itr) >= num_rows_) continue;  // index out of bound, skipping
         keys.push_back(*itr);
@@ -218,20 +224,21 @@ Status AlbumOp::WorkerEntry(int32_t worker_id) {
 
 // Only support JPEG/PNG/GIF/BMP
 // Optimization: Could take in a tensor
-Status AlbumOp::CheckImageType(const std::string &file_name, bool *valid) {
+// This function does not return status because we want to just skip bad input, not crash
+bool AlbumOp::CheckImageType(const std::string &file_name, bool *valid) {
   std::ifstream file_handle;
   constexpr int read_num = 3;
   *valid = false;
   file_handle.open(file_name, std::ios::binary | std::ios::in);
   if (!file_handle.is_open()) {
-    RETURN_STATUS_UNEXPECTED("Invalid file, can not open image file: " + file_name);
+    return false;
   }
   unsigned char file_type[read_num];
   (void)file_handle.read(reinterpret_cast<char *>(file_type), read_num);
 
   if (file_handle.fail()) {
     file_handle.close();
-    RETURN_STATUS_UNEXPECTED("Invalid data, failed to read image file: " + file_name);
+    return false;
   }
   file_handle.close();
   if (file_type[0] == 0xff && file_type[1] == 0xd8 && file_type[2] == 0xff) {
@@ -239,40 +246,54 @@ Status AlbumOp::CheckImageType(const std::string &file_name, bool *valid) {
     // JPEG with EXIF stats with \xff\xd8\xff\xe1
     // Use \xff\xd8\xff to cover both.
     *valid = true;
-  } else if (file_type[0] == 0x89 && file_type[1] == 0x50 && file_type[2] == 0x4e) {
-    // It's a PNG
-    *valid = true;
-  } else if (file_type[0] == 0x47 && file_type[1] == 0x49 && file_type[2] == 0x46) {
-    // It's a GIF
-    *valid = true;
-  } else if (file_type[0] == 0x42 && file_type[1] == 0x4d) {
-    // It's a BMP
-    *valid = true;
   }
-  return Status::OK();
+  return true;
 }
 
 Status AlbumOp::LoadImageTensor(const std::string &image_file_path, uint32_t col_num, TensorRow *row) {
-  std::shared_ptr<Tensor> image;
+  TensorPtr image;
   std::ifstream fs;
   fs.open(image_file_path, std::ios::binary | std::ios::in);
   if (fs.fail()) {
-    MS_LOG(INFO) << "Image file not found:" << image_file_path << ".";
-    // If file doesn't exist, we don't flag this as error in input check, simply skip
+    MS_LOG(WARNING) << "File not found:" << image_file_path << ".";
+    // If file doesn't exist, we don't flag this as error in input check, simply push back empty tensor
+    RETURN_IF_NOT_OK(LoadEmptyTensor(col_num, row));
+    return Status::OK();
+  }
+  fs.close();
+  // Hack logic to replace png images with empty tensor
+  Path file(image_file_path);
+  std::set<std::string> png_ext = {".png", ".PNG"};
+  if (png_ext.find(file.Extension()) != png_ext.end()) {
+    // load empty tensor since image is not jpg
+    MS_LOG(INFO) << "PNG!" << image_file_path << ".";
+    RETURN_IF_NOT_OK(LoadEmptyTensor(col_num, row));
+    return Status::OK();
+  }
+  // treat bin files separately
+  std::set<std::string> bin_ext = {".bin", ".BIN"};
+  if (bin_ext.find(file.Extension()) != bin_ext.end()) {
+    // load empty tensor since image is not jpg
+    MS_LOG(INFO) << "Bin file found" << image_file_path << ".";
+    RETURN_IF_NOT_OK(Tensor::CreateFromFile(image_file_path, &image));
+    row->push_back(std::move(image));
     return Status::OK();
   }
 
-  MS_LOG(INFO) << "Image file found: " << image_file_path << ".";
-
   // check that the file is an image before decoding
   bool valid = false;
-  RETURN_IF_NOT_OK(CheckImageType(image_file_path, &valid));
+  bool check_success = CheckImageType(image_file_path, &valid);
+  if (!check_success || !valid) {
+    RETURN_IF_NOT_OK(LoadEmptyTensor(col_num, row));
+    return Status::OK();
+  }
+  // if it is a jpeg image, load and try to decode
   RETURN_IF_NOT_OK(Tensor::CreateFromFile(image_file_path, &image));
   if (decode_ && valid) {
     Status rc = Decode(image, &image);
     if (rc.IsError()) {
-      std::string err = "Invalid data, failed to decode image: " + image_file_path;
-      RETURN_STATUS_UNEXPECTED(err);
+      RETURN_IF_NOT_OK(LoadEmptyTensor(col_num, row));
+      return Status::OK();
     }
   }
   row->push_back(std::move(image));
@@ -283,7 +304,7 @@ Status AlbumOp::LoadStringArrayTensor(const nlohmann::json &json_obj, uint32_t c
   std::vector<std::string> data = json_obj;
 
   MS_LOG(INFO) << "String array label found: " << data << ".";
-  std::shared_ptr<Tensor> label;
+  TensorPtr label;
   RETURN_IF_NOT_OK(Tensor::CreateFromVector(data, &label));
   row->push_back(std::move(label));
   return Status::OK();
@@ -294,16 +315,16 @@ Status AlbumOp::LoadStringTensor(const nlohmann::json &json_obj, uint32_t col_nu
   // now we iterate over the elements in json
 
   MS_LOG(INFO) << "String label found: " << data << ".";
-  std::shared_ptr<Tensor> label;
+  TensorPtr label;
   RETURN_IF_NOT_OK(Tensor::CreateScalar<std::string>(data, &label));
   row->push_back(std::move(label));
   return Status::OK();
 }
 
 Status AlbumOp::LoadIntArrayTensor(const nlohmann::json &json_obj, uint32_t col_num, TensorRow *row) {
-  std::shared_ptr<Tensor> label;
+  TensorPtr label;
   // consider templating this function to handle all ints
-  if (data_schema_->column(col_num).type() == DataType(DataType::DE_INT64)) {
+  if (data_schema_->column(col_num).type() == DataType::DE_INT64) {
     std::vector<int64_t> data;
 
     // Iterate over the integer list and add those values to the output shape tensor
@@ -312,7 +333,7 @@ Status AlbumOp::LoadIntArrayTensor(const nlohmann::json &json_obj, uint32_t col_
     (void)std::transform(items.begin(), items.end(), std::back_inserter(data), [](it_type j) { return j.value(); });
 
     RETURN_IF_NOT_OK(Tensor::CreateFromVector(data, &label));
-  } else if (data_schema_->column(col_num).type() == DataType(DataType::DE_INT32)) {
+  } else if (data_schema_->column(col_num).type() == DataType::DE_INT32) {
     std::vector<int32_t> data;
 
     // Iterate over the integer list and add those values to the output shape tensor
@@ -320,7 +341,6 @@ Status AlbumOp::LoadIntArrayTensor(const nlohmann::json &json_obj, uint32_t col_
     using it_type = decltype(items.begin());
     (void)std::transform(items.begin(), items.end(), std::back_inserter(data), [](it_type j) { return j.value(); });
 
-    MS_LOG(INFO) << "Int array found: " << data << ".";
     RETURN_IF_NOT_OK(Tensor::CreateFromVector(data, &label));
   } else {
     RETURN_STATUS_UNEXPECTED("Invalid data, column type is neither int32 nor int64, it is " +
@@ -330,16 +350,45 @@ Status AlbumOp::LoadIntArrayTensor(const nlohmann::json &json_obj, uint32_t col_
   return Status::OK();
 }
 
+Status AlbumOp::LoadFloatArrayTensor(const nlohmann::json &json_obj, uint32_t col_num, TensorRow *row) {
+  TensorPtr float_array;
+  // consider templating this function to handle all ints
+  if (data_schema_->column(col_num).type() == DataType::DE_FLOAT64) {
+    std::vector<double> data;
+
+    // Iterate over the integer list and add those values to the output shape tensor
+    auto items = json_obj.items();
+    using it_type = decltype(items.begin());
+    (void)std::transform(items.begin(), items.end(), std::back_inserter(data), [](it_type j) { return j.value(); });
+
+    RETURN_IF_NOT_OK(Tensor::CreateFromVector(data, &float_array));
+  } else if (data_schema_->column(col_num).type() == DataType::DE_FLOAT32) {
+    std::vector<float> data;
+
+    // Iterate over the integer list and add those values to the output shape tensor
+    auto items = json_obj.items();
+    using it_type = decltype(items.begin());
+    (void)std::transform(items.begin(), items.end(), std::back_inserter(data), [](it_type j) { return j.value(); });
+
+    RETURN_IF_NOT_OK(Tensor::CreateFromVector(data, &float_array));
+  } else {
+    RETURN_STATUS_UNEXPECTED("Invalid data, column type is neither float32 nor float64, it is " +
+                             data_schema_->column(col_num).type().ToString());
+  }
+  row->push_back(std::move(float_array));
+  return Status::OK();
+}
+
 Status AlbumOp::LoadIDTensor(const std::string &file, uint32_t col_num, TensorRow *row) {
-  if (data_schema_->column(col_num).type() == DataType(DataType::DE_STRING)) {
-    std::shared_ptr<Tensor> id;
+  if (data_schema_->column(col_num).type() == DataType::DE_STRING) {
+    TensorPtr id;
     RETURN_IF_NOT_OK(Tensor::CreateScalar<std::string>(file, &id));
     row->push_back(std::move(id));
     return Status::OK();
   }
   // hack to get the file name without extension, the 1 is to get rid of the backslash character
-  int64_t image_id = std::atoi(file.substr(1, file.find(".")).c_str());
-  std::shared_ptr<Tensor> id;
+  int64_t image_id = std::stoi(file.substr(1, file.find(".")).c_str());
+  TensorPtr id;
   RETURN_IF_NOT_OK(Tensor::CreateScalar<int64_t>(image_id, &id));
   MS_LOG(INFO) << "File ID " << image_id << ".";
   row->push_back(std::move(id));
@@ -348,8 +397,8 @@ Status AlbumOp::LoadIDTensor(const std::string &file, uint32_t col_num, TensorRo
 
 Status AlbumOp::LoadEmptyTensor(uint32_t col_num, TensorRow *row) {
   // hack to get the file name without extension, the 1 is to get rid of the backslash character
-  std::shared_ptr<Tensor> empty_tensor;
-  RETURN_IF_NOT_OK(Tensor::CreateEmpty(TensorShape({}), data_schema_->column(col_num).type(), &empty_tensor));
+  TensorPtr empty_tensor;
+  RETURN_IF_NOT_OK(Tensor::CreateEmpty(TensorShape({0}), data_schema_->column(col_num).type(), &empty_tensor));
   row->push_back(std::move(empty_tensor));
   return Status::OK();
 }
@@ -359,12 +408,12 @@ Status AlbumOp::LoadEmptyTensor(uint32_t col_num, TensorRow *row) {
 // Float64 doesn't work with reinterpret cast here. Otherwise we limit the float in the schema to
 // only be float32, seems like a weird limitation to impose
 Status AlbumOp::LoadFloatTensor(const nlohmann::json &json_obj, uint32_t col_num, TensorRow *row) {
-  std::shared_ptr<Tensor> float_tensor;
-  if (data_schema_->column(col_num).type() == DataType(DataType::DE_FLOAT64)) {
+  TensorPtr float_tensor;
+  if (data_schema_->column(col_num).type() == DataType::DE_FLOAT64) {
     double data = json_obj;
     MS_LOG(INFO) << "double found: " << json_obj << ".";
     RETURN_IF_NOT_OK(Tensor::CreateScalar<double>(data, &float_tensor));
-  } else if (data_schema_->column(col_num).type() == DataType(DataType::DE_FLOAT32)) {
+  } else if (data_schema_->column(col_num).type() == DataType::DE_FLOAT32) {
     float data = json_obj;
     RETURN_IF_NOT_OK(Tensor::CreateScalar<float>(data, &float_tensor));
     MS_LOG(INFO) << "float found: " << json_obj << ".";
@@ -373,12 +422,30 @@ Status AlbumOp::LoadFloatTensor(const nlohmann::json &json_obj, uint32_t col_num
   return Status::OK();
 }
 
-// Load 1 TensorRow (image,label) using 1 ImageColumns. 1 function call produces 1 TensorTow in a DataBuffer
+// Loads a tensor with int value, we have to cast the value to type specified in the schema.
+Status AlbumOp::LoadIntTensor(const nlohmann::json &json_obj, uint32_t col_num, TensorRow *row) {
+  TensorPtr int_tensor;
+  if (data_schema_->column(col_num).type() == DataType::DE_INT64) {
+    int64_t data = json_obj;
+    MS_LOG(INFO) << "int64 found: " << json_obj << ".";
+    RETURN_IF_NOT_OK(Tensor::CreateScalar<int64_t>(data, &int_tensor));
+  } else if (data_schema_->column(col_num).type() == DataType::DE_INT32) {
+    int32_t data = json_obj;
+    RETURN_IF_NOT_OK(Tensor::CreateScalar<int32_t>(data, &int_tensor));
+    MS_LOG(INFO) << "int32 found: " << json_obj << ".";
+  }
+  row->push_back(std::move(int_tensor));
+  return Status::OK();
+}
+
+// Load 1 TensorRow (image,label) using 1 ImageColumns. 1 function call produces 1 TensorRow in a DataBuffer
 // possible optimization: the helper functions of LoadTensorRow should be optimized
 // to take a reference to a column descriptor?
-Status AlbumOp::LoadTensorRow(const std::string &file, TensorRow *row) {
+// the design of this class is to make the code more readable, forgoing minor perfomance gain like
+// getting rid of duplicated checks
+Status AlbumOp::LoadTensorRow(row_id_type row_id, const std::string &file, TensorRow *row) {
   // testing here is to just print out file path
-  (*row) = {};
+  (*row) = TensorRow(row_id, {});
   MS_LOG(INFO) << "Image row file: " << file << ".";
 
   std::ifstream file_handle(folder_path_ + file);
@@ -395,7 +462,7 @@ Status AlbumOp::LoadTensorRow(const std::string &file, TensorRow *row) {
       // get columns in schema:
       int32_t columns = data_schema_->NumColumns();
 
-      // loop over each column descriptor, this can optimized by swtich cases
+      // loop over each column descriptor, this can optimized by switch cases
       for (int32_t i = 0; i < columns; i++) {
         // special case to handle
         if (data_schema_->column(i).name() == "id") {
@@ -414,30 +481,42 @@ Status AlbumOp::LoadTensorRow(const std::string &file, TensorRow *row) {
         MS_LOG(INFO) << "This column is: " << data_schema_->column(i).name() << ".";
         bool is_array = column_value.is_array();
         // load single string
-        if (column_value.is_string() && data_schema_->column(i).type() == DataType(DataType::DE_STRING)) {
+        if (column_value.is_string() && data_schema_->column(i).type() == DataType::DE_STRING) {
           RETURN_IF_NOT_OK(LoadStringTensor(column_value, i, row));
           continue;
         }
         // load string array
-        if (is_array && data_schema_->column(i).type() == DataType(DataType::DE_STRING)) {
+        if (is_array && data_schema_->column(i).type() == DataType::DE_STRING) {
           RETURN_IF_NOT_OK(LoadStringArrayTensor(column_value, i, row));
           continue;
         }
         // load image file
-        if (column_value.is_string() && data_schema_->column(i).type() != DataType(DataType::DE_STRING)) {
+        if (column_value.is_string() && data_schema_->column(i).type() != DataType::DE_STRING) {
           std::string image_file_path = column_value;
           RETURN_IF_NOT_OK(LoadImageTensor(image_file_path, i, row));
           continue;
         }
-        // load float array
-        if (!is_array && (data_schema_->column(i).type() == DataType(DataType::DE_FLOAT32) ||
-                          data_schema_->column(i).type() == DataType(DataType::DE_FLOAT64))) {
+        // load float value
+        if (!is_array && (data_schema_->column(i).type() == DataType::DE_FLOAT32 ||
+                          data_schema_->column(i).type() == DataType::DE_FLOAT64)) {
           RETURN_IF_NOT_OK(LoadFloatTensor(column_value, i, row));
           continue;
         }
+        // load float array
+        if (is_array && (data_schema_->column(i).type() == DataType::DE_FLOAT32 ||
+                         data_schema_->column(i).type() == DataType::DE_FLOAT64)) {
+          RETURN_IF_NOT_OK(LoadFloatArrayTensor(column_value, i, row));
+          continue;
+        }
+        // int value
+        if (!is_array && (data_schema_->column(i).type() == DataType::DE_INT64 ||
+                          data_schema_->column(i).type() == DataType::DE_INT32)) {
+          RETURN_IF_NOT_OK(LoadIntTensor(column_value, i, row));
+          continue;
+        }
         // int array
-        if (is_array && (data_schema_->column(i).type() == DataType(DataType::DE_INT64) ||
-                         data_schema_->column(i).type() == DataType(DataType::DE_INT32))) {
+        if (is_array && (data_schema_->column(i).type() == DataType::DE_INT64 ||
+                         data_schema_->column(i).type() == DataType::DE_INT32)) {
           RETURN_IF_NOT_OK(LoadIntArrayTensor(column_value, i, row));
           continue;
         } else {
@@ -460,7 +539,7 @@ Status AlbumOp::LoadBuffer(const std::vector<int64_t> &keys, std::unique_ptr<Dat
   TensorRow trow;
 
   for (const int64_t &key : keys) {
-    RETURN_IF_NOT_OK(this->LoadTensorRow(image_rows_[key], &trow));
+    RETURN_IF_NOT_OK(this->LoadTensorRow(key, image_rows_[key], &trow));
     deq->push_back(std::move(trow));
   }
   (*db)->set_tensor_table(std::move(deq));
@@ -479,7 +558,8 @@ void AlbumOp::Print(std::ostream &out, bool show_all) const {
     // Call the super class for displaying any common detailed info
     ParallelOp::Print(out, show_all);
     // Then show any custom derived-internal stuff
-    out << "\nNumber of rows:" << num_rows_ << "\nAlbum directory: " << folder_path_ << "\n\n";
+    out << "\nNumber of rows:" << num_rows_ << "\nAlbum directory: " << folder_path_
+        << "\nDecode: " << (decode_ ? "yes" : "no") << "\n\n";
   }
 }
 

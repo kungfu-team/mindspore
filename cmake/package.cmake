@@ -25,6 +25,10 @@ elseif (ENABLE_CPU)
     set(CPACK_MS_BACKEND "ms")
     set(CPACK_MS_TARGET "cpu")
     set(CPACK_MS_PACKAGE_NAME "mindspore")
+elseif (ENABLE_ACL)
+    set(CPACK_MS_BACKEND "debug")
+    set(CPACK_MS_TARGET "ascend-gpu-cpu")
+    set(CPACK_MS_PACKAGE_NAME "mindspore-ascend")
 else ()
     set(CPACK_MS_BACKEND "debug")
     set(CPACK_MS_TARGET "ascend-gpu-cpu")
@@ -37,6 +41,7 @@ set(INSTALL_LIB_DIR ${CMAKE_INSTALL_LIBDIR} CACHE PATH "Installation directory f
 set(INSTALL_PY_DIR ".")
 set(INSTALL_BASE_DIR ".")
 set(INSTALL_BIN_DIR "bin")
+set(INSTALL_CFG_DIR "config")
 
 if (CMAKE_SYSTEM_NAME MATCHES "Windows")
     set(INSTALL_LIB_DIR ".")
@@ -59,9 +64,15 @@ install(
 )
 
 install(
-        TARGETS mindspore_gvar
-        DESTINATION ${INSTALL_LIB_DIR}
-        COMPONENT mindspore
+    TARGETS mindspore_shared_lib
+    LIBRARY DESTINATION ${INSTALL_LIB_DIR}
+    COMPONENT mindspore
+)
+
+install(
+    TARGETS mindspore_gvar
+    DESTINATION ${INSTALL_LIB_DIR}
+    COMPONENT mindspore
 )
 
 if (USE_GLOG)
@@ -72,6 +83,17 @@ if (USE_GLOG)
         COMPONENT mindspore
     )
 endif ()
+
+file(GLOB_RECURSE LIBEVENT_LIB_LIST
+        ${libevent_LIBPATH}/libevent*${CMAKE_SHARED_LIBRARY_SUFFIX}*
+        ${libevent_LIBPATH}/libevent_pthreads*${CMAKE_SHARED_LIBRARY_SUFFIX}*
+        )
+
+install(
+        FILES ${LIBEVENT_LIB_LIST}
+        DESTINATION ${INSTALL_LIB_DIR}
+        COMPONENT mindspore
+)
 
 if (ENABLE_MINDDATA)
     install(
@@ -97,11 +119,9 @@ if (ENABLE_MINDDATA)
         DESTINATION ${INSTALL_LIB_DIR}
         COMPONENT mindspore
     )
-    file(GLOB_RECURSE TINYXML2_LIB_LIST
-	    ${tinyxml2_LIBPATH}/libtinyxml2*
-    )
+    file(GLOB_RECURSE TINYXML2_LIB_LIST ${tinyxml2_LIBPATH}/libtinyxml2*)
     install(
-	FILES ${TINYXML2_LIB_LIST}
+        FILES ${TINYXML2_LIB_LIST}
         DESTINATION ${INSTALL_LIB_DIR}
         COMPONENT mindspore
     )
@@ -176,7 +196,15 @@ if (ENABLE_GPU)
     )
 endif ()
 
-if (ENABLE_SERVING OR ENABLE_TESTCASES)
+if (ENABLE_CPU AND (ENABLE_D OR ENABLE_GPU))
+    install(
+        TARGETS ps_cache
+        DESTINATION ${INSTALL_LIB_DIR}
+        COMPONENT mindspore
+    )
+endif()
+
+if (ENABLE_TESTCASES)
     file(GLOB_RECURSE LIBEVENT_LIB_LIST
             ${libevent_LIBPATH}/libevent*
             ${libevent_LIBPATH}/libevent_pthreads*
@@ -184,7 +212,7 @@ if (ENABLE_SERVING OR ENABLE_TESTCASES)
 endif ()
 
 if (NOT ENABLE_GE)
-    if (ENABLE_D)
+    if (ENABLE_D OR ENABLE_ACL)
         if (DEFINED ENV{ASCEND_CUSTOM_PATH})
             set(ASCEND_PATH $ENV{ASCEND_CUSTOM_PATH})
         else ()
@@ -193,19 +221,31 @@ if (NOT ENABLE_GE)
         set(ASCEND_DRIVER_PATH ${ASCEND_PATH}/driver/lib64/common)
 
         install(
-            FILES
-                ${CMAKE_BINARY_DIR}/graphengine/src/common/graph/libgraph.so
-                ${CMAKE_BINARY_DIR}/graphengine/src/ge/common/libge_common.so
-                ${CMAKE_BINARY_DIR}/graphengine/src/ge/ge_runtime/libge_runtime.so
-                ${CMAKE_SOURCE_DIR}/build/graphengine/libc_sec.so
+            FILES ${CMAKE_SOURCE_DIR}/build/graphengine/c_sec/lib/libc_sec.so
             DESTINATION ${INSTALL_LIB_DIR}
             COMPONENT mindspore
         )
+
+        if (ENABLE_D)
+            install(
+                TARGETS ms_profile
+                DESTINATION ${INSTALL_LIB_DIR}
+                COMPONENT mindspore
+            )
+            install(
+                FILES
+                    ${CMAKE_BINARY_DIR}/graphengine/metadef/graph/libgraph.so
+                    ${CMAKE_BINARY_DIR}/graphengine/ge/common/libge_common.so
+                    ${CMAKE_BINARY_DIR}/graphengine/ge/ge_runtime/libge_runtime.so
+                DESTINATION ${INSTALL_LIB_DIR}
+                COMPONENT mindspore
+            )
+        endif ()
     elseif (ENABLE_TESTCASES)
         install(
             FILES
-                ${CMAKE_BINARY_DIR}/graphengine/src/common/graph/libgraph.so
-                ${CMAKE_SOURCE_DIR}/build/graphengine/libc_sec.so
+                ${CMAKE_BINARY_DIR}/graphengine/metadef/graph/libgraph.so
+                ${CMAKE_SOURCE_DIR}/build/graphengine/c_sec/lib/libc_sec.so
                 ${LIBEVENT_LIB_LIST}
             DESTINATION ${INSTALL_LIB_DIR}
             COMPONENT mindspore
@@ -243,11 +283,14 @@ install(
         ${CMAKE_SOURCE_DIR}/mindspore/_extends
         ${CMAKE_SOURCE_DIR}/mindspore/parallel
         ${CMAKE_SOURCE_DIR}/mindspore/mindrecord
+        ${CMAKE_SOURCE_DIR}/mindspore/numpy
         ${CMAKE_SOURCE_DIR}/mindspore/train
         ${CMAKE_SOURCE_DIR}/mindspore/common
         ${CMAKE_SOURCE_DIR}/mindspore/ops
         ${CMAKE_SOURCE_DIR}/mindspore/communication
         ${CMAKE_SOURCE_DIR}/mindspore/profiler
+        ${CMAKE_SOURCE_DIR}/mindspore/explainer
+        ${CMAKE_SOURCE_DIR}/mindspore/compression
     DESTINATION ${INSTALL_PY_DIR}
     COMPONENT mindspore
 )
@@ -270,29 +313,29 @@ if (EXISTS ${CMAKE_SOURCE_DIR}/mindspore/dataset)
     )
 endif ()
 
-if (ENABLE_SERVING)
-    install(
-        TARGETS ms_serving
-        DESTINATION ${INSTALL_BASE_DIR}
-        COMPONENT mindspore
-    )
+## Public header files
+install(
+    DIRECTORY ${CMAKE_SOURCE_DIR}/include
+    DESTINATION ${INSTALL_BASE_DIR}
+    COMPONENT mindspore
+)
 
-    install(
-        FILES ${CMAKE_SOURCE_DIR}/build/mindspore/serving/ms_service_pb2.py
-              ${CMAKE_SOURCE_DIR}/build/mindspore/serving/ms_service_pb2_grpc.py
-        DESTINATION ${INSTALL_PY_DIR}
-        COMPONENT mindspore
-    )
+## Public header files for minddata
+install(
+    FILES ${CMAKE_SOURCE_DIR}/mindspore/ccsrc/minddata/dataset/include/constants.h
+          ${CMAKE_SOURCE_DIR}/mindspore/ccsrc/minddata/dataset/include/status.h
+          ${CMAKE_SOURCE_DIR}/mindspore/ccsrc/minddata/dataset/include/transforms.h
+          ${CMAKE_SOURCE_DIR}/mindspore/ccsrc/minddata/dataset/include/vision.h
+          ${CMAKE_SOURCE_DIR}/mindspore/ccsrc/minddata/dataset/include/vision_lite.h
+          ${CMAKE_SOURCE_DIR}/mindspore/ccsrc/minddata/dataset/include/minddata_eager.h
+    DESTINATION ${INSTALL_BASE_DIR}/include/minddata/dataset/include
+    COMPONENT mindspore
+)
 
-    install(
-        TARGETS inference
-        DESTINATION ${INSTALL_LIB_DIR}
-        COMPONENT mindspore
-    )
+## config files
+install(
+    FILES ${CMAKE_SOURCE_DIR}/config/op_info.config
+    DESTINATION ${INSTALL_CFG_DIR}
+    COMPONENT mindspore
+)
 
-    install(
-            FILES ${LIBEVENT_LIB_LIST}
-            DESTINATION ${INSTALL_LIB_DIR}
-            COMPONENT mindspore
-    )
-endif ()

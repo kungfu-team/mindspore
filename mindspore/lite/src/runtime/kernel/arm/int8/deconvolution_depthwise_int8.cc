@@ -43,7 +43,7 @@ DeconvolutionDepthwiseInt8CPUKernel::~DeconvolutionDepthwiseInt8CPUKernel() {
 int DeconvolutionDepthwiseInt8CPUKernel::InitWeightBias() {
   // init weight: int8 -> int16
   // o, h, w, i -> o/8, h, w, i, 8; o == group, i == 1
-  auto weight_tensor = in_tensors_[kWeightIndex];
+  auto weight_tensor = in_tensors_.at(kWeightIndex);
   auto origin_weight = reinterpret_cast<int8_t *>(weight_tensor->MutableData());
   int OC4 = UP_DIV(weight_tensor->Batch(), C4NUM);
   int pack_weight_size = C4NUM * OC4 * weight_tensor->Height() * weight_tensor->Width();
@@ -111,13 +111,9 @@ int DeconvolutionDepthwiseInt8CPUKernel::InitBuffer() {
     memset(packed_output_, 0, pack_output_size * sizeof(int8_t));
   }
 
-  output_buffer_ = reinterpret_cast<int32_t *>(
-    context_->allocator->Malloc(conv_param_->output_h_ * conv_param_->output_w_ * C4NUM * sizeof(int32_t)));
+  output_buffer_ = reinterpret_cast<int32_t *>(context_->allocator->Malloc(
+    conv_param_->output_h_ * conv_param_->output_w_ * C4NUM * conv_param_->thread_num_ * sizeof(int32_t)));
   if (output_buffer_ == nullptr) {
-    MS_LOG(ERROR) << "Malloc buffer failed.";
-    return RET_ERROR;
-  }
-  if (packed_input_ == nullptr) {
     MS_LOG(ERROR) << "Malloc buffer failed.";
     return RET_ERROR;
   }
@@ -149,17 +145,12 @@ int DeconvolutionDepthwiseInt8CPUKernel::Init() {
 int DeconvolutionDepthwiseInt8CPUKernel::ReSize() {
   InitSlideParam();
   ConvolutionBaseCPUKernel::Init();
-
-  auto ret = InitBuffer();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Deconv Depthwise int8 InitBuffer error!";
-    return ret;
-  }
   return RET_OK;
 }
 
 int DeconvolutionDepthwiseInt8CPUKernel::Execute(int task_id) {
-  DeconvDwInt8(packed_output_, output_buffer_, packed_input_, packed_weight_, reinterpret_cast<int32_t *>(bias_data_),
+  auto buffer = output_buffer_ + conv_param_->output_h_ * conv_param_->output_w_ * C4NUM * task_id;
+  DeconvDwInt8(packed_output_, buffer, packed_input_, packed_weight_, reinterpret_cast<int32_t *>(bias_data_),
                conv_param_, sliding, task_id);
   return RET_OK;
 }
@@ -175,14 +166,21 @@ int DeconvDwInt8Run(void *cdata, int task_id) {
 }
 
 int DeconvolutionDepthwiseInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare failed.";
-    return RET_ERROR;
-  }
   if (conv_param_->input_channel_ != conv_param_->output_channel_) {
     MS_LOG(ERROR) << "Only support input channel equals output channel.";
     return RET_ERROR;
+  }
+  auto ret = InitBuffer();
+  if (ret != RET_OK) {
+    MS_LOG(ERROR) << "Deconv Depthwise int8 InitBuffer error!";
+    context_->allocator->Free(packed_input_);
+    packed_input_ = nullptr;
+    context_->allocator->Free(output_buffer_);
+    output_buffer_ = nullptr;
+    if (need_align_) {
+      context_->allocator->Free(packed_output_);
+    }
+    return ret;
   }
 
   // pack input, assume input format: NHWC -> NHWC4
@@ -199,17 +197,19 @@ int DeconvolutionDepthwiseInt8CPUKernel::Run() {
   ret = ParallelLaunch(this->context_->thread_pool_, DeconvDwInt8Run, this, conv_param_->thread_num_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "DeconvDwInt8Run error: error_code[" << ret << "]";
-    return RET_ERROR;
   }
 
   if (need_align_) {
     PackNHWC4ToNHWCInt8(packed_output_, output_addr, conv_param_->output_batch_,
                         conv_param_->output_h_ * conv_param_->output_w_, conv_param_->output_channel_);
     context_->allocator->Free(packed_output_);
+    packed_output_ = nullptr;
   }
   context_->allocator->Free(packed_input_);
+  packed_input_ = nullptr;
   context_->allocator->Free(output_buffer_);
-  return RET_OK;
+  output_buffer_ = nullptr;
+  return ret;
 }
 
 kernel::LiteKernel *CpuDeconvDwInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
@@ -222,13 +222,14 @@ kernel::LiteKernel *CpuDeconvDwInt8KernelCreator(const std::vector<lite::Tensor 
     new (std::nothrow) kernel::DeconvolutionDepthwiseInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
   if (kernel == nullptr) {
     MS_LOG(ERROR) << "kernel is nullptr.";
+    free(opParameter);
     return nullptr;
   }
   auto ret = kernel->Init();
   if (ret != RET_OK) {
-    delete kernel;
     MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
                   << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
+    delete kernel;
     return nullptr;
   }
   return kernel;

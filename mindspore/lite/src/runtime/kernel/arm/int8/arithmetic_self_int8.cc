@@ -29,12 +29,12 @@ using mindspore::lite::RET_OK;
 namespace mindspore::kernel {
 int ArithmeticSelfInt8CPUKernel::Init() {
   auto *input_tensor = in_tensors_.at(kInputIndex);
-  auto in_quant_args = input_tensor->GetQuantParams();
+  auto in_quant_args = input_tensor->quant_params();
   para_->quant_arg_.in_args_.scale_ = in_quant_args.front().scale;
   para_->quant_arg_.in_args_.zp_ = in_quant_args.front().zeroPoint * (-1);
 
   auto *out_tensor = out_tensors_.at(kOutputIndex);
-  auto out_quant_args = out_tensor->GetQuantParams();
+  auto out_quant_args = out_tensor->quant_params();
   para_->quant_arg_.out_args_.scale_ = out_quant_args.front().scale;
   para_->quant_arg_.out_args_.zp_ = out_quant_args.front().zeroPoint;
 
@@ -95,16 +95,11 @@ int ArithmeticSelfInt8CPUKernel::DoArithmeticSelf(int task_id) {
 }
 
 int ArithmeticSelfInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << ret;
-    return ret;
-  }
   auto input_tensor = in_tensors_.at(0);
   auto out_tensor = out_tensors_.at(0);
   in_ptr_ = reinterpret_cast<int8_t *>(input_tensor->MutableData());
   out_ptr_ = reinterpret_cast<int8_t *>(out_tensor->MutableData());
-  ret = ParallelLaunch(this->context_->thread_pool_, ArithmeticSelfInt8Runs, this, thread_sz_count_);
+  auto ret = ParallelLaunch(this->context_->thread_pool_, ArithmeticSelfInt8Runs, this, thread_sz_count_);
   if (ret != RET_OK) {
     MS_LOG(ERROR) << "ArithmeticSelfRun error error_code[" << ret << "]";
     return ret;
@@ -112,42 +107,16 @@ int ArithmeticSelfInt8CPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuArithmeticSelfInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                       const std::vector<lite::Tensor *> &outputs,
-                                                       OpParameter *opParameter, const lite::InnerContext *ctx,
-                                                       const kernel::KernelKey &desc,
-                                                       const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(opParameter != nullptr);
-  if (opParameter == nullptr) {
-    MS_LOG(ERROR) << "Creator failed, opParameter is nullptr!";
-    return nullptr;
-  }
-
-  auto *kernel = new (std::nothrow) ArithmeticSelfInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    MS_LOG(ERROR) << "new ArithmeticSelfInt8CPUKernel fail!";
-    return nullptr;
-  }
-
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Round, CpuArithmeticSelfInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Floor, CpuArithmeticSelfInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Ceil, CpuArithmeticSelfInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Abs, CpuArithmeticSelfInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Sin, CpuArithmeticSelfInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Cos, CpuArithmeticSelfInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Log, CpuArithmeticSelfInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Sqrt, CpuArithmeticSelfInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Rsqrt, CpuArithmeticSelfInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Square, CpuArithmeticSelfInt8KernelCreator)
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_LogicalNot, CpuArithmeticSelfInt8KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Round, LiteKernelCreator<ArithmeticSelfInt8CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Floor, LiteKernelCreator<ArithmeticSelfInt8CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Ceil, LiteKernelCreator<ArithmeticSelfInt8CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Abs, LiteKernelCreator<ArithmeticSelfInt8CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Sin, LiteKernelCreator<ArithmeticSelfInt8CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Cos, LiteKernelCreator<ArithmeticSelfInt8CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Log, LiteKernelCreator<ArithmeticSelfInt8CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Sqrt, LiteKernelCreator<ArithmeticSelfInt8CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Rsqrt, LiteKernelCreator<ArithmeticSelfInt8CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Square, LiteKernelCreator<ArithmeticSelfInt8CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_LogicalNot, LiteKernelCreator<ArithmeticSelfInt8CPUKernel>)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Reciprocal, LiteKernelCreator<ArithmeticSelfInt8CPUKernel>)
 }  // namespace mindspore::kernel

@@ -14,24 +14,29 @@
  * limitations under the License.
  */
 
-#ifndef MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_OPCLIB_SIGMOID_PARAMETER_H_
-#define MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_OPCLIB_SIGMOID_PARAMETER_H_
+#ifndef MINDSPORE_LITE_NNACL_SIGMOID_PARAMETER_H_
+#define MINDSPORE_LITE_NNACL_SIGMOID_PARAMETER_H_
 
 #include "nnacl/op_base.h"
 #define SIGMOID_OFFSET_MAX_SIZE 4
 
 typedef struct SigmoidParameter {
+  // primitive parameter
   OpParameter op_parameter_;
+
+  // shape correlative
+  const int *in_shape_;
+  const int *out_shape_;
+
+  // other parameter
   SigmoidQuantArg quant_arg;
   double alpha_;
   int thread_count_;
   int64_t offset_[PRELU_OFFSET_MAX_SIZE];
   int64_t in_offset_[PRELU_OFFSET_MAX_SIZE];
   int64_t axis_;
-  const int *in_shape_;
-  const int *out_shape_;
   int input_dim_;
   int element_num;
 } SigmoidParameter;
 
-#endif  // MINDSPORE_LITE_SRC_RUNTIME_KERNEL_ARM_OPCLIB_SIGMOID_PARAMETER_H_
+#endif  // MINDSPORE_LITE_NNACL_SIGMOID_PARAMETER_H_

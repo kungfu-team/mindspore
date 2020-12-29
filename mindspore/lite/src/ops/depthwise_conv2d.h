@@ -25,11 +25,11 @@
 namespace mindspore {
 namespace lite {
 class DepthwiseConv2D : public PrimitiveC {
-#ifdef PRIMITIVE_WRITEABLE
-  MS_DECLARE_PARENT(DepthwiseConv2D, PrimitiveC);
-
  public:
   DepthwiseConv2D() = default;
+  ~DepthwiseConv2D() = default;
+#ifdef PRIMITIVE_WRITEABLE
+  MS_DECLARE_PARENT(DepthwiseConv2D, PrimitiveC);
   explicit DepthwiseConv2D(schema::PrimitiveT *primitive) : PrimitiveC(primitive) {}
 
   int UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) override;
@@ -47,18 +47,11 @@ class DepthwiseConv2D : public PrimitiveC {
   void SetPadRight(int pad_right);
   void SetDilateW(int dilate_w);
   void SetDilateH(int dilate_h);
-  void SetHasBias(bool has_bias);
   void SetActivationType(int activation_type);
-
 #else
-
- public:
-  DepthwiseConv2D() = default;
-
   int UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::FlatBufferBuilder *fbb) override;
 #endif
 
- public:
   int InferShape(std::vector<lite::Tensor *> inputs_, std::vector<lite::Tensor *> outputs_) override;
   int GetFormat() const;
   int GetChannelIn() const;
@@ -74,7 +67,6 @@ class DepthwiseConv2D : public PrimitiveC {
   int GetPadRight() const;
   int GetDilateW() const;
   int GetDilateH() const;
-  bool GetHasBias() const;
   int GetActivationType() const;
 
   int PadUp() const { return this->pad_u_; }

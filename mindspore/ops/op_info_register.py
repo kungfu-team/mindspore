@@ -45,7 +45,7 @@ def op_info_register(op_info):
             op_info_real = json.dumps(op_info)
         else:
             op_info_real = op_info
-        validator.check_value_type("op_info", op_info_real, [str], None)
+        validator.check_value_type("op_info", op_info_real, [str])
         op_lib = Oplib()
         file_path = os.path.realpath(inspect.getfile(func))
         # keep the path custom ops implementation.
@@ -342,7 +342,7 @@ class AiCPURegOp(RegOp):
 
 
 class TBERegOp(RegOp):
-    """Class for TBE op info register."""
+    """Class for TBE operator information register."""
 
     def __init__(self, op_name):
         super(TBERegOp, self).__init__(op_name)
@@ -631,6 +631,10 @@ class DataType:
     F16_NHWC = ("float16", "NHWC")
     F16_HWCN = ("float16", "HWCN")
     F16_NDHWC = ("float16", "NDHWC")
+    F16_NCDHW = ("float16", "NCDHW")
+    F16_DHWCN = ("float16", "DHWCN")
+    F16_NDC1HWC0 = ("float16", "NDC1HWC0")
+    F16_FRACTAL_Z_3D = ("float16", "FRACTAL_Z_3D")
     F16_FracZNLSTM = ("float16", "FRACTAL_ZN_LSTM")
 
     F32_None = ("float32", "")
@@ -643,6 +647,10 @@ class DataType:
     F32_NHWC = ("float32", "NHWC")
     F32_HWCN = ("float32", "HWCN")
     F32_NDHWC = ("float32", "NDHWC")
+    F32_NCDHW = ("float32", "NCDHW")
+    F32_DHWCN = ("float32", "DHWCN")
+    F32_NDC1HWC0 = ("float32", "NDC1HWC0")
+    F32_FRACTAL_Z_3D = ("float32", "FRACTAL_Z_3D")
     F32_FracZNLSTM = ("float32", "FRACTAL_ZN_LSTM")
 
     F64_None = ("float64", "")

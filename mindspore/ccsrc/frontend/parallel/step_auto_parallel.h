@@ -21,27 +21,21 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include "ir/anf.h"
 #include "frontend/optimizer/opt.h"
 #include "frontend/parallel/status.h"
+#include "ir/anf.h"
 #include "pipeline/jit/pipeline.h"
 
 namespace mindspore {
 namespace parallel {
+// main step of Auto-parallel
+bool StepAutoParallel(const FuncGraphPtr &func_graph, const opt::OptimizerPtr &optimizer);
+
 bool IsSplittableOperator(const std::string &);
 
 bool IsAutoParallelCareNode(const CNodePtr &);
 
-// main step of Auto-parallel
-bool StepAutoParallel(const FuncGraphPtr &func_graph, const opt::OptimizerPtr &optimizer);
-
-size_t GetLengthOfDataType(const TypePtr &type);
-
-std::vector<bool> ExtractInputParameterByNode(const CNodePtr &node);
-
-std::vector<size_t> ExtractInputTypeLengthByNode(const CNodePtr &node);
-
-std::vector<TypePtr> ExtractOutputTypeByNode(const CNodePtr &node);
+void InitCostGraph();
 
 Status ConstructCostGraphNodesByUniqueId(const std::vector<AnfNodePtr> &all_nodes, const FuncGraphPtr &root);
 

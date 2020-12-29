@@ -16,6 +16,10 @@
 
 #include "src/ops/logical_or.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -28,6 +32,12 @@ int LogicalOr::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffe
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *LogicalOrCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<LogicalOr>(primitive);
+}
+Registry LogicalOrRegistry(schema::PrimitiveType_LogicalOr, LogicalOrCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

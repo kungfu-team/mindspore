@@ -16,6 +16,10 @@
 
 #include "src/ops/greater_equal.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifndef PRIMITIVE_WRITEABLE
@@ -27,16 +31,13 @@ int GreaterEqual::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbu
   fbb->Finish(prim_offset);
   return RET_OK;
 }
-#endif
-int GreaterEqual::InferShape(std::vector<Tensor *> inputs_, std::vector<Tensor *> outputs_) {
-  auto input = inputs_.front();
-  MS_ASSERT(input != nullptr);
-  auto output = outputs_.front();
-  MS_ASSERT(output != nullptr);
-  output->set_shape(input->shape());
-  output->set_data_type(TypeId::kNumberTypeBool);
-  output->SetFormat(input->GetFormat());
-  return RET_OK;
+
+PrimitiveC *GreaterEqualCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<GreaterEqual>(primitive);
 }
+Registry GreaterEqualRegistry(schema::PrimitiveType_GreaterEqual, GreaterEqualCreator);
+
+#endif
+
 }  // namespace lite
 }  // namespace mindspore

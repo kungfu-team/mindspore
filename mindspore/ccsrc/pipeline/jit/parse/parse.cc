@@ -109,6 +109,7 @@ void Parser::BuildMethodMap() {
   expr_method_map_["Name"] = &Parser::ParseName;
   expr_method_map_["Num"] = &Parser::ParseNum;
   expr_method_map_["Str"] = &Parser::ParseStr;
+  expr_method_map_["Constant"] = &Parser::ParseConstant;
   expr_method_map_["NameConstant"] = &Parser::ParseNameConstant;
   expr_method_map_["Call"] = &Parser::ParseCall;
   expr_method_map_["IfExp"] = &Parser::ParseIfExp;
@@ -227,7 +228,7 @@ void Parser::GenerateArgsNodeForFunction(const FunctionBlockPtr &block, const py
   block->func_graph()->set_has_kwarg(!py::isinstance<py::none>(kw_arg_node));
 
   py::list kwonly_args = python_adapter::GetPyObjAttr(func_args, "kwonlyargs");
-  block->func_graph()->set_kwonlyargs_count(SizeToInt(kwonly_args.size()));
+  block->func_graph()->set_kwonlyargs_count(SizeToLong(kwonly_args.size()));
 
   MS_EXCEPTION_IF_NULL(ast_);
   py::list args = ast_->GetArgs(fn_node);
@@ -238,10 +239,9 @@ void Parser::GenerateArgsNodeForFunction(const FunctionBlockPtr &block, const py
         continue;
       }
     }
-    TraceManager::DebugTrace(GetLocation(args[i]));
+    TraceGuard guard(GetLocation(args[i]));
     auto para_node = std::make_shared<Parameter>(block->func_graph());
     MS_EXCEPTION_IF_NULL(para_node);
-    TraceManager::EndTrace();
     para_node->set_name(arg_name);
     para_node->debug_info()->set_name(arg_name);
     block->func_graph()->add_parameter(para_node);
@@ -342,13 +342,12 @@ FunctionBlockPtr Parser::ParseFunction(const py::object &node, const FunctionBlo
 
 FunctionBlockPtr Parser::ParseStatements(FunctionBlockPtr fn_block, const py::object &nodes) {
   py::int_ pcount = python_adapter::CallPyObjMethod(nodes, "__len__");
-  size_t count = IntToSize(pcount);
+  size_t count = LongToSize(pcount);
   MS_LOG(DEBUG) << "The nodes count is " << count;
   for (size_t i = 0; i < count; i++) {
     auto node = py::cast<py::list>(nodes)[i];
-    TraceManager::DebugTrace(GetLocation(node));
+    TraceGuard guard(GetLocation(node));
     fn_block = ParseStatement(fn_block, node);
-    TraceManager::EndTrace();
     // insert appropriate depended items for the function block if it has a return node
     if (fn_block->func_graph()->get_return() != nullptr) {
       fn_block->InsertDependItemsBeforeReturn();
@@ -372,9 +371,8 @@ FunctionBlockPtr Parser::ParseStatement(const FunctionBlockPtr &block, const py:
   std::string node_name = node_type->node_name();
   MS_LOG(DEBUG) << "Ast node is " << node_name;
   if (stmt_method_map_.count(node_name)) {
-    TraceManager::DebugTrace(GetLocation(node));
+    TraceGuard trace_guard(GetLocation(node));
     auto stmt_block = (this->*stmt_method_map_[node_name])(block, node);
-    TraceManager::EndTrace();
     return stmt_block;
   } else {
     errcode_ = PARSE_NODE_METHOD_UNSUPPORTED;
@@ -383,7 +381,7 @@ FunctionBlockPtr Parser::ParseStatement(const FunctionBlockPtr &block, const py:
       MS_LOG(EXCEPTION) << "List size should not be less than 2.";
     }
     auto filename = location[0].cast<std::string>();
-    auto line_no = location[1].cast<int>();
+    auto line_no = location[1].cast<int64_t>();
     auto fn_loc = block->func_graph()->debug_info()->location();
     py::str desc = python_adapter::CallPyModFn(ast_->module(), PYTHON_MOD_GET_OBJECT_DESCRIPTION, ast_->function(),
                                                fn_loc->file_name(), fn_loc->line());
@@ -406,15 +404,14 @@ AnfNodePtr Parser::ParseExprNode(const FunctionBlockPtr &block, const py::object
   std::string node_name = node_type->node_name();
   MS_LOG(DEBUG) << "Ast node is " << node_name;
   if (expr_method_map_.count(node_name)) {
-    TraceManager::DebugTrace(GetLocation(node));
+    TraceGuard trace_guard(GetLocation(node));
     auto expr_node = (this->*expr_method_map_[node_name])(block, node);
-    TraceManager::EndTrace();
     return expr_node;
   } else {
     errcode_ = PARSE_NODE_METHOD_UNSUPPORTED;
     py::list ret = ast_->CallParserObjMethod(PYTHON_PARSE_GET_LOCATION, node);
     auto filename = ret[0].cast<std::string>();
-    auto line_no = ret[1].cast<int>();
+    auto line_no = ret[1].cast<int64_t>();
     auto fn_loc = block->func_graph()->debug_info()->location();
     py::str desc = python_adapter::CallPyModFn(ast_->module(), PYTHON_MOD_GET_OBJECT_DESCRIPTION, ast_->function(),
                                                fn_loc->file_name(), fn_loc->line());
@@ -460,8 +457,8 @@ LocationPtr Parser::GetLocation(const py::object &node) const {
     MS_LOG(EXCEPTION) << "List size should not be less than 5.";
   }
   // refer to Location::Location() for each member of ret: line, column, line_end, column_end.
-  auto location = std::make_shared<Location>(ret[0].cast<std::string>(), ret[1].cast<int>(), ret[2].cast<int>(),
-                                             ret[3].cast<int>(), ret[4].cast<int>());
+  auto location = std::make_shared<Location>(ret[0].cast<std::string>(), ret[1].cast<int64_t>(), ret[2].cast<int64_t>(),
+                                             ret[3].cast<int64_t>(), ret[4].cast<int64_t>());
   return location;
 }
 
@@ -540,8 +537,8 @@ AnfNodePtr Parser::ParseNum(const FunctionBlockPtr &, const py::object &node) {
   py::object obj = python_adapter::GetPyObjAttr(node, "n");
   TraceGuard trace_guard(GetLocation(node));
   if (py::isinstance<py::int_>(obj)) {
-    MS_LOG(INFO) << "The Num is int:" << (std::string)py::str(obj);
-    auto data = py::cast<int>(obj);
+    MS_LOG(INFO) << "The Num is int64_t:" << (std::string)py::str(obj);
+    auto data = py::cast<int64_t>(obj);
     return NewValueNode(data);
   } else if (py::isinstance<py::float_>(obj)) {
     MS_LOG(INFO) << "The Num is float:" << (std::string)py::str(obj);
@@ -559,6 +556,36 @@ AnfNodePtr Parser::ParseStr(const FunctionBlockPtr &, const py::object &node) {
   MS_LOG(DEBUG) << "Process ast Str";
   auto str_s = py::cast<std::string>(python_adapter::GetPyObjAttr(node, "s"));
   return NewValueNode(str_s);
+}
+
+AnfNodePtr Parser::ParseConstant(const FunctionBlockPtr &, const py::object &node) {
+  MS_LOG(DEBUG) << "Process ast Constant";
+  py::object obj = python_adapter::GetPyObjAttr(node, "value");
+  TraceGuard trace_guard(GetLocation(node));
+  if (py::isinstance<py::bool_>(obj)) {
+    MS_LOG(INFO) << "The Constant is bool:" << (std::string)py::str(obj);
+    auto data = py::cast<bool>(obj);
+    return NewValueNode(data);
+  } else if (py::isinstance<py::int_>(obj)) {
+    MS_LOG(INFO) << "The Constant is int64_t:" << (std::string)py::str(obj);
+    auto data = py::cast<int64_t>(obj);
+    return NewValueNode(data);
+  } else if (py::isinstance<py::float_>(obj)) {
+    MS_LOG(INFO) << "The Constant is float:" << (std::string)py::str(obj);
+    auto data = py::cast<float>(obj);
+    return NewValueNode(data);
+  } else if (py::isinstance<py::str>(obj)) {
+    MS_LOG(INFO) << "The Constant is string:" << (std::string)py::str(obj);
+    auto data = py::cast<std::string>(obj);
+    return NewValueNode(data);
+  } else if (py::isinstance<py::none>(obj)) {
+    MS_LOG(INFO) << "The Constant is none:" << (std::string)py::str(obj);
+    return NewValueNode(kNone);
+  } else {
+    // no else actually
+    MS_EXCEPTION(TypeError) << "Unsupported Constant type : " << (std::string)py::str(obj)
+                            << GetLocation(node)->ToString();
+  }
 }
 
 AnfNodePtr Parser::ParseNameConstant(const FunctionBlockPtr &, const py::object &node) {
@@ -756,9 +783,11 @@ AnfNodePtr Parser::ParseAttribute(const FunctionBlockPtr &block, const py::objec
   // process the node attr
   auto attr_str = python_adapter::GetPyObjAttr(node, "attr").cast<std::string>();
   MS_LOG(DEBUG) << "Attr = " << attr_str;
-  TraceManager::DebugTrace(GetLocation(python_adapter::GetPyObjAttr(node, "attr")));
-  AnfNodePtr attr_node = NewValueNode(attr_str);
-  TraceManager::EndTrace();
+  AnfNodePtr attr_node = nullptr;
+  {
+    TraceGuard guard(GetLocation(python_adapter::GetPyObjAttr(node, "attr")));
+    attr_node = NewValueNode(attr_str);
+  }
 
   // create the apply node
   return block->func_graph()->NewCNode({op_node, value_node, attr_node});
@@ -799,12 +828,16 @@ AnfNodePtr Parser::ProcessBoolOpValueList(const FunctionBlockPtr &block, const p
       rest.append(value_list[i]);
     }
     MS_EXCEPTION_IF_NULL(block);
-    TraceManager::DebugTrace(std::make_shared<TraceIfExpTrueBranch>(block->func_graph()->debug_info()));
-    FunctionBlockPtr true_block = MakeFunctionBlock(*this);
-    TraceManager::EndTrace();
-    TraceManager::DebugTrace(std::make_shared<TraceIfExpFalseBranch>(block->func_graph()->debug_info()));
-    FunctionBlockPtr false_block = MakeFunctionBlock(*this);
-    TraceManager::EndTrace();
+    FunctionBlockPtr true_block = nullptr;
+    FunctionBlockPtr false_block = nullptr;
+    {
+      TraceGuard guard(std::make_shared<TraceIfExpTrueBranch>(block->func_graph()->debug_info()));
+      true_block = MakeFunctionBlock(*this);
+    }
+    {
+      TraceGuard guard(std::make_shared<TraceIfExpFalseBranch>(block->func_graph()->debug_info()));
+      false_block = MakeFunctionBlock(*this);
+    }
     MakeConditionBlocks(block, true_block, false_block);
     FunctionBlockPtr b1, b2;
 
@@ -874,9 +907,8 @@ AnfNodePtr Parser::ParseLambda(const FunctionBlockPtr &block, const py::object &
   py::list args = ast_->GetArgs(node);
   for (std::size_t i = 0; i < args.size(); i++) {
     std::string arg = py::cast<std::string>(args[i].attr("arg"));
-    TraceManager::DebugTrace(GetLocation(args[i]));
+    TraceGuard guard(GetLocation(args[i]));
     auto para_node = std::make_shared<Parameter>(func_block->func_graph());
-    TraceManager::EndTrace();
     para_node->debug_info()->set_name(arg);
     func_block->func_graph()->add_parameter(para_node);
     func_block->WriteVariable(arg, para_node);
@@ -1016,36 +1048,36 @@ AnfNodePtr Parser::ParseDict(const FunctionBlockPtr &block, const py::object &no
   return block->func_graph()->NewCNode({make_dict_op, keys_tuple, values_tuple});
 }
 
-// process a  augment assign such as a += b;
+// process a  augment assign such as a += b or mat[stride_slice] += b.
 FunctionBlockPtr Parser::ParseAugAssign(const FunctionBlockPtr &block, const py::object &node) {
   MS_LOG(DEBUG) << "Process ast AugAssign";
-  py::object op = python_adapter::GetPyObjAttr(node, "op");
-
   MS_EXCEPTION_IF_NULL(block);
-  // resolve the op
-  AnfNodePtr op_node = block->MakeResolveAstOp(op);
-  py::object target_node = python_adapter::GetPyObjAttr(node, "target");
   MS_EXCEPTION_IF_NULL(ast_);
-  auto ast_type = AstSubType(py::cast<int32_t>(ast_->CallParserObjMethod(PYTHON_PARSE_GET_AST_TYPE, target_node)));
-  AnfNodePtr read_node = nullptr;
+
+  py::object target_obj = python_adapter::GetPyObjAttr(node, "target");
+  py::object op_obj = python_adapter::GetPyObjAttr(node, "op");
+  py::object value_obj = python_adapter::GetPyObjAttr(node, "value");
+  AnfNodePtr target_node = nullptr;
+  AnfNodePtr op_node = block->MakeResolveAstOp(op_obj);
+  AnfNodePtr value_node = ParseExprNode(block, value_obj);
+  auto ast_type = AstSubType(py::cast<int32_t>(ast_->CallParserObjMethod(PYTHON_PARSE_GET_AST_TYPE, target_obj)));
+
   if (ast_type == AST_SUB_TYPE_NAME) {
-    read_node = ParseName(block, target_node);
-  } else if (ast_->IsClassMember(target_node)) {
-    read_node = ParseAttribute(block, target_node);
+    target_node = ParseName(block, target_obj);
+  } else if (ast_type == AST_SUB_TYPE_SUBSCRIPT) {
+    target_node = ParseSubscript(block, target_obj);
+  } else if (ast_->IsClassMember(target_obj)) {
+    target_node = ParseAttribute(block, target_obj);
   } else {
     MS_LOG(EXCEPTION) << "Not supported augassign";
   }
-  if (read_node == nullptr) {
+  if (target_node == nullptr) {
     MS_LOG(EXCEPTION) << "Can not get target node ";
   }
-
-  py::object value = python_adapter::GetPyObjAttr(node, "value");
-  AnfNodePtr value_node = ParseExprNode(block, value);
-  CNodePtr augassign_app = block->func_graph()->NewCNode({op_node, read_node, value_node});
-  WriteAssignVars(block, target_node, augassign_app);
+  CNodePtr augassign_app = block->func_graph()->NewCNode({op_node, target_node, value_node});
+  WriteAssignVars(block, target_obj, augassign_app);
   return block;
 }
-
 // process global declaration such as 'global x';
 FunctionBlockPtr Parser::ParseGlobal(const FunctionBlockPtr &block, const py::object &node) {
   MS_LOG(DEBUG) << "Process ast Global";
@@ -1065,19 +1097,24 @@ FunctionBlockPtr Parser::ParseIf(const FunctionBlockPtr &block, const py::object
   MS_EXCEPTION_IF_NULL(block);
   CNodePtr bool_node = block->ForceToBoolNode(condition_node);
 
-  TraceManager::DebugTrace(std::make_shared<TraceIfStmtTrueBranch>(block->func_graph()->debug_info()));
-  FunctionBlockPtr true_block = MakeFunctionBlock(*this);
-  TraceManager::EndTrace();
-
-  TraceManager::DebugTrace(std::make_shared<TraceIfStmtFalseBranch>(block->func_graph()->debug_info()));
-  FunctionBlockPtr false_block = MakeFunctionBlock(*this);
-  TraceManager::EndTrace();
+  FunctionBlockPtr true_block = nullptr;
+  FunctionBlockPtr false_block = nullptr;
+  {
+    TraceGuard guard(std::make_shared<TraceIfStmtTrueBranch>(block->func_graph()->debug_info()));
+    true_block = MakeFunctionBlock(*this);
+  }
+  {
+    TraceGuard guard(std::make_shared<TraceIfStmtFalseBranch>(block->func_graph()->debug_info()));
+    false_block = MakeFunctionBlock(*this);
+  }
 
   MakeConditionBlocks(block, true_block, false_block);
 
-  TraceManager::DebugTrace(std::make_shared<TraceIfStmtAfterBranch>(block->func_graph()->debug_info()));
-  FunctionBlockPtr after_block = MakeFunctionBlock(*this);
-  TraceManager::EndTrace();
+  FunctionBlockPtr after_block = nullptr;
+  {
+    TraceGuard guard(std::make_shared<TraceIfStmtAfterBranch>(block->func_graph()->debug_info()));
+    after_block = MakeFunctionBlock(*this);
+  }
 
   if (MsContext::GetInstance()->backend_policy() != "ge") {
     // for backends excludes 'ge', it can handle multi graph call, use this flag to
@@ -1112,17 +1149,21 @@ FunctionBlockPtr Parser::ParseWhile(const FunctionBlockPtr &block, const py::obj
   MS_LOG(DEBUG) << "Process ast While";
   MS_EXCEPTION_IF_NULL(block);
   MS_LOG(INFO) << "Parse while statement";
-  TraceManager::DebugTrace(std::make_shared<TraceWhileHeader>(block->func_graph()->debug_info()));
-  FunctionBlockPtr header_block = MakeFunctionBlock(*this);
-  TraceManager::EndTrace();
-
-  TraceManager::DebugTrace(std::make_shared<TraceWhileBody>(block->func_graph()->debug_info()));
-  FunctionBlockPtr body_block = MakeFunctionBlock(*this);
-  TraceManager::EndTrace();
-
-  TraceManager::DebugTrace(std::make_shared<TraceWhileAfter>(block->func_graph()->debug_info()));
-  FunctionBlockPtr after_block = MakeFunctionBlock(*this);
-  TraceManager::EndTrace();
+  FunctionBlockPtr header_block = nullptr;
+  FunctionBlockPtr body_block = nullptr;
+  FunctionBlockPtr after_block = nullptr;
+  {
+    TraceGuard guard(std::make_shared<TraceWhileHeader>(block->func_graph()->debug_info()));
+    header_block = MakeFunctionBlock(*this);
+  }
+  {
+    TraceGuard guard(std::make_shared<TraceWhileBody>(block->func_graph()->debug_info()));
+    body_block = MakeFunctionBlock(*this);
+  }
+  {
+    TraceGuard guard(std::make_shared<TraceWhileAfter>(block->func_graph()->debug_info()));
+    after_block = MakeFunctionBlock(*this);
+  }
 
   body_block->AddPrevBlock(header_block);
   after_block->AddPrevBlock(header_block);
@@ -1169,9 +1210,8 @@ CNodePtr Parser::GenerateCondInFor(const ParameterPtr &iter_param, const Functio
 }
 
 FunctionBlockPtr Parser::GenerateBlockInFor(const TraceInfoPtr &trace_info) {
-  TraceManager::DebugTrace(trace_info);
+  TraceGuard trace_guard(trace_info);
   FunctionBlockPtr body_block = MakeFunctionBlock(*this);
-  TraceManager::EndTrace();
   return body_block;
 }
 
@@ -1195,19 +1235,24 @@ FunctionBlockPtr Parser::ParseFor(const FunctionBlockPtr &block, const py::objec
     block->func_graph()->NewCNode({NewValueNode(prim::kPrimScalarLt), len_iter, NewValueNode(MAX_FOR_LOOP_COUNT)});
 
   // create statement 'if len(xs) < prim::MAX_FOR_LOOP_COUNT then ParseForIter else ParseForLoop'
-  TraceManager::DebugTrace(std::make_shared<TraceIfStmtTrueBranch>(block->func_graph()->debug_info()));
-  FunctionBlockPtr true_block = MakeFunctionBlock(*this);
-  TraceManager::EndTrace();
-
-  TraceManager::DebugTrace(std::make_shared<TraceIfStmtFalseBranch>(block->func_graph()->debug_info()));
-  FunctionBlockPtr false_block = MakeFunctionBlock(*this);
-  TraceManager::EndTrace();
+  FunctionBlockPtr true_block = nullptr;
+  FunctionBlockPtr false_block = nullptr;
+  {
+    TraceGuard guard(std::make_shared<TraceIfStmtTrueBranch>(block->func_graph()->debug_info()));
+    true_block = MakeFunctionBlock(*this);
+  }
+  {
+    TraceGuard guard(std::make_shared<TraceIfStmtFalseBranch>(block->func_graph()->debug_info()));
+    false_block = MakeFunctionBlock(*this);
+  }
 
   MakeConditionBlocks(block, true_block, false_block);
 
-  TraceManager::DebugTrace(std::make_shared<TraceIfStmtAfterBranch>(block->func_graph()->debug_info()));
-  FunctionBlockPtr after_block = MakeFunctionBlock(*this);
-  TraceManager::EndTrace();
+  FunctionBlockPtr after_block = nullptr;
+  {
+    TraceGuard guard(std::make_shared<TraceIfStmtAfterBranch>(block->func_graph()->debug_info()));
+    after_block = MakeFunctionBlock(*this);
+  }
 
   FunctionBlockPtr true_end = ParseForIter(true_block, node);
   true_end->Jump(after_block, nullptr);
@@ -1251,10 +1296,10 @@ FunctionBlockPtr Parser::ParseForIter(const FunctionBlockPtr &block, const py::o
   // generate the iterator next apply
   // process as following: `app = next(it); target = app[0]; it = app[1];`
   CNodePtr app = body_block->func_graph()->NewCNode({op_next, iter_param});
-  CNodePtr target_app = body_block->func_graph()->NewCNode({op_getitem, app, NewValueNode(0)});
+  CNodePtr target_app = body_block->func_graph()->NewCNode({op_getitem, app, NewValueNode(static_cast<int64_t>(0))});
   py::object target_node = python_adapter::GetPyObjAttr(node, "target");
 
-  CNodePtr iter2_app = body_block->func_graph()->NewCNode({op_getitem, app, NewValueNode(1)});
+  CNodePtr iter2_app = body_block->func_graph()->NewCNode({op_getitem, app, NewValueNode(static_cast<int64_t>(1))});
   WriteAssignVars(body_block, target_node, target_app);
 
   // link the variable name with the target
@@ -1263,10 +1308,12 @@ FunctionBlockPtr Parser::ParseForIter(const FunctionBlockPtr &block, const py::o
   iter2_app->debug_info()->set_trace_info(it_info);
   iter_apply->debug_info()->set_trace_info(it_info);
 
-  TraceManager::DebugTrace(std::make_shared<TraceForAfter>(block->func_graph()->debug_info()));
-  FunctionBlockPtr after_block = MakeFunctionBlock(*this);
+  FunctionBlockPtr after_block = nullptr;
+  {
+    TraceGuard guard(std::make_shared<TraceForAfter>(block->func_graph()->debug_info()));
+    after_block = MakeFunctionBlock(*this);
+  }
   MS_EXCEPTION_IF_NULL(after_block);
-  TraceManager::EndTrace();
   after_block->AddPrevBlock(header_block);
 
   block->Jump(header_block, iter_apply);
@@ -1341,8 +1388,8 @@ FunctionBlockPtr Parser::ParseForLoop(const FunctionBlockPtr &block, const py::o
   CNodePtr target_var = body_block->func_graph()->NewCNode({op_getitem, iter_node, loop_var});
   WriteAssignVars(body_block, target_node, target_var);
   // create 'i = i + 1'
-  CNodePtr loop_var_inc =
-    body_block->func_graph()->NewCNode({NewValueNode(prim::kPrimScalarAdd), loop_var, NewValueNode(1)});
+  CNodePtr loop_var_inc = body_block->func_graph()->NewCNode(
+    {NewValueNode(prim::kPrimScalarAdd), loop_var, NewValueNode(static_cast<int64_t>(1))});
   body_block->WriteVariable(loop_var->name(), loop_var_inc);
 
   // link the variable name with the target
@@ -1350,13 +1397,15 @@ FunctionBlockPtr Parser::ParseForLoop(const FunctionBlockPtr &block, const py::o
   loop_var->debug_info()->set_trace_info(it_info);
   len_iter->debug_info()->set_trace_info(it_info);
 
-  TraceManager::DebugTrace(std::make_shared<TraceForAfter>(block->func_graph()->debug_info()));
-  FunctionBlockPtr after_block = MakeFunctionBlock(*this);
+  FunctionBlockPtr after_block = nullptr;
+  {
+    TraceGuard guard(std::make_shared<TraceForAfter>(block->func_graph()->debug_info()));
+    after_block = MakeFunctionBlock(*this);
+  }
   MS_EXCEPTION_IF_NULL(after_block);
-  TraceManager::EndTrace();
   after_block->AddPrevBlock(header_block);
 
-  block->Jump(header_block, NewValueNode(0));
+  block->Jump(header_block, NewValueNode(static_cast<int64_t>(0)));
   body_block->Mature();
 
   header_block->ConditionalJump(cond_node, body_block, after_block, false);
@@ -1389,13 +1438,16 @@ AnfNodePtr Parser::ParseIfExp(const FunctionBlockPtr &block, const py::object &n
   AnfNodePtr condition_node = ParseExprNode(block, test_node);
   CNodePtr bool_node = block->ForceToBoolNode(condition_node);
 
-  TraceManager::DebugTrace(std::make_shared<TraceIfExpTrueBranch>(block->func_graph()->debug_info()));
-  FunctionBlockPtr true_block = MakeFunctionBlock(*this);
-  TraceManager::EndTrace();
-
-  TraceManager::DebugTrace(std::make_shared<TraceIfExpFalseBranch>(block->func_graph()->debug_info()));
-  FunctionBlockPtr false_block = MakeFunctionBlock(*this);
-  TraceManager::EndTrace();
+  FunctionBlockPtr true_block = nullptr;
+  FunctionBlockPtr false_block = nullptr;
+  {
+    TraceGuard guard(std::make_shared<TraceIfExpTrueBranch>(block->func_graph()->debug_info()));
+    true_block = MakeFunctionBlock(*this);
+  }
+  {
+    TraceGuard guard(std::make_shared<TraceIfExpFalseBranch>(block->func_graph()->debug_info()));
+    false_block = MakeFunctionBlock(*this);
+  }
 
   MakeConditionBlocks(block, true_block, false_block);
 
@@ -1447,7 +1499,8 @@ void Parser::HandleAssignTuple(const FunctionBlockPtr &block, const py::object &
   for (size_t i = 0; i < items.size(); i++) {
     // Use the Primitive replace the operation resolve node (getitem)
     // because the getitem will eventually be converted to Primitive node
-    CNodePtr item_apply = block->func_graph()->NewCNode({op_getitem, assigned_node, NewValueNode(static_cast<int>(i))});
+    CNodePtr item_apply =
+      block->func_graph()->NewCNode({op_getitem, assigned_node, NewValueNode(static_cast<int64_t>(i))});
 
     py::object elt = items[i];
     WriteAssignVars(block, elt, item_apply);
@@ -1471,7 +1524,7 @@ void Parser::HandleAssignClassMember(const FunctionBlockPtr &block, const py::ob
     MS_LOG(EXCEPTION) << "List size should not be less than 2.";
   }
   auto filename = location[0].cast<std::string>();
-  auto line_no = location[1].cast<int>();
+  auto line_no = location[1].cast<int64_t>();
   // Now only support the self.xxx = yyy, where self.xxx must be a defined Parameter type
   if (!py::hasattr(ast()->obj(), common::SafeCStr(attr_name))) {
     MS_EXCEPTION(TypeError) << "'" << var_name << "' should be a Parameter, but not defined, at " << filename << ":"
@@ -1501,7 +1554,7 @@ void Parser::HandleAssignSubscript(const FunctionBlockPtr &block, const py::obje
   AnfNodePtr slice_node = ParseExprNode(block, slice_obj);
   CNodePtr setitem_app = block->func_graph()->NewCNode({op_setitem, value_node, slice_node, assigned_node});
   // getitem apply should return the sequence data structure itself
-  std::string var_name = "";
+  std::string var_name;
   if (ast_->IsClassMember(value_obj)) {
     std::string attr_name = value_obj.attr("attr").cast<std::string>();
     var_name = "self." + attr_name;
@@ -1515,9 +1568,18 @@ void Parser::HandleAssignSubscript(const FunctionBlockPtr &block, const py::obje
                               << py::str(obj).cast<std::string>() << "' with type '"
                               << py::str(obj_type).cast<std::string>() << "'.";
     }
-  } else {
-    var_name = value_obj.attr("id").cast<std::string>();
+    block->WriteVariable(var_name, setitem_app);
+    return;
   }
+  if (AstSubType(py::cast<int32_t>(ast_->CallParserObjMethod(PYTHON_PARSE_GET_AST_TYPE, value_obj))) ==
+      AST_SUB_TYPE_SUBSCRIPT) {
+    HandleAssignSubscript(block, value_obj, setitem_app);
+    return;
+  }
+  if (!py::hasattr(value_obj, "id")) {
+    MS_EXCEPTION(TypeError) << "Attribute id not found in " << py::str(value_obj).cast<std::string>();
+  }
+  var_name = value_obj.attr("id").cast<std::string>();
   block->WriteVariable(var_name, setitem_app);
 }
 
@@ -1546,7 +1608,7 @@ FunctionBlockPtr Parser::ParseAssign(const FunctionBlockPtr &block, const py::ob
   AnfNodePtr value_node = ParseExprNode(block, value_object);
   py::object targets_object = python_adapter::GetPyObjAttr(node, "targets");
   py::int_ pcount = python_adapter::CallPyObjMethod(targets_object, "__len__");
-  size_t count = IntToSize(pcount);
+  size_t count = LongToSize(pcount);
   MS_LOG(DEBUG) << "The nodes count is " << count;
   for (size_t i = 0; i < count; i++) {
     auto target_node = py::cast<py::list>(targets_object)[i];
@@ -1564,16 +1626,15 @@ FunctionBlockPtr Parser::ParseBreak(const FunctionBlockPtr &block, const py::obj
       MS_LOG(EXCEPTION) << "List size should not be less than 2.";
     }
     auto filename = location[0].cast<std::string>();
-    auto line_no = location[1].cast<int>();
+    auto line_no = location[1].cast<int64_t>();
     MS_LOG(EXCEPTION) << "Unexpected 'break' at " << filename << ":" << line_no;
   }
   // Get current loop.
   Loop &loop = loops_.top();
   if (loop.end == nullptr) {
     // Create end_block if it is not existed.
-    TraceManager::DebugTrace(std::make_shared<TraceLoopEnd>(block->func_graph()->debug_info()));
+    TraceGuard trace_guard(std::make_shared<TraceLoopEnd>(block->func_graph()->debug_info()));
     loop.end = MakeFunctionBlock(*this);
-    TraceManager::EndTrace();
   }
   // Jump to the end_block.
   block->Jump(loop.end, nullptr);
@@ -1588,7 +1649,7 @@ FunctionBlockPtr Parser::ParseContinue(const FunctionBlockPtr &block, const py::
       MS_LOG(EXCEPTION) << "List size should not be less than 2.";
     }
     auto filename = location[0].cast<std::string>();
-    auto line_no = location[1].cast<int>();
+    auto line_no = location[1].cast<int64_t>();
     MS_LOG(EXCEPTION) << "Unexpected 'continue' at " << filename << ":" << line_no;
   }
   // Jump to the header of the loop with iterator called.
@@ -1628,8 +1689,8 @@ void Parser::RemoveUnnecessaryPhis() {
   auto mng = Manage(func_graph_, false);
   // replace the nodes
   // remove from inside to outside
-  for (int idx = SizeToInt(phis.size() - 1); idx >= 0; idx--) {
-    auto phi = phis[IntToSize(idx)];
+  for (int64_t idx = SizeToLong(phis.size() - 1); idx >= 0; idx--) {
+    auto phi = phis[LongToSize(idx)];
     auto new_node = FindPhis(removable_phis, phi);
     MS_LOG(DEBUG) << "phi " << phi->DebugString() << " to " << new_node->DebugString();
     mng->Replace(phi, new_node);
@@ -1710,7 +1771,7 @@ bool ParseAst::InitParseAstInfo(const std::string &python_mod_get_parse_method) 
   function_module_ = py::cast<std::string>(python_adapter::GetPyObjAttr(parser_, "function_module"));
   function_name_ = py::cast<std::string>(python_adapter::GetPyObjAttr(parser_, "function_name"));
   function_filename_ = py::cast<std::string>(python_adapter::GetPyObjAttr(parser_, "filename"));
-  function_line_offset_ = py::cast<int>(python_adapter::GetPyObjAttr(parser_, "line_offset"));
+  function_line_offset_ = py::cast<int64_t>(python_adapter::GetPyObjAttr(parser_, "line_offset"));
 
   return true;
 }

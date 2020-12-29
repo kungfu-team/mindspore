@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 #include "src/ops/sgd.h"
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -70,6 +74,10 @@ int Sgd::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers::Fl
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *SgdCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<Sgd>(primitive); }
+Registry SgdRegistry(schema::PrimitiveType_Sgd, SgdCreator);
+
 #endif
 
 int Sgd::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Tensor *> outputs) {
@@ -78,16 +86,17 @@ int Sgd::InferShape(std::vector<lite::Tensor *> inputs, std::vector<lite::Tensor
     return RET_ERROR;
   }
 
-  if (inputs[0]->ElementsNum() != inputs[1]->ElementsNum() || inputs[0]->ElementsNum() != inputs[3]->ElementsNum() ||
-      inputs[2]->ElementsNum() != 1 || inputs[4]->ElementsNum() != 1) {
+  if (inputs.at(0)->ElementsNum() != inputs.at(1)->ElementsNum() ||
+      inputs.at(0)->ElementsNum() != inputs.at(3)->ElementsNum() || inputs.at(2)->ElementsNum() != 1 ||
+      inputs.at(4)->ElementsNum() != 1) {
     MS_LOG(ERROR) << "error input data size!";
     return RET_ERROR;
   }
   if (!outputs.empty()) {
     auto *out = outputs.front();
     MS_ASSERT(out != nullptr);
-    out->set_data_type(inputs[0]->data_type());
-    out->SetFormat(inputs[0]->GetFormat());
+    out->set_data_type(inputs.at(0)->data_type());
+    out->set_format(inputs.at(0)->format());
     out->set_shape({1});
   }
 

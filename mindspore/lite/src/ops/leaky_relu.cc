@@ -16,6 +16,10 @@
 
 #include "src/ops/leaky_relu.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -42,6 +46,10 @@ int LeakyReLU::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffe
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+PrimitiveC *LeakyReLUCreator(const schema::Primitive *primitive) {
+  return PrimitiveC::NewPrimitiveC<LeakyReLU>(primitive);
+}
+Registry LeakyReLURegistry(schema::PrimitiveType_LeakyReLU, LeakyReLUCreator);
 #endif
 }  // namespace lite
 }  // namespace mindspore

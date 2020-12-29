@@ -15,19 +15,17 @@
  */
 
 #include "src/runtime/kernel/arm/int8/concat_int8.h"
-#include <limits>
-#include "nnacl/int8/concat_int8.h"
 #include "schema/model_generated.h"
-#include "include/errorcode.h"
+#include "src/kernel_registry.h"
 
 using mindspore::kernel::KERNEL_ARCH::kCPU;
+using mindspore::lite::KernelRegistrar;
 using mindspore::lite::RET_ERROR;
 using mindspore::lite::RET_OK;
+using mindspore::schema::PrimitiveType_Concat;
 
 namespace mindspore::kernel {
-
 int ConcatInt8CPUKernel::Init() {
-  ConcatBaseCPUKernel::Init();
   concat_param_->input_shapes_ = nullptr;
   auto input_num = in_tensors_.size();
   input_data_ = reinterpret_cast<int8_t **>(malloc(sizeof(int8_t *) * input_num));
@@ -42,13 +40,13 @@ int ConcatInt8CPUKernel::Init() {
   }
   for (size_t i = 0; i < input_num; i++) {
     auto *input_tensor = in_tensors_.at(i);
-    auto quant_args = input_tensor->GetQuantParams();
+    auto quant_args = input_tensor->quant_params();
     concat_param_->quant_arg_.in_args_[i].scale_ = quant_args.front().scale;
     concat_param_->quant_arg_.in_args_[i].zp_ = quant_args.front().zeroPoint;
   }
 
   auto output_tensor = out_tensors_.at(kOutputIndex);
-  auto quant_args = output_tensor->GetQuantParams();
+  auto quant_args = output_tensor->quant_params();
   concat_param_->quant_arg_.out_args_.scale_ = quant_args.front().scale;
   concat_param_->quant_arg_.out_args_.zp_ = quant_args.front().zeroPoint;
 
@@ -61,13 +59,12 @@ int ConcatInt8CPUKernel::Init() {
 }
 
 int ConcatInt8CPUKernel::ReSize() {
-  auto ret = ConcatBaseCPUKernel::ReSize();
-  if (ret != RET_OK) {
-    return ret;
-  }
+  concat_param_->axis_ =
+    concat_param_->axis_ >= 0 ? concat_param_->axis_ : in_tensors_.front()->shape().size() + concat_param_->axis_;
+
   auto input_num = in_tensors_.size();
   concat_param_->input_num_ = input_num;
-  concat_param_->input_shapes_ = reinterpret_cast<const int **>(malloc(sizeof(int *) * input_num));
+  concat_param_->input_shapes_ = reinterpret_cast<int **>(malloc(sizeof(int *) * input_num));
   if (concat_param_->input_shapes_ == nullptr) {
     MS_LOG(ERROR) << "malloc concat_param_->input_shapes_ failed.";
     return RET_ERROR;
@@ -80,12 +77,11 @@ int ConcatInt8CPUKernel::ReSize() {
                     << " failed.";
       return RET_ERROR;
     }
-    memcpy(reinterpret_cast<void *>(const_cast<int *>(concat_param_->input_shapes_[i])), in_shape.data(),
-           sizeof(int) * in_shape.size());
+    memcpy(reinterpret_cast<void *>(concat_param_->input_shapes_[i]), in_shape.data(), sizeof(int) * in_shape.size());
   }
 
   before_axis_size = 1;
-  for (int i = 0; i < axis_; i++) {
+  for (int i = 0; i < concat_param_->axis_; i++) {
     before_axis_size *= out_tensors_.at(kOutputIndex)->DimensionSize(i);
   }
 
@@ -98,10 +94,10 @@ int ConcatInt8CPUKernel::ReSize() {
     MS_LOG(ERROR) << "malloc concat_param_->output_shapes_ failed.";
     return RET_ERROR;
   }
-  memcpy(reinterpret_cast<void *>(const_cast<int *>(concat_param_->output_shapes_)), output_tensor->shape().data(),
+  memcpy(reinterpret_cast<void *>(concat_param_->output_shapes_), output_tensor->shape().data(),
          sizeof(int) * output_dim);
 
-  for (size_t i = axis_ + 1; i < output_dim; i++) {
+  for (size_t i = concat_param_->axis_ + 1; i < output_dim; i++) {
     after_axis_size *= concat_param_->output_shapes_[i];
   }
   concat_param_->after_axis_size = after_axis_size;
@@ -109,14 +105,9 @@ int ConcatInt8CPUKernel::ReSize() {
 }
 
 int ConcatInt8CPUKernel::Run() {
-  auto ret = Prepare();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << ret;
-    return ret;
-  }
-
   auto input_num = concat_param_->input_num_;
-  count_unit_ = thread_count_ > 1 ? UP_DIV(before_axis_size, thread_count_) : before_axis_size;
+  count_unit_ =
+    op_parameter_->thread_num_ > 1 ? UP_DIV(before_axis_size, op_parameter_->thread_num_) : before_axis_size;
   concat_param_->count_unit_ = count_unit_;
 
   for (int i = 0; i < input_num; i++) {
@@ -124,7 +115,7 @@ int ConcatInt8CPUKernel::Run() {
   }
   output_data_ = reinterpret_cast<int8_t *>(out_tensors_.at(0)->MutableData());
 
-  ret = ParallelLaunch(this->context_->thread_pool_, ConcatInt8Run, this, thread_count_);
+  auto ret = ParallelLaunch(this->context_->thread_pool_, ConcatInt8Run, this, op_parameter_->thread_num_);
 
   return ret;
 }
@@ -140,7 +131,9 @@ int ConcatInt8CPUKernel::DoExecute(int task_id) {
   if (real_dst_count <= 0) {
     return lite::RET_OK;
   }
-  Int8Concat(input_data_, output_data_, concat_param_, axis_, real_dst_count, task_id);
+  Int8Concat(input_data_, output_data_, concat_param_, concat_param_->axis_, real_dst_count, task_id);
   return lite::RET_OK;
 }
+
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_Concat, LiteKernelCreator<ConcatInt8CPUKernel>)
 }  // namespace mindspore::kernel

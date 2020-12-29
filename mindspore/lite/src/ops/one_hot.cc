@@ -16,6 +16,10 @@
 
 #include "src/ops/one_hot.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+
 namespace mindspore {
 namespace lite {
 #ifdef PRIMITIVE_WRITEABLE
@@ -23,6 +27,37 @@ int OneHot::GetAxis() const { return this->primitive_->value.AsOneHot()->axis; }
 
 void OneHot::SetAxis(int axis) { this->primitive_->value.AsOneHot()->axis = axis; }
 
+int OneHot::UnPackAttr(const Primitive &prim, const std::vector<AnfNodePtr> &inputs) {
+  if (this->primitive_ == nullptr) {
+    this->primitive_ = new (std::nothrow) schema::PrimitiveT;
+    if (this->primitive_ == nullptr) {
+      MS_LOG(ERROR) << "new primitiveT failed";
+      return RET_ERROR;
+    }
+    this->primitive_->value.type = schema::PrimitiveType_OneHot;
+  }
+  if (this->primitive_->value.type != schema::PrimitiveType_OneHot) {
+    MS_LOG(ERROR) << "Primitive type is error :" << this->primitive_->value.type;
+    return RET_ERROR;
+  }
+  if (this->primitive_->value.value == nullptr) {
+    auto attr = new (std::nothrow) schema::OneHotT();
+    if (attr == nullptr) {
+      MS_LOG(ERROR) << "new primitiveT value failed";
+      return RET_ERROR;
+    }
+    attr->axis = -1;
+    if (prim.GetAttr("axis") != nullptr) {
+      attr->axis = CastToInt(prim.GetAttr("axis")).front();
+    }
+    this->primitive_->value.value = attr;
+    if (this->primitive_->value.value == nullptr) {
+      MS_LOG(ERROR) << "primitive value is nullptr";
+      return RET_ERROR;
+    }
+  }
+  return RET_OK;
+}
 #else
 
 int OneHot::GetAxis() const { return this->primitive_->value_as_OneHot()->axis(); }
@@ -40,11 +75,15 @@ int OneHot::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers:
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *OneHotCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<OneHot>(primitive); }
+Registry OneHotRegistry(schema::PrimitiveType_OneHot, OneHotCreator);
 #endif
 
 namespace {
 constexpr size_t kOneHotInputNum = 4;
-}
+constexpr size_t kOneHotInputNumOpt = 3;
+}  // namespace
 int OneHot::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outputs) {
   if (this->primitive_ == nullptr) {
     return RET_NULL_PTR;
@@ -52,8 +91,9 @@ int OneHot::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outpu
 
   int axis = GetAxis();
   // indices, depth, on_value, off_value
-  if (inputs.size() != kOneHotInputNum) {
-    MS_LOG(ERROR) << "OneHot got inputs num " << inputs.size() << ", should be " << kOneHotInputNum;
+  if (inputs.size() != kOneHotInputNum && inputs.size() != kOneHotInputNumOpt) {
+    MS_LOG(ERROR) << "OneHot got inputs num " << inputs.size() << ", should be " << kOneHotInputNum << " or "
+                  << kOneHotInputNumOpt;
     return RET_ERROR;
   }
   auto depth_tensor = inputs.at(1);
@@ -74,9 +114,9 @@ int OneHot::InferShape(std::vector<Tensor *> inputs, std::vector<Tensor *> outpu
     return RET_NULL_PTR;
   }
   output->set_data_type(on_value->data_type());
-  output->SetFormat(on_value->GetFormat());
-  if (!GetInferFlag()) {
-    return RET_OK;
+  output->set_format(on_value->format());
+  if (!infer_flag()) {
+    return RET_INFER_INVALID;
   }
   const auto input_shape = input->shape();
   int input_rank = static_cast<int>(input_shape.size());

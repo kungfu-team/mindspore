@@ -16,6 +16,11 @@
 
 #include "src/ops/log_grad.h"
 
+#ifndef PRIMITIVE_WRITEABLE
+#include "src/ops/ops_register.h"
+#endif
+#include "src/ops/arithmetic_self.h"
+
 namespace mindspore {
 namespace lite {
 #ifndef PRIMITIVE_WRITEABLE
@@ -32,6 +37,10 @@ int LogGrad::UnPackToFlatBuilder(const schema::Primitive *primitive, flatbuffers
   fbb->Finish(prim_offset);
   return RET_OK;
 }
+
+PrimitiveC *LogGradCreator(const schema::Primitive *primitive) { return PrimitiveC::NewPrimitiveC<LogGrad>(primitive); }
+Registry LogGradRegistry(schema::PrimitiveType_LogGrad, LogGradCreator);
 #endif
+
 }  // namespace lite
 }  // namespace mindspore

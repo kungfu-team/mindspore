@@ -5,8 +5,6 @@
 
 MindSpore Lite是MindSpore推出的端云协同的、轻量化、高性能AI推理框架，用于满足越来越多的端测AI应用需求。MindSpore Lite聚焦AI技术在端侧设备上的部署和运行，已经在华为HMS和智能终端的图像分类、目标识别、人脸识别、文字识别等应用中广泛使用，未来MindSpore Lite将与MindSpore AI社区一起，致力于丰富AI软硬件应用生态。
 
-
-
 <img src="../../docs/MindSpore-Lite-architecture.png" alt="MindSpore Lite Architecture" width="600"/>
 
 欲了解更多详情，请查看我们的[MindSpore Lite 总体架构](https://www.mindspore.cn/doc/note/zh-CN/master/design/mindspore/architecture_lite.html)。
@@ -49,7 +47,7 @@ MindSpore Lite是MindSpore推出的端云协同的、轻量化、高性能AI推�
 
 2. 模型转换/优化
 
-   如果您使用MindSpore或第三方训练的模型，需要使用[MindSpore Lite模型转换工具](https://www.mindspore.cn/tutorial/lite/zh-CN/master/use/convert_model.html)转换成MindSpore Lite模型格式。MindSpore Lite模型转换工具不仅提供了将TensorFlow Lite、Caffe、ONNX等模型格式转换为MindSpore Lite模型格式，还提供了算子融合、量化等功能。
+   如果您使用MindSpore或第三方训练的模型，需要使用[MindSpore Lite模型转换工具](https://www.mindspore.cn/tutorial/lite/zh-CN/master/use/converter_tool.html)转换成MindSpore Lite模型格式。MindSpore Lite模型转换工具不仅提供了将TensorFlow Lite、Caffe、ONNX等模型格式转换为MindSpore Lite模型格式，还提供了算子融合、量化等功能。
 
    MindSpore还提供了将IoT设备上运行的模型转换成.C代码的生成工具。
 
@@ -64,14 +62,15 @@ MindSpore Lite是MindSpore推出的端云协同的、轻量化、高性能AI推�
    主要完成模型推理工作，即加载模型，完成模型相关的所有计算。[推理](https://www.mindspore.cn/tutorial/lite/zh-CN/master/use/runtime.html)是通过模型运行输入数据，获取预测的过程。
 
    MindSpore提供了预训练模型部署在智能终端的[样例](https://www.mindspore.cn/lite/examples)。
-   
+
 ## MindSpore Lite性能参考数据
-我们在HUAWEI Mate30（Hisilicon Kirin990）手机上，基于MindSpore r0.7，测试了一组端侧常见网络的性能数据，供您参考：
+
+我们在HUAWEI Mate30（Hisilicon Kirin990）手机上，基于MindSpore r1.1，测试了一组端侧常见网络的性能数据，供您参考：
 
 | 网络                | 线程数 | 平均推理时间(毫秒) |
 | ------------------- | ------ | ------------------ |
-| basic_squeezenet    | 4      | 9.10               |
-| inception_v3        | 4      | 69.361             |
-| mobilenet_v1_10_224 | 4      | 7.137              |
-| mobilenet_v2_10_224 | 4      | 5.569              |
-| resnet_v2_50        | 4      | 48.691             |
+| basic_squeezenet    | 4      | 7.569              |
+| inception_v3        | 4      | 44.869             |
+| mobilenet_v1_10_224 | 4      | 6.320              |
+| mobilenet_v2_10_224 | 4      | 4.679              |
+| resnet_v2_50        | 4      | 30.375             |

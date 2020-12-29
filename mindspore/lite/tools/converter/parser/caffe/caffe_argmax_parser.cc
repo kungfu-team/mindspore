@@ -19,36 +19,24 @@
 
 namespace mindspore {
 namespace lite {
-STATUS CaffeArgMaxParser::Parse(const caffe::LayerParameter &proto, const caffe::LayerParameter &weight,
-                                schema::CNodeT *op, std::vector<schema::TensorT *> *weightVec) {
-  MS_LOG(DEBUG) << "parse CaffeArgMaxParser";
-  if (op == nullptr) {
-    MS_LOG(ERROR) << "op is null";
-    return RET_NULL_PTR;
-  }
-  op->primitive = std::make_unique<schema::PrimitiveT>();
-  if (op->primitive == nullptr) {
-    MS_LOG(ERROR) << "op->primitive is null";
-    return RET_NULL_PTR;
-  }
-
+lite::PrimitiveC *CaffeArgMaxParser::ParseLitePrimitive(const caffe::LayerParameter &proto,
+                                                        const caffe::LayerParameter &weight) {
   std::unique_ptr<schema::ArgMaxT> attr = std::make_unique<schema::ArgMaxT>();
   if (attr == nullptr) {
     MS_LOG(ERROR) << "new op failed";
-    return RET_NULL_PTR;
+    return nullptr;
   }
 
-  // set default params
   attr->outMaxValue = false;
   attr->topK = 1;
-  const caffe::ArgMaxParameter argmaxParam = proto.argmax_param();
+  const caffe::ArgMaxParameter &argmaxParam = proto.argmax_param();
   if (argmaxParam.has_out_max_val()) {
     attr->outMaxValue = argmaxParam.out_max_val();
   }
   if (argmaxParam.has_top_k()) {
     attr->topK = argmaxParam.top_k();
   }
-  int32_t axisType;
+  int32_t axisType = 0;
   int32_t axis = 0;
   if (!argmaxParam.has_axis()) {
     axisType = 2;
@@ -59,11 +47,10 @@ STATUS CaffeArgMaxParser::Parse(const caffe::LayerParameter &proto, const caffe:
   attr->axis = axis;
   attr->axisType = axisType;
   attr->keepDims = true;
-
-  op->name = proto.name();
-  op->primitive->value.type = schema::PrimitiveType_ArgMax;
-  op->primitive->value.value = attr.release();
-  return RET_OK;
+  auto primitive = std::make_unique<schema::PrimitiveT>();
+  primitive->value.type = schema::PrimitiveType_ArgMax;
+  primitive->value.value = attr.release();
+  return PrimitiveC::Create(primitive.release());
 }
 
 CaffeNodeRegistrar g_caffeArgMaxParser("ArgMax", new CaffeArgMaxParser());

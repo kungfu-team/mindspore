@@ -18,6 +18,7 @@
 #include <numeric>
 #include <utility>
 #include "utils/ms_utils.h"
+#include "abstract/utils.h"
 #include "backend/session/anf_runtime_algorithm.h"
 #include "backend/kernel_compiler/kernel.h"
 #include "runtime/device/convert_tensor_utils.h"
@@ -28,12 +29,6 @@
 namespace mindspore {
 namespace trans {
 enum kAxis : int { kN = 0, kC, kH, kW, kNchwDims, kNdhwc };
-const std::map<TypeId, size_t> type_map = {{kNumberTypeBool, 1},    {kNumberTypeInt, 4},     {kNumberTypeInt8, 1},
-                                           {kNumberTypeInt16, 2},   {kNumberTypeInt32, 4},   {kNumberTypeInt64, 8},
-                                           {kNumberTypeUInt, 4},    {kNumberTypeUInt8, 1},   {kNumberTypeUInt16, 2},
-                                           {kNumberTypeUInt32, 4},  {kNumberTypeUInt64, 8},  {kNumberTypeFloat, 4},
-                                           {kNumberTypeFloat16, 2}, {kNumberTypeFloat32, 4}, {kNumberTypeFloat64, 8}};
-
 inline void SetData(size_t size, bool pad_zero, size_t src_idx, size_t dst_idx, const FormatArgs &args, void *result) {
   switch (size) {
     case 1:
@@ -71,6 +66,7 @@ enum DataTypeTransMode {
   FROM_INT32_TO_FLOAT16,
   FROM_INT32_TO_UINT8,
   FROM_INT32_TO_INT8,
+  FROM_INT32_TO_INT64,
   FROM_INT32_TO_BOOL,
   FROM_UINT8_TO_FLOAT,
   FROM_UINT8_TO_INT32,
@@ -100,6 +96,7 @@ const std::map<std::pair<TypeId, TypeId>, DataTypeTransMode> mode_map{
   {std::pair<TypeId, TypeId>(kNumberTypeInt32, kNumberTypeFloat16), FROM_INT32_TO_FLOAT16},
   {std::pair<TypeId, TypeId>(kNumberTypeInt32, kNumberTypeUInt8), FROM_INT32_TO_UINT8},
   {std::pair<TypeId, TypeId>(kNumberTypeInt32, kNumberTypeInt8), FROM_INT32_TO_INT8},
+  {std::pair<TypeId, TypeId>(kNumberTypeInt32, kNumberTypeInt64), FROM_INT32_TO_INT64},
   {std::pair<TypeId, TypeId>(kNumberTypeInt32, kNumberTypeBool), FROM_INT32_TO_BOOL},
   {std::pair<TypeId, TypeId>(kNumberTypeUInt8, kNumberTypeFloat32), FROM_UINT8_TO_FLOAT},
   {std::pair<TypeId, TypeId>(kNumberTypeUInt8, kNumberTypeInt32), FROM_UINT8_TO_INT32},
@@ -115,8 +112,8 @@ const std::map<std::pair<TypeId, TypeId>, DataTypeTransMode> mode_map{
   {std::pair<TypeId, TypeId>(kNumberTypeBool, kNumberTypeFloat16), FROM_BOOL_TO_FLOAT16}};
 
 void CheckMemSize(const TypeIdArgs &args) {
-  auto src_type_size = TypeIdSize(args.host_data_type);
-  auto dst_type_size = TypeIdSize(args.device_data_type);
+  auto src_type_size = abstract::TypeIdSize(args.host_data_type);
+  auto dst_type_size = abstract::TypeIdSize(args.device_data_type);
   if (src_type_size < 1 || dst_type_size < 1) {
     MS_LOG(EXCEPTION) << "Invalid src or dst data type.";
   }
@@ -154,6 +151,7 @@ bool CastKernel(const TypeIdArgs &args, void *dst, const size_t data_size, const
     {FROM_FLOAT16_TO_UINT8, TransDataSrc2Dst<float16, uint8_t>},
     {FROM_INT32_TO_FLOAT, TransDataSrc2Dst<int32_t, float>},
     {FROM_INT32_TO_INT8, TransDataSrc2Dst<int32_t, int8_t>},
+    {FROM_INT32_TO_INT64, TransDataSrc2Dst<int32_t, int64_t>},
     {FROM_INT32_TO_UINT8, TransDataSrc2Dst<int32_t, uint8_t>},
     {FROM_INT32_TO_BOOL, TransDataSrc2Dst<int32_t, int8_t>},
     {FROM_INT32_TO_FLOAT16, TransDataSrc2Fp16<int32_t>},
@@ -189,7 +187,7 @@ bool CastKernel(const TypeIdArgs &args, void *dst, const size_t data_size, const
 
 size_t CubeSizeByType(const TypeId data_type) {
   const size_t default_error = 0;
-  auto dt_size = TypeIdSize(data_type);
+  auto dt_size = abstract::TypeIdSize(data_type);
   if (dt_size < 1) {
     MS_LOG(ERROR) << "Illegal dtype.";
     return default_error;
@@ -197,19 +195,6 @@ size_t CubeSizeByType(const TypeId data_type) {
     return kCubeSize * 2;
   }
   return kCubeSize;
-}
-
-size_t ShapeSize(const std::vector<size_t> &shape) {
-  return std::accumulate(shape.begin(), shape.end(), IntToSize(1), std::multiplies<size_t>());
-}
-
-size_t TypeIdSize(const TypeId data_type) {
-  const size_t unsupported_type_error = 0;
-  auto iter = type_map.find(data_type);
-  if (iter != type_map.end()) {
-    return iter->second;
-  }
-  return unsupported_type_error;
 }
 
 namespace {
@@ -281,6 +266,38 @@ std::vector<size_t> Nc1hwc0DeviceShape(const std::vector<size_t> &shape) {
   return device_shape;
 }
 
+std::vector<size_t> Ndc1hwc0DeviceShape(const std::vector<size_t> &shape) {
+  // NCDHW
+  if (shape.size() != 5) {
+    MS_LOG(EXCEPTION) << "Check dims failed, expect shape dim 5, but got shape dim : " << shape.size();
+  }
+  std::vector<size_t> device_shape;
+  const size_t C1 = (shape[1] + kCubeSize - 1) / kCubeSize;
+  const size_t C0 = kCubeSize;
+  device_shape.push_back(shape[0]);
+  device_shape.push_back(shape[2]);
+  device_shape.push_back(C1);
+  device_shape.push_back(shape[3]);
+  device_shape.push_back(shape[4]);
+  device_shape.push_back(C0);
+  return device_shape;
+}
+
+std::vector<size_t> Fracz3DDeviceShape(const std::vector<size_t> &shape) {
+  // NCDHW -> Frac_Z_3D
+  if (shape.size() != 5) {
+    MS_LOG(EXCEPTION) << "Check dims failed, expect shape dim 5, but got shape dim : " << shape.size();
+  }
+  std::vector<size_t> device_shape;
+  const size_t C1 = (shape[1] + kCubeSize - 1) / kCubeSize;
+  const size_t N1 = (shape[0] + kCubeSize - 1) / kCubeSize;
+  device_shape.push_back(shape[2] * C1 * shape[3] * shape[4]);
+  device_shape.push_back(N1);
+  device_shape.push_back(kCubeSize);
+  device_shape.push_back(kCubeSize);
+  return device_shape;
+}
+
 std::vector<size_t> C1hwncoc0DeviceShape(const std::vector<size_t> &shape) {
   if (!CheckDims(shape)) {
     MS_LOG(EXCEPTION) << "Check dims failed.";
@@ -325,7 +342,7 @@ std::vector<size_t> Nc1hwc04DeviceShape(const std::vector<size_t> &shape) {
   return device_shape;
 }
 
-std::vector<size_t> NdhwcDeviceShape(const std::vector<size_t> &shape) {
+std::vector<size_t> NcdhwDeviceShape(const std::vector<size_t> &shape) {
   if (shape.size() < kNdhwc) {
     MS_LOG(EXCEPTION) << "Shape dims must be 5 when format is ndhwc.";
   }
@@ -385,7 +402,7 @@ ShapeVector GetRuntimePaddingShape(const AnfNodePtr &node, size_t index) {
       MS_LOG(EXCEPTION) << " The node[ " << node->DebugString() << "]'s cannot convert ";
     }
     auto shape_temp = tensor->shape();
-    (void)std::transform(shape_temp.begin(), shape_temp.end(), std::back_inserter(host_shape), IntToSize);
+    (void)std::transform(shape_temp.begin(), shape_temp.end(), std::back_inserter(host_shape), LongToSize);
     if (host_shape.empty()) {
       host_shape.push_back(1);
     }
@@ -395,7 +412,7 @@ ShapeVector GetRuntimePaddingShape(const AnfNodePtr &node, size_t index) {
   if (trans::IsNeedPadding(AnfAlgo::GetOutputFormat(node, index), host_shape.size())) {
     host_shape = trans::PaddingShapeTo4d(host_shape, AnfAlgo::GetOutputReshapeType(node, index));
   }
-  std::transform(host_shape.begin(), host_shape.end(), std::back_inserter(shape), SizeToInt);
+  std::transform(host_shape.begin(), host_shape.end(), std::back_inserter(shape), SizeToLong);
   return shape;
 }
 
@@ -420,7 +437,9 @@ std::vector<size_t> TransShapeToDevice(const std::vector<size_t> &shape, const s
                                                                     {kOpFormat_C1HWNCoC0, C1hwncoc0DeviceShape},
                                                                     {kOpFormat_FRACTAL_Z_C04, FracZc04DeviceShape},
                                                                     {kOpFormat_NC1HWC0_C04, Nc1hwc04DeviceShape},
-                                                                    {kOpFormat_NDHWC, NdhwcDeviceShape}};
+                                                                    {kOpFormat_NCDHW, NcdhwDeviceShape},
+                                                                    {kOpFormat_NDC1HWC0, Ndc1hwc0DeviceShape},
+                                                                    {kOpFormat_FRACTAL_Z_3D, Fracz3DDeviceShape}};
 
   if (format == kOpFormat_ND || format == kOpFormat_DEFAULT) {
     return shape;
@@ -456,7 +475,7 @@ std::vector<size_t> TransShapeToDevice(const std::vector<size_t> &shape, const s
     device_shape.push_back(kCubeSize);
     return device_shape;
   }
-  if (shape.size() != kNchwDims) {
+  if (shape.size() != kNchwDims && shape.size() != 5) {
     MS_LOG(WARNING) << "Get Device Shape using a shape size is less than 4 ,should be Padding shape by Default firstly";
     temp_shape = PaddingShapeTo4dByDefault(shape);
   }
@@ -474,12 +493,12 @@ bool CheckArgs(const FormatArgs &args, size_t *size, size_t *total_size) {
   }
   MS_EXCEPTION_IF_NULL(size);
   MS_EXCEPTION_IF_NULL(total_size);
-  *size = TypeIdSize(args.src_data_type);
+  *size = abstract::TypeIdSize(args.src_data_type);
   if (*size < 1) {
     MS_LOG(ERROR) << "Illegal dtype.";
     return false;
   }
-  *total_size = ShapeSize(args.device_shape) * (*size);
+  *total_size = abstract::ShapeSize(args.device_shape) * (*size);
   if (*total_size != args.device_size) {
     MS_LOG(ERROR) << "Illegal total data size, total_size:" << *total_size << ", device_size:" << args.device_size;
     return false;
@@ -507,35 +526,29 @@ bool TransDataType(const TypeIdArgs &args, void *result) {
 }
 
 bool TransFormat(const FormatArgs &args, void *result) {
-  using FormatTransfer = std::function<bool(const FormatArgs &, void *)>;
-  const std::map<std::string, FormatTransfer> format_trans_map{
-    {kOpFormat_FRAC_Z, NchwToFracZ},           {kOpFormat_FRAC_NZ, NchwToFracNz},
-    {kOpFormat_NC1HWC0, NchwToNc1hwc0},        {kOpFormat_C1HWNCoC0, NchwToC1hwncoc0},
-    {kOpFormat_FRACTAL_Z_C04, NchwToFracZc04}, {kOpFormat_NC1HWC0_C04, NchwToNc1hwc04}};
   MS_LOG(DEBUG) << "Start trans format.";
-  if (TypeIdSize(args.src_data_type) < 1) {
+  if (abstract::TypeIdSize(args.src_data_type) < 1) {
     MS_LOG(ERROR) << "Invalid datatype..";
     return false;
   }
   if (args.device_format == kOpFormat_HWCN || args.device_format == kOpFormat_NHWC) {
     return NchwTo4D(args, result);
   }
-  auto iter = format_trans_map.find(args.device_format);
-  if (iter == format_trans_map.end()) {
+  auto iter = kTransFormatMapOfHostToDevice.find(args.device_format);
+  if (iter == kTransFormatMapOfHostToDevice.end()) {
     MS_LOG(EXCEPTION) << "Unexpected format[" << args.device_format << "]";
   }
   return iter->second(args, result);
 }
 
 bool TransFormatFromDeviceToHost(const FormatArgs &args, void *result) {
-  using FormatTransfer = std::function<bool(const FormatArgs &, void *)>;
-  const std::map<std::string, FormatTransfer> format_trans_map{{kOpFormat_FRAC_Z, FracZToNchw},
-                                                               {kOpFormat_FRAC_NZ, FracNzToNchw},
-                                                               {kOpFormat_NC1HWC0, Nc1hwc0ToNchw},
-                                                               {kOpFormat_C1HWNCoC0, C1hwncoc0ToNchw},
-                                                               {kOpFormat_NC1HWC0_C04, Nc1hwc04ToNchw}};
+  const std::map<std::string, FormatTransfer> format_trans_map{
+    {kOpFormat_FRAC_Z, FracZToNchw},         {kOpFormat_FRAC_NZ, FracNzToNchw},
+    {kOpFormat_NC1HWC0, Nc1hwc0ToNchw},      {kOpFormat_C1HWNCoC0, C1hwncoc0ToNchw},
+    {kOpFormat_NC1HWC0_C04, Nc1hwc04ToNchw}, {kOpFormat_NDC1HWC0, Ndc1hwc0ToNcdhw}};
+
   MS_LOG(DEBUG) << "Start trans format.";
-  if (TypeIdSize(args.src_data_type) < 1) {
+  if (abstract::TypeIdSize(args.src_data_type) < 1) {
     MS_LOG(ERROR) << "Invalid datatype..";
     return false;
   }
@@ -621,7 +634,7 @@ bool NchwToFracZ(const FormatArgs &args, void *result) {
     MS_LOG(ERROR) << "Invalid host shape, host shape dims:" << args.host_shape.size() << ", expect dims:" << kNchwDims;
     return false;
   }
-  auto size = TypeIdSize(args.src_data_type);
+  auto size = abstract::TypeIdSize(args.src_data_type);
   if (size < 1) {
     MS_LOG(ERROR) << "Illegal dtype.";
     return false;
@@ -682,12 +695,12 @@ bool FracZToNchw(const FormatArgs &args, void *result) {
     MS_LOG(ERROR) << "Invalid host shape, host shape dims:" << args.host_shape.size() << ", expect dims:" << kNchwDims;
     return false;
   }
-  auto size = TypeIdSize(args.src_data_type);
+  auto size = abstract::TypeIdSize(args.src_data_type);
   if (size < 1) {
     MS_LOG(ERROR) << "Illegal dtype.";
     return false;
   }
-  auto total_size = ShapeSize(args.device_shape) * size;
+  auto total_size = abstract::ShapeSize(args.device_shape) * size;
   if (total_size != args.device_size) {
     MS_LOG(ERROR) << "Illegal total data size, total_size:" << total_size << ", device_size:" << args.device_size;
     return false;
@@ -825,13 +838,13 @@ bool NchwToFracNz(const FormatArgs &args, void *result) {
     MS_LOG(ERROR) << "Invalid shape size.";
     return false;
   }
-  auto size = TypeIdSize(args.src_data_type);
+  auto size = abstract::TypeIdSize(args.src_data_type);
   if (size < 1) {
     MS_LOG(ERROR) << "Illegal dtype";
     return false;
   }
 
-  auto dst_size = ShapeSize(args.device_shape) * size;
+  auto dst_size = abstract::ShapeSize(args.device_shape) * size;
   if (dst_size != args.device_size) {
     MS_LOG(ERROR) << "Illegal total data size, total_size:" << dst_size << ", device_size:" << args.device_size;
     return false;
@@ -887,13 +900,13 @@ bool FracNzToNchw(const FormatArgs &args, void *result) {
     MS_LOG(ERROR) << "Invalid shape size.";
     return false;
   }
-  auto size = TypeIdSize(args.src_data_type);
+  auto size = abstract::TypeIdSize(args.src_data_type);
   if (size < 1) {
     MS_LOG(ERROR) << "Illegal dtype";
     return false;
   }
 
-  auto dst_size = ShapeSize(args.device_shape) * size;
+  auto dst_size = abstract::ShapeSize(args.device_shape) * size;
   if (dst_size != args.device_size) {
     MS_LOG(ERROR) << "Illegal total data size, total_size:" << dst_size << ", device_size:" << args.device_size;
     return false;
@@ -944,12 +957,12 @@ bool NchwToNc1hwc0(const FormatArgs &args, void *result) {
     MS_LOG(ERROR) << "Invalid host shape, host shape dims:" << args.host_shape.size() << ", expect dims:" << kNchwDims;
     return false;
   }
-  auto size = TypeIdSize(args.src_data_type);
+  auto size = abstract::TypeIdSize(args.src_data_type);
   if (size < 1) {
     MS_LOG(ERROR) << "Illegal dtype.";
     return false;
   }
-  auto total_size = ShapeSize(args.device_shape) * size;
+  auto total_size = abstract::ShapeSize(args.device_shape) * size;
   if (total_size != args.device_size) {
     MS_LOG(ERROR) << "Illegal total data size, total_size:" << total_size << ", device_size:" << args.device_size;
     return false;
@@ -1002,12 +1015,12 @@ bool Nc1hwc0ToNchw(const FormatArgs &args, void *result) {
     MS_LOG(ERROR) << "Invalid host shape, host shape dims:" << args.host_shape.size() << ", expect dims:" << kNchwDims;
     return false;
   }
-  auto size = TypeIdSize(args.src_data_type);
+  auto size = abstract::TypeIdSize(args.src_data_type);
   if (size < 1) {
     MS_LOG(ERROR) << "Illegal dtype.";
     return false;
   }
-  auto total_size = ShapeSize(args.device_shape) * size;
+  auto total_size = abstract::ShapeSize(args.device_shape) * size;
   if (total_size != args.device_size) {
     MS_LOG(ERROR) << "Illegal total data size, total_size:" << total_size << ", device_size:" << args.device_size;
     return false;
@@ -1115,6 +1128,120 @@ bool C1hwncoc0ToNchw(const FormatArgs &args, void *result) {
           size_t src_idx =
             c1_i * h * w * n * co * c0 + h_i * w * n * co * c0 + w_i * n * co * c0 + n_i * co * c0 + co_i * c0 + c0_i;
           SetData(size, false, src_idx, dst_idx, args, result);
+        }
+      }
+    }
+  }
+  return true;
+}
+
+bool Ndc1hwc0ToNcdhw(const FormatArgs &args, void *result) {
+  MS_LOG(DEBUG) << "Trans from ndc1hwc0 to ncdhw";
+  MS_EXCEPTION_IF_NULL(result);
+
+  if (args.host_shape.size() != 5) {
+    MS_LOG(ERROR) << "Illegal host shape dim, expect dim: 5, but got " << args.host_shape.size();
+    return false;
+  }
+  auto size = abstract::TypeIdSize(args.src_data_type);
+  if (size < 1) {
+    MS_LOG(ERROR) << "Illegal dtype.";
+    return false;
+  }
+  auto total_size = abstract::ShapeSize(args.device_shape) * size;
+  if (total_size != args.device_size) {
+    MS_LOG(ERROR) << "Illegal total data size, total_size:" << total_size << ", device_size:" << args.device_size;
+    return false;
+  }
+  auto n = args.host_shape[0];
+  auto c = args.host_shape[1];
+  auto d = args.host_shape[2];
+  auto h = args.host_shape[3];
+  auto w = args.host_shape[4];
+  auto c1 = args.device_shape[2];
+  auto c0 = args.device_shape[5];
+  const size_t cdhw = c * d * h * w;
+  const size_t dhw = d * h * w;
+  const size_t hw = h * w;
+  const size_t dc1hwc0 = d * c1 * h * w * c0;
+  const size_t c1hwc0 = c1 * h * w * c0;
+  const size_t hwc0 = h * w * c0;
+  const size_t wc0 = w * c0;
+
+  for (size_t n_i = 0; n_i < n; n_i++) {
+    size_t n_head = n_i * cdhw;
+    for (size_t c_i = 0; c_i < c; c_i++) {
+      size_t c_head = n_head + c_i * dhw;
+      for (size_t d_i = 0; d_i < d; d_i++) {
+        size_t d_head = c_head + d_i * hw;
+        for (size_t h_i = 0; h_i < h; h_i++) {
+          size_t h_head = d_head + h_i * w;
+          for (size_t w_i = 0; w_i < w; w_i++) {
+            size_t dst_i = h_head + w_i;
+            size_t c1_i = c_i / c0;
+            size_t c0_i = c_i % c0;
+            auto src_idx = n_i * dc1hwc0 + d_i * c1hwc0 + c1_i * hwc0 + h_i * wc0 + w_i * c0 + c0_i;
+            SetData(size, false, src_idx, dst_i, args, result);
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+
+bool NcdhwToNdc1hwc0(const FormatArgs &args, void *result) {
+  MS_LOG(DEBUG) << "Trans from ncdhw to ndc1hwc0";
+  MS_EXCEPTION_IF_NULL(result);
+
+  if (args.host_shape.size() != 5) {
+    MS_LOG(ERROR) << "Illegal host shape dim, expect dim: 5, but got " << args.host_shape.size();
+    return false;
+  }
+  auto size = abstract::TypeIdSize(args.src_data_type);
+  if (size < 1) {
+    MS_LOG(ERROR) << "Illegal dtype.";
+    return false;
+  }
+  auto total_size = abstract::ShapeSize(args.device_shape) * size;
+  if (total_size != args.device_size) {
+    MS_LOG(ERROR) << "Illegal total data size, total_size:" << total_size << ", device_size:" << args.device_size;
+    return false;
+  }
+
+  auto n = args.host_shape[0];
+  auto c = args.host_shape[1];
+  auto d = args.host_shape[2];
+  auto h = args.host_shape[3];
+  auto w = args.host_shape[4];
+  auto c0 = kCubeSize;
+  auto c1 = DivCeil(c, c0);
+  const size_t cdhw = c * d * h * w;
+  const size_t dhw = d * h * w;
+  const size_t hw = h * w;
+  const size_t dc1hwc0 = d * c1 * h * w * c0;
+  const size_t c1hwc0 = c1 * h * w * c0;
+  const size_t hwc0 = h * w * c0;
+  const size_t wc0 = w * c0;
+
+  for (size_t n_i = 0; n_i < n; n_i++) {
+    size_t n_head = n_i * dc1hwc0;
+    for (size_t d_i = 0; d_i < d; d_i++) {
+      size_t d_head = n_head + d_i * c1hwc0;
+      for (size_t c1_i = 0; c1_i < c1; c1_i++) {
+        size_t c1_head = d_head + c1_i * hwc0;
+        for (size_t h_i = 0; h_i < h; h_i++) {
+          size_t h_head = c1_head + h_i * wc0;
+          for (size_t w_i = 0; w_i < w; w_i++) {
+            size_t w_head = h_head + w_i * c0;
+            for (size_t c0_i = 0; c0_i < c0; c0_i++) {
+              size_t dst_i = c0_i + w_head;
+              size_t c_i = c0_i + c1_i * c0;
+              size_t src_i = n_i * cdhw + c_i * dhw + d_i * hw + h_i * w + w_i;
+              auto pad_zero = c_i >= c;
+              SetData(size, pad_zero, src_i, dst_i, args, result);
+            }
+          }
         }
       }
     }

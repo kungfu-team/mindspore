@@ -50,9 +50,9 @@ int GatherNdInt8CPUKernel::ReSize() {
     free(in_offset_);
     in_offset_ = nullptr;
   }
-  auto in_quant_args = in_tensors_.at(0)->GetQuantParams();
-  auto ind_quant_args = in_tensors_.at(1)->GetQuantParams();
-  auto out_quant_args = out_tensors_.at(0)->GetQuantParams();
+  auto in_quant_args = in_tensors_.at(0)->quant_params();
+  auto ind_quant_args = in_tensors_.at(1)->quant_params();
+  auto out_quant_args = out_tensors_.at(0)->quant_params();
   param_.alpha_ = in_quant_args.front().scale / out_quant_args.front().scale;
   param_.zp_in_ = in_quant_args.front().zeroPoint;
   param_.zp_out_ = out_quant_args.front().zeroPoint;
@@ -64,7 +64,10 @@ int GatherNdInt8CPUKernel::ReSize() {
   for (int i = 0; i < indices_rank - 1; ++i) {
     count_ *= indices_shape[i];
   }
-
+  if (count_ >= std::numeric_limits<int>::max() / static_cast<int>(sizeof(int))) {
+    MS_LOG(ERROR) << "count_ is invalid, count_: " << count_;
+    return RET_ERROR;
+  }
   in_offset_ = reinterpret_cast<int *>(malloc(count_ * sizeof(int)));
   if (in_offset_ == nullptr) {
     MS_LOG(ERROR) << "GatherNdInt8 Malloc in_offset_ error!";
@@ -77,11 +80,11 @@ int GatherNdInt8CPUKernel::ReSize() {
 
   auto in_shape = in_tensors_.front()->shape();
   int in_rank = in_shape.size();
-  int idx_lastshape = indices_shape[indices_rank - 1];
+  int idx_lastshape = indices_shape.at(indices_rank - 1);
   auto indices_ptr = reinterpret_cast<int8_t *>(indices_tensor->MutableData());
   area_ = 1;
   for (int i = idx_lastshape; i < in_rank; ++i) {
-    area_ *= in_shape[i];
+    area_ *= in_shape.at(i);
   }
   std::vector<int> in_stride(in_rank);
   in_stride[in_rank - 1] = 1;
@@ -125,11 +128,6 @@ int GatherNdInt8Run(void *cdata, int task_id) {
 }
 
 int GatherNdInt8CPUKernel::Run() {
-  auto prepare_ret = Prepare();
-  if (prepare_ret != RET_OK) {
-    MS_LOG(ERROR) << "Prepare fail!ret: " << prepare_ret;
-    return prepare_ret;
-  }
   in_ptr_ = reinterpret_cast<int8_t *>(in_tensors_.front()->MutableData());
   out_ptr_ = reinterpret_cast<int8_t *>(out_tensors_.front()->MutableData());
   auto ret = ParallelLaunch(this->context_->thread_pool_, GatherNdInt8Run, this, thread_sz_count_);
@@ -140,26 +138,5 @@ int GatherNdInt8CPUKernel::Run() {
   return RET_OK;
 }
 
-kernel::LiteKernel *CpuGatherNdInt8KernelCreator(const std::vector<lite::Tensor *> &inputs,
-                                                 const std::vector<lite::Tensor *> &outputs, OpParameter *opParameter,
-                                                 const lite::InnerContext *ctx, const kernel::KernelKey &desc,
-                                                 const mindspore::lite::PrimitiveC *primitive) {
-  MS_ASSERT(opParameter != nullptr);
-  MS_ASSERT(desc.type == schema::PrimitiveType_GatherNd);
-
-  auto *kernel = new (std::nothrow) GatherNdInt8CPUKernel(opParameter, inputs, outputs, ctx, primitive);
-  if (kernel == nullptr) {
-    return nullptr;
-  }
-  auto ret = kernel->Init();
-  if (ret != RET_OK) {
-    MS_LOG(ERROR) << "Init kernel failed, name: " << opParameter->name_ << ", type: "
-                  << schema::EnumNamePrimitiveType(static_cast<schema::PrimitiveType>(opParameter->type_));
-    delete kernel;
-    return nullptr;
-  }
-  return kernel;
-}
-
-REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_GatherNd, CpuGatherNdInt8KernelCreator)
+REG_KERNEL(kCPU, kNumberTypeInt8, PrimitiveType_GatherNd, LiteKernelCreator<GatherNdInt8CPUKernel>)
 }  // namespace mindspore::kernel

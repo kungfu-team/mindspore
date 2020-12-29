@@ -15,26 +15,22 @@
  */
 
 #include "tools/converter/legacy_optimizer/graph/batchnorm_convert_scale_pass.h"
-#include <cfloat>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
+#include "tools/converter/converter_flags.h"
 #include "third_party/securec/include/securec.h"
 #include "src/common/log_adapter.h"
-#include "tools/common/graph_util.h"
 #include "tools/common/tensor_util.h"
 #include "include/errorcode.h"
 #include "schema/inner/model_generated.h"
-#include "src/common/op_utils.h"
 
 namespace mindspore {
 namespace lite {
-#define CAFFE_BATCHNORM_OP_WEIGHT_NUM 2
-#define TF_BATCHNORM_OP_WEIGHT_NUM 4
 #define CAFFE_BATCHNORM_MEAN_INDEX 0
 #define CAFFE_BATCHNORM_VARIANCE_INDEX 1
+#define CAFFE_BATCHNORM_SCALE_INDEX 2
 #define TF_BATCHNORM_SCALE_INDEX 0
 #define TF_BATCHNORM_BIAS_INDEX 1
 #define TF_BATCHNORM_MEAN_INDEX 2
@@ -73,9 +69,9 @@ STATUS BatchNormConvertScalePass::ConvertBNToScale(MetaGraphT *graph, const std:
   MS_ASSERT(graph != nullptr);
   MS_ASSERT(bnNode != nullptr);
   bnNode->primitive->value.type = schema::PrimitiveType_Scale;
-  std::unique_ptr<ScaleT> scaleParam(new ScaleT());
+  std::unique_ptr<ScaleT> scaleParam(new (std::nothrow) ScaleT());
   if (scaleParam == nullptr) {
-    MS_LOG(ERROR) << "new transposeParam failed";
+    MS_LOG(ERROR) << "new scaleParam failed";
     return RET_ERROR;
   }
   scaleParam->axis = NCHW_DIM_C;
@@ -108,7 +104,7 @@ STATUS BatchNormConvertScalePass::GenNewScaleTensor(MetaGraphT *graph, const std
   newScaleWeightTensor->data.resize(weightShapeSize * sizeof(float));
   auto ret = memcpy_s(newScaleWeightTensor->data.data(), weightShapeSize * sizeof(float), transScale,
                       weightShapeSize * sizeof(float));
-  if (ret != RET_OK) {
+  if (ret != EOK) {
     MS_LOG(ERROR) << "memcpy error: " << ret;
     delete[] transScale;
     delete[] transBias;
@@ -131,7 +127,7 @@ STATUS BatchNormConvertScalePass::GenNewScaleTensor(MetaGraphT *graph, const std
   newScaleBiasTensor->data.resize(weightShapeSize * sizeof(float));
   ret = memcpy_s(newScaleBiasTensor->data.data(), weightShapeSize * sizeof(float), transBias,
                  weightShapeSize * sizeof(float));
-  if (ret != RET_OK) {
+  if (ret != EOK) {
     MS_LOG(ERROR) << "memcpy error: " << ret;
     delete[] transScale;
     delete[] transBias;
@@ -170,9 +166,17 @@ STATUS BatchNormConvertScalePass::GetTransParam(MetaGraphT *graph, const std::un
     return status;
   }
   this->transScale = new (std::nothrow) float[bnChannel];
+  if (this->transScale == nullptr) {
+    MS_LOG(ERROR) << "new transScale failed";
+    return RET_ERROR;
+  }
   this->transBias = new (std::nothrow) float[bnChannel];
+  if (this->transBias == nullptr) {
+    MS_LOG(ERROR) << "new transBias failed";
+    return RET_ERROR;
+  }
   // cal transScale, tf : scale/sqrt(variance + eps); caffe : 1/sqrt(variance + eps)
-  if (memcpy_s(transScale, bnChannel * sizeof(float), varianceData, bnChannel * sizeof(float)) != 0) {
+  if (memcpy_s(transScale, bnChannel * sizeof(float), varianceData, bnChannel * sizeof(float)) != EOK) {
     MS_LOG(ERROR) << "memcpy_s transScale error";
     delete[] transScale;
     delete[] transBias;
@@ -184,6 +188,10 @@ STATUS BatchNormConvertScalePass::GetTransParam(MetaGraphT *graph, const std::un
   for (uint32_t i = 0; i < bnChannel; i++) {
     float tmp = transScale[i] + eps;
     tmp = pow(tmp, POW_NUM);
+    if (tmp <= 0.0f) {
+      MS_LOG(ERROR) << "divisor 'tmp' cannot be 0";
+      return RET_ERROR;
+    }
     transScale[i] = 1 / tmp;
   }
 
@@ -229,18 +237,27 @@ STATUS BatchNormConvertScalePass::GetBnWeightTensors(MetaGraphT *graph, BNWeight
   MS_ASSERT(graph->allTensors.size() > bnNode->inputIndex.at(1));
   auto bnWeightTensorIdxes = bnNode->inputIndex;
   bnWeightTensorIdxes.erase(bnWeightTensorIdxes.begin());
-  if (bnWeightTensorIdxes.size() == CAFFE_BATCHNORM_OP_WEIGHT_NUM) {
+  if (fmkType == converter::FmkType_CAFFE) {
     bnWeightTensors->meanTensor = graph->allTensors.at(bnWeightTensorIdxes[CAFFE_BATCHNORM_MEAN_INDEX]).get();
     bnWeightTensors->varianceTensor = graph->allTensors.at(bnWeightTensorIdxes[CAFFE_BATCHNORM_VARIANCE_INDEX]).get();
-  } else if (bnWeightTensorIdxes.size() == TF_BATCHNORM_OP_WEIGHT_NUM) {
+    auto scaleTensor = graph->allTensors.at(bnWeightTensorIdxes[CAFFE_BATCHNORM_SCALE_INDEX]).get();
+
+    // calibrate mean and variance
+    float scale_factor_data = (reinterpret_cast<float *>(scaleTensor->data.data()))[0];
+    float scale_factor = scale_factor_data == 0 ? 0 : 1 / scale_factor_data;
+    auto mean_data = reinterpret_cast<float *>(bnWeightTensors->meanTensor->data.data());
+    auto variance_data = reinterpret_cast<float *>(bnWeightTensors->varianceTensor->data.data());
+    for (size_t i = 0; i < GetShapeSize(*bnWeightTensors->meanTensor); i++) {
+      mean_data[i] *= scale_factor;
+    }
+    for (size_t i = 0; i < GetShapeSize(*bnWeightTensors->varianceTensor); i++) {
+      variance_data[i] *= scale_factor;
+    }
+  } else {
     bnWeightTensors->scaleTensor = graph->allTensors.at(bnWeightTensorIdxes[TF_BATCHNORM_SCALE_INDEX]).get();
     bnWeightTensors->biasTensor = graph->allTensors.at(bnWeightTensorIdxes[TF_BATCHNORM_BIAS_INDEX]).get();
     bnWeightTensors->meanTensor = graph->allTensors.at(bnWeightTensorIdxes[TF_BATCHNORM_MEAN_INDEX]).get();
     bnWeightTensors->varianceTensor = graph->allTensors.at(bnWeightTensorIdxes[TF_BATCHNORM_VARIANCE_INDEX]).get();
-  } else {
-    MS_LOG(ERROR) << "BatchNorm should has 2 or 4 weight tensors, current number of weight tensors: "
-                  << bnWeightTensorIdxes.size();
-    return RET_ERROR;
   }
 
   if (bnWeightTensors->meanTensor == nullptr) {
@@ -282,6 +299,7 @@ STATUS BatchNormConvertScalePass::GetBnWeightTensors(MetaGraphT *graph, BNWeight
 STATUS BatchNormConvertScalePass::GetBnEpsilon(const std::unique_ptr<CNodeT> &bnNode) {
   MS_ASSERT(graph != nullptr);
   MS_ASSERT(bnNode != nullptr);
+  MS_ASSERT(bnNode->primitive != nullptr);
   if (bnNode->primitive->value.type == schema::PrimitiveType_FusedBatchNorm) {
     eps = bnNode->primitive->value.AsFusedBatchNorm()->epsilon;
   } else if (bnNode->primitive->value.type == schema::PrimitiveType_BatchNorm) {

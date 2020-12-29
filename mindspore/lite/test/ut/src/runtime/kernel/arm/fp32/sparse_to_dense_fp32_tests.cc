@@ -18,7 +18,7 @@
 #include "schema/inner/model_generated.h"
 #include "src/common/log_adapter.h"
 #include "common/common_test.h"
-#include "mindspore/lite/nnacl/fp32/sparse_to_dense.h"
+#include "mindspore/lite/nnacl/fp32/sparse_to_dense_fp32.h"
 #include "mindspore/lite/src/kernel_registry.h"
 #include "mindspore/lite/src/lite_kernel.h"
 #include "mindspore/lite/src/tensor.h"
@@ -42,22 +42,22 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test1) {
 
   TypeId tid = kNumberTypeFloat32;
   lite::Tensor *input_tensor1 = new lite::Tensor;
-  input_tensor1->SetData(input1.data());
+  input_tensor1->set_data(input1.data());
   input_tensor1->set_shape(shape1);
   input_tensor1->set_data_type(tid);
 
   lite::Tensor *input_tensor2 = new lite::Tensor;
-  input_tensor2->SetData(input2.data());
+  input_tensor2->set_data(input2.data());
   input_tensor2->set_shape(shape2);
   input_tensor2->set_data_type(tid);
 
   lite::Tensor *input_tensor3 = new lite::Tensor;
-  input_tensor3->SetData(input3.data());
+  input_tensor3->set_data(input3.data());
   input_tensor3->set_shape(shape3);
   input_tensor3->set_data_type(tid);
 
   lite::Tensor *input_tensor4 = new lite::Tensor;
-  input_tensor4->SetData(input4.data());
+  input_tensor4->set_data(input4.data());
   input_tensor4->set_shape(shape4);
   input_tensor4->set_data_type(tid);
 
@@ -72,7 +72,7 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test1) {
   std::vector<int> output_shape = {6, 10};
 
   lite::Tensor *output0_tensor = new lite::Tensor;
-  output0_tensor->SetData(output);
+  output0_tensor->set_data(output);
   output0_tensor->set_shape(output_shape);
   output0_tensor->set_data_type(tid);
   std::vector<lite::Tensor *> outputs_tensor(1);
@@ -99,13 +99,13 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test1) {
                                       0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
   PrintData("output data", output, output_size);
   PrintData("output data shape", output_tensor_shape.data(), output_tensor_shape.size());
-  CompareOutputData(output, except_result.data(), output_size, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, except_result.data(), output_size, 0.000001));
 
-  input_tensor1->SetData(nullptr);
-  input_tensor2->SetData(nullptr);
-  input_tensor3->SetData(nullptr);
-  input_tensor4->SetData(nullptr);
-  output0_tensor->SetData(nullptr);
+  input_tensor1->set_data(nullptr);
+  input_tensor2->set_data(nullptr);
+  input_tensor3->set_data(nullptr);
+  input_tensor4->set_data(nullptr);
+  output0_tensor->set_data(nullptr);
   delete input_tensor1;
   delete input_tensor2;
   delete input_tensor3;
@@ -126,22 +126,22 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test2) {
 
   TypeId tid = kNumberTypeFloat32;
   lite::Tensor *input_tensor1 = new lite::Tensor;
-  input_tensor1->SetData(input1.data());
+  input_tensor1->set_data(input1.data());
   input_tensor1->set_shape(shape1);
   input_tensor1->set_data_type(tid);
 
   lite::Tensor *input_tensor2 = new lite::Tensor;
-  input_tensor2->SetData(input2.data());
+  input_tensor2->set_data(input2.data());
   input_tensor2->set_shape(shape2);
   input_tensor2->set_data_type(tid);
 
   lite::Tensor *input_tensor3 = new lite::Tensor;
-  input_tensor3->SetData(input3.data());
+  input_tensor3->set_data(input3.data());
   input_tensor3->set_shape(shape3);
   input_tensor3->set_data_type(tid);
 
   lite::Tensor *input_tensor4 = new lite::Tensor;
-  input_tensor4->SetData(input4.data());
+  input_tensor4->set_data(input4.data());
   input_tensor4->set_shape(shape4);
   input_tensor4->set_data_type(tid);
 
@@ -156,7 +156,7 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test2) {
   std::vector<int> output_shape = {6, 10};
 
   lite::Tensor *output0_tensor = new lite::Tensor;
-  output0_tensor->SetData(output);
+  output0_tensor->set_data(output);
   output0_tensor->set_shape(output_shape);
   output0_tensor->set_data_type(tid);
   std::vector<lite::Tensor *> outputs_tensor(1);
@@ -183,13 +183,13 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test2) {
                                       0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6};
   PrintData("output data", output, output_size);
   PrintData("output data shape", output_tensor_shape.data(), output_tensor_shape.size());
-  CompareOutputData(output, except_result.data(), output_size, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, except_result.data(), output_size, 0.000001));
 
-  input_tensor1->SetData(nullptr);
-  input_tensor2->SetData(nullptr);
-  input_tensor3->SetData(nullptr);
-  input_tensor4->SetData(nullptr);
-  output0_tensor->SetData(nullptr);
+  input_tensor1->set_data(nullptr);
+  input_tensor2->set_data(nullptr);
+  input_tensor3->set_data(nullptr);
+  input_tensor4->set_data(nullptr);
+  output0_tensor->set_data(nullptr);
   delete input_tensor1;
   delete input_tensor2;
   delete input_tensor3;
@@ -210,22 +210,22 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test3) {
 
   TypeId tid = kNumberTypeFloat32;
   lite::Tensor *input_tensor1 = new lite::Tensor;
-  input_tensor1->SetData(input1.data());
+  input_tensor1->set_data(input1.data());
   input_tensor1->set_shape(shape1);
   input_tensor1->set_data_type(tid);
 
   lite::Tensor *input_tensor2 = new lite::Tensor;
-  input_tensor2->SetData(input2.data());
+  input_tensor2->set_data(input2.data());
   input_tensor2->set_shape(shape2);
   input_tensor2->set_data_type(tid);
 
   lite::Tensor *input_tensor3 = new lite::Tensor;
-  input_tensor3->SetData(input3.data());
+  input_tensor3->set_data(input3.data());
   input_tensor3->set_shape(shape3);
   input_tensor3->set_data_type(tid);
 
   lite::Tensor *input_tensor4 = new lite::Tensor;
-  input_tensor4->SetData(input4.data());
+  input_tensor4->set_data(input4.data());
   input_tensor4->set_shape(shape4);
   input_tensor4->set_data_type(tid);
 
@@ -240,7 +240,7 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test3) {
   std::vector<int> output_shape = {1, 10};
 
   lite::Tensor *output0_tensor = new lite::Tensor;
-  output0_tensor->SetData(output);
+  output0_tensor->set_data(output);
   output0_tensor->set_shape(output_shape);
   output0_tensor->set_data_type(tid);
   std::vector<lite::Tensor *> outputs_tensor(1);
@@ -265,13 +265,13 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test3) {
   std::vector<float> except_result = {0, 1, 0, 1, 1, 0, 0, 0, 0, 0};
   PrintData("output data", output, output_size);
   PrintData("output data shape", output_tensor_shape.data(), output_tensor_shape.size());
-  CompareOutputData(output, except_result.data(), output_size, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, except_result.data(), output_size, 0.000001));
 
-  input_tensor1->SetData(nullptr);
-  input_tensor2->SetData(nullptr);
-  input_tensor3->SetData(nullptr);
-  input_tensor4->SetData(nullptr);
-  output0_tensor->SetData(nullptr);
+  input_tensor1->set_data(nullptr);
+  input_tensor2->set_data(nullptr);
+  input_tensor3->set_data(nullptr);
+  input_tensor4->set_data(nullptr);
+  output0_tensor->set_data(nullptr);
   delete input_tensor1;
   delete input_tensor2;
   delete input_tensor3;
@@ -292,22 +292,22 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test4) {
 
   TypeId tid = kNumberTypeFloat32;
   lite::Tensor *input_tensor1 = new lite::Tensor;
-  input_tensor1->SetData(input1.data());
+  input_tensor1->set_data(input1.data());
   input_tensor1->set_shape(shape1);
   input_tensor1->set_data_type(tid);
 
   lite::Tensor *input_tensor2 = new lite::Tensor;
-  input_tensor2->SetData(input2.data());
+  input_tensor2->set_data(input2.data());
   input_tensor2->set_shape(shape2);
   input_tensor2->set_data_type(tid);
 
   lite::Tensor *input_tensor3 = new lite::Tensor;
-  input_tensor3->SetData(input3.data());
+  input_tensor3->set_data(input3.data());
   input_tensor3->set_shape(shape3);
   input_tensor3->set_data_type(tid);
 
   lite::Tensor *input_tensor4 = new lite::Tensor;
-  input_tensor4->SetData(input4.data());
+  input_tensor4->set_data(input4.data());
   input_tensor4->set_shape(shape4);
   input_tensor4->set_data_type(tid);
 
@@ -322,7 +322,7 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test4) {
   std::vector<int> output_shape = {1, 10};
 
   lite::Tensor *output0_tensor = new lite::Tensor;
-  output0_tensor->SetData(output);
+  output0_tensor->set_data(output);
   output0_tensor->set_shape(output_shape);
   output0_tensor->set_data_type(tid);
   std::vector<lite::Tensor *> outputs_tensor(1);
@@ -347,13 +347,13 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test4) {
   std::vector<float> except_result = {0, 0, 0, 0, 0, 1, 0, 0, 0, 0};
   PrintData("output data", output, output_size);
   PrintData("output data shape", output_tensor_shape.data(), output_tensor_shape.size());
-  CompareOutputData(output, except_result.data(), output_size, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, except_result.data(), output_size, 0.000001));
 
-  input_tensor1->SetData(nullptr);
-  input_tensor2->SetData(nullptr);
-  input_tensor3->SetData(nullptr);
-  input_tensor4->SetData(nullptr);
-  output0_tensor->SetData(nullptr);
+  input_tensor1->set_data(nullptr);
+  input_tensor2->set_data(nullptr);
+  input_tensor3->set_data(nullptr);
+  input_tensor4->set_data(nullptr);
+  output0_tensor->set_data(nullptr);
   delete input_tensor1;
   delete input_tensor2;
   delete input_tensor3;
@@ -374,22 +374,22 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test5) {
 
   TypeId tid = kNumberTypeFloat32;
   lite::Tensor *input_tensor1 = new lite::Tensor;
-  input_tensor1->SetData(input1.data());
+  input_tensor1->set_data(input1.data());
   input_tensor1->set_shape(shape1);
   input_tensor1->set_data_type(tid);
 
   lite::Tensor *input_tensor2 = new lite::Tensor;
-  input_tensor2->SetData(input2.data());
+  input_tensor2->set_data(input2.data());
   input_tensor2->set_shape(shape2);
   input_tensor2->set_data_type(tid);
 
   lite::Tensor *input_tensor3 = new lite::Tensor;
-  input_tensor3->SetData(input3.data());
+  input_tensor3->set_data(input3.data());
   input_tensor3->set_shape(shape3);
   input_tensor3->set_data_type(tid);
 
   lite::Tensor *input_tensor4 = new lite::Tensor;
-  input_tensor4->SetData(input4.data());
+  input_tensor4->set_data(input4.data());
   input_tensor4->set_shape(shape4);
   input_tensor4->set_data_type(tid);
 
@@ -404,7 +404,7 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test5) {
   std::vector<int> output_shape = {6, 10};
 
   lite::Tensor *output0_tensor = new lite::Tensor;
-  output0_tensor->SetData(output);
+  output0_tensor->set_data(output);
   output0_tensor->set_shape(output_shape);
   output0_tensor->set_data_type(tid);
   std::vector<lite::Tensor *> outputs_tensor(1);
@@ -431,13 +431,13 @@ TEST_F(TestSparseToDenseFp32, SparseToDense_test5) {
                                       0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6};
   PrintData("output data", output, output_size);
   PrintData("output data shape", output_tensor_shape.data(), output_tensor_shape.size());
-  CompareOutputData(output, except_result.data(), output_size, 0.000001);
+  ASSERT_EQ(0, CompareOutputData(output, except_result.data(), output_size, 0.000001));
 
-  input_tensor1->SetData(nullptr);
-  input_tensor2->SetData(nullptr);
-  input_tensor3->SetData(nullptr);
-  input_tensor4->SetData(nullptr);
-  output0_tensor->SetData(nullptr);
+  input_tensor1->set_data(nullptr);
+  input_tensor2->set_data(nullptr);
+  input_tensor3->set_data(nullptr);
+  input_tensor4->set_data(nullptr);
+  output0_tensor->set_data(nullptr);
   delete input_tensor1;
   delete input_tensor2;
   delete input_tensor3;

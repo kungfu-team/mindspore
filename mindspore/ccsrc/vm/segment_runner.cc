@@ -34,10 +34,6 @@
 #include "frontend/operator/ops.h"
 
 namespace mindspore {
-const char kMsConvert[] = "ms";
-const char kMsVm[] = "vm";
-const char kGeVm[] = "ge";
-
 namespace compile {
 // cached conversion
 ConvertCache g_ConvertCache;
@@ -58,7 +54,7 @@ AnfNodePtrList GetOutput(const AnfNodePtrList &lst, const NodeUsersMap &users, c
     std::begin(lst), std::end(lst), std::back_inserter(output), [&users, &seen](AnfNodePtr n) -> AnfNodePtr {
       auto usersn = users.find(n);
       bool is_referred_out_of_segment = std::any_of(
-        std::begin(usersn->second), std::end(usersn->second), [&seen](const std::pair<AnfNodePtr, int> &u) -> bool {
+        std::begin(usersn->second), std::end(usersn->second), [&seen](const std::pair<AnfNodePtr, int64_t> &u) -> bool {
           return std::find(std::begin(seen), std::end(seen), u.first) == std::end(seen);
         });
       if (n->isa<CNode>() && is_referred_out_of_segment) {
@@ -91,6 +87,10 @@ AnfNodePtr RefSubGraphNode(const FuncGraphPtr &fg, const AnfNodePtr &node, AnfNo
   if (node->isa<ValueNode>() && !IsValueNode<FuncGraph>(node)) {
     eqv[node] = node;
   } else if (eqv.find(node) == eqv.end()) {
+    if (IsPrimitiveCNode(node, prim::kPrimControlDepend)) {
+      eqv[node] = NewValueNode(MakeValue(0));
+      return eqv[node];
+    }
     bool ignore_make_tuple = false;
     if (IsPrimitiveCNode(node, prim::kPrimMakeTuple)) {
       ignore_make_tuple = true;
@@ -119,10 +119,12 @@ std::tuple<FuncGraphPtr, AnfNodePtrList, AnfNodePtrList> TransformSegmentToAnfGr
   if (lst.empty()) {
     MS_LOG(EXCEPTION) << "Input anf node list is empty";
   }
-  TraceManager::DebugTrace(
-    std::make_shared<TraceSegmentTransform>(lst[0]->cast<CNodePtr>()->func_graph()->debug_info()));
-  auto fg = std::make_shared<FuncGraph>();
-  TraceManager::EndTrace();
+  FuncGraphPtr fg = nullptr;
+  {
+    // limit the lifetime of guard.
+    TraceGuard guard(std::make_shared<TraceSegmentTransform>(lst[0]->cast<CNodePtr>()->func_graph()->debug_info()));
+    fg = std::make_shared<FuncGraph>();
+  }
   AnfNodePtrList inputs;
   AnfNodePtrToAnfNodePtrMap eqv;
   // Merge CNodes into a AnfGraph that represents a linear instruction segment
@@ -137,18 +139,19 @@ std::tuple<FuncGraphPtr, AnfNodePtrList, AnfNodePtrList> TransformSegmentToAnfGr
     if (!IsValueNode<Primitive>(inps[0]) &&
         !(IsValueNode<FuncGraph>(inps[0]) &&
           inps[0]->cast<ValueNodePtr>()->value()->cast<FuncGraphPtr>()->has_attr(FUNC_GRAPH_ATTR_GRAPH_KERNEL))) {
-      MS_LOG(EXCEPTION) << "Input[0] Must be a Primitive valuenode";
+      MS_LOG(EXCEPTION) << "Input[0] Must be a Primitive ValueNode";
     }
     auto fn = inps[0];
     std::vector<AnfNodePtr> args{fn};
-    if (IsPrimitive(fn, prim::kPrimDepend) && inps.size() == 3 && inps[kRealInputIndexInDepend]->isa<ValueNode>() &&
-        eqv.find(inps[kDependAttachNodeIndex]) == eqv.end()) {
-      args.emplace_back(inps[kRealInputIndexInDepend]);
-      args.emplace_back(inps[kRealInputIndexInDepend]);
+    if (IsPrimitive(fn, prim::kPrimDepend) && inps.size() >= 3 && eqv.find(inps[kDependAttachNodeIndex]) == eqv.end()) {
+      args.emplace_back(RefSubGraphNode(fg, inps[kRealInputIndexInDepend], &inputs, &eqv));
+      for (size_t i = 2; i < inps.size(); ++i) {
+        args.emplace_back(NewValueNode(MakeValue(0)));
+      }
     } else if (IsPrimitive(fn, prim::kPrimControlDepend) && inps.size() == 3) {
       for (size_t i = 1; i < inps.size(); ++i) {
         if (inps[i]->isa<CNode>() && std::find(lst.begin(), lst.end(), inps[i]) == lst.end()) {
-          args.emplace_back(NewValueNode(MakeValue(i)));
+          args.emplace_back(NewValueNode(MakeValue(static_cast<int>(i))));
         } else {
           args.emplace_back(RefSubGraphNode(fg, inps[i], &inputs, &eqv));
         }
@@ -157,9 +160,8 @@ std::tuple<FuncGraphPtr, AnfNodePtrList, AnfNodePtrList> TransformSegmentToAnfGr
       (void)std::transform(std::begin(inps) + 1, std::end(inps), std::back_inserter(args),
                            [&fg, &inputs, &eqv](const AnfNodePtr &a) { return RefSubGraphNode(fg, a, &inputs, &eqv); });
     }
-    TraceManager::DebugTrace(std::make_shared<TraceGetEnv>(n->debug_info()));
+    TraceGuard tg(std::make_shared<TraceSegmentTransform>(n->debug_info()));
     eqv[n] = fg->NewCNode(args);
-    TraceManager::EndTrace();
     eqv[n]->set_abstract(n->abstract());
     eqv[n]->set_kernel_info(n->kernel_info_ptr());
   }
@@ -195,8 +197,9 @@ std::tuple<FuncGraphPtr, AnfNodePtrList, AnfNodePtrList> TransformSegmentToAnfGr
 //   This implementation will convert the nodes into a subgraph
 //   that will run using the MsVM.
 template <typename T>
-LinConvertResult Convert(const AnfNodePtrList &lst, const std::string &) {
-  auto cached = g_ConvertCache.find(lst);
+LinConvertResult Convert(const GraphSegmentPtr &segment, const std::string &) {
+  MS_EXCEPTION_IF_NULL(segment);
+  auto cached = g_ConvertCache.find(segment);
   if (cached != g_ConvertCache.end()) {
     return cached->second;
   }
@@ -207,7 +210,7 @@ LinConvertResult Convert(const AnfNodePtrList &lst, const std::string &) {
   AnfNodePtrList inputs;
   AnfNodePtrList outputs;
 
-  std::tie(fg, inputs, outputs) = TransformSegmentToAnfGraph(lst);
+  std::tie(fg, inputs, outputs) = TransformSegmentToAnfGraph(segment->nodes_);
 
   // Clone in case g contains subgraphs that have a different manager
   fg = BasicClone(fg);
@@ -220,18 +223,15 @@ LinConvertResult Convert(const AnfNodePtrList &lst, const std::string &) {
   result.outputs = outputs;
   result.graph_id = UINT32_MAX;
 
-  (void)g_ConvertCache.emplace(lst, result);
+  (void)g_ConvertCache.emplace(segment, result);
   return result;
 }
 
 LinkFuncType MsVmConvert = Convert<VM>;
 
-std::unordered_map<std::string, LinkFuncType> backends = {{kMsVm, MsVmConvert}};
-
 std::set<std::string> backend_list = {
   kMsConvert,
   kMsVm,
 };
-
 }  // namespace compile
 }  // namespace mindspore
