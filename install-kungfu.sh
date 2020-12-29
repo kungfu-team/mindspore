@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-# PREFIX=$HOME/local/kungfu
+cd $(dirname $0)
 PREFIX=$PWD/third_party/kungfu
 
 if [ ! -d KungFu ]; then
@@ -10,8 +10,6 @@ fi
 
 cd KungFu
 git checkout master
-git pull
-git checkout lg-nccl-2
 git pull
 
 config_flags() {
