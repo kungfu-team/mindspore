@@ -5,7 +5,7 @@ import numpy as np
 from mindspore._c_expression import (kungfu_current_rank, kungfu_finalize,
                                      kungfu_init, kungfu_nccl_finalize,
                                      kungfu_nccl_init)
-from mindspore.ops.operations.kungfu_comm_ops import KungFuBroadcast
+from mindspore.ops.operations.kungfu_comm_ops import KungFuAllReduce
 
 dtype_map = {
     'i32': np.int32,
@@ -29,7 +29,7 @@ def main():
     if args.device == 'GPU':
         kungfu_nccl_init()
 
-    broadcast = KungFuBroadcast()
+    allreduce = KungFuAllReduce()
 
     size = 10
     value = kungfu_current_rank()
@@ -37,7 +37,7 @@ def main():
 
     x = ms.Tensor(np.array([value] * size).astype(dtype))
     print('x=%s' % (x))
-    y = broadcast(x)
+    y = allreduce(x)
     print('y=%s' % (y))
 
     if args.device == 'GPU':
