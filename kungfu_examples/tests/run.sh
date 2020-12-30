@@ -19,13 +19,13 @@ kungfu_run() {
 }
 
 test_broadcast_op() {
-    kungfu_run python3.7 test_broadcast_op.py --device CPU --dtype i32
-    kungfu_run python3.7 test_broadcast_op.py --device CPU --dtype f32
+    # kungfu_run python3.7 test_broadcast_op.py --device CPU --dtype i32
+    # kungfu_run python3.7 test_broadcast_op.py --device CPU --dtype f32
 
     # FIXME:
     # mindspore/KungFu/srcs/cpp/src/nccl/gpu_collective.cpp::141: unhandled cuda error(1) in broadcast
 
-    # kungfu_run python3.7 test_broadcast_op.py --device GPU --dtype i32
+    kungfu_run python3.7 test_broadcast_op.py --device GPU --dtype i32
     # kungfu_run python3.7 test_broadcast_op.py --device GPU --dtype f32
 }
 
@@ -40,4 +40,4 @@ test_allreduce_op() {
 }
 
 test_broadcast_op
-test_allreduce_op
+# test_allreduce_op

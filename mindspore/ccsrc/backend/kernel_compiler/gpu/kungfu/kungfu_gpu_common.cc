@@ -12,6 +12,7 @@ std::unique_ptr<kungfu::NCCLHelper> _kungfu_nccl_helper;
 namespace mindspore {
 namespace kernel {
 void kungfu_nccl_init() {
+  log_func_call(__func__);
   const auto nccl_scope = KungFu_NCCL_GLOBAL;
   _kungfu_nccl_helper.reset(new kungfu::NCCLHelper);
   _kungfu_nccl_helper->EnsureScheduler(nccl_scope);

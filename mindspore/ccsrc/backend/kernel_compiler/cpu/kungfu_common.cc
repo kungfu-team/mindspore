@@ -23,7 +23,7 @@ void kungfu_finalize() {
 
 void LOG_InitKernel(const std::string &kernel_name) {
   if (_show_kungfu_debug_log) {
-    std::cerr << kernel_name << "::InitKernel called"        //
+    std::cerr << kernel_name << "::InitKernel called "       //
               << "in thread " << std::this_thread::get_id()  //
               << std::endl;
   }
@@ -35,7 +35,7 @@ void LOG_Kernel_Launch(const std::string &kernel_name, const std::vector<Address
     std::cerr << kernel_name << "::Launch called with "      //
               << inputs.size() << " inputs and "             //
               << outputs.size() << " outputs and "           //
-              << workspace.size() << " workspaces"           //
+              << workspace.size() << " workspaces "          //
               << "in thread " << std::this_thread::get_id()  //
               << std::endl;
   }

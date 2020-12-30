@@ -41,7 +41,7 @@ class KungFuBroadcastGpuKernel : public GpuKernel {
     T *output_addr = GetDeviceAddress<T>(outputs, 0);
 
     cudaStream_t stream = comm_stream_ ? comm_stream_ : reinterpret_cast<cudaStream_t>(stream_ptr);
-    // MS_LOG(WARNING) << "using stream " << stream;
+    MS_LOG(WARNING) << "using stream " << stream;
 
     auto w = make_kungfu_workspace(input_addr, output_addr, input_count_);
 
