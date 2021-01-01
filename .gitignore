@@ -103,8 +103,3 @@ mindspore/lite/test/do_test/
 
 # lite opencl compile file
 *.cl.inc
-
-
-/KungFu
-/third_party/kungfu
-/model_zoo/official/cv/resnet/scripts/train/
