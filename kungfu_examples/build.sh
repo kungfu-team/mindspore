@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+cd $(dirname $0)/..
+
 datatime() {
     date '+%Y-%m-%d %H:%M:%S'
 }
