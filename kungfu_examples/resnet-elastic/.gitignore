@@ -1,0 +1,4 @@
+*.meta
+cuda_meta_*
+ckpt*
+log_output

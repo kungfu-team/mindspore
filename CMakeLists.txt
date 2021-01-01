@@ -40,6 +40,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/securec/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/flatbuffers/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/flatbuffers/include/flatbuffers)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/kungfu/include)
 
 include(${CMAKE_SOURCE_DIR}/cmake/dependency_utils.cmake)
 find_package(Python3 3.7 COMPONENTS Interpreter Development)
