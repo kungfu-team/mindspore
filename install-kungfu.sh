@@ -9,10 +9,7 @@ if [ ! -d KungFu ]; then
 fi
 
 cd KungFu
-git checkout master
-git pull
-git checkout lg-libkungfu_nccl
-git pull
+git checkout v0.2.3
 
 config_flags() {
     echo --prefix=$PREFIX
