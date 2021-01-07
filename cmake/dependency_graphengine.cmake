@@ -8,6 +8,8 @@ include(${GE_SOURCE_DIR}/cmake/external_libs/eigen.cmake)
 include(${GE_SOURCE_DIR}/cmake/external_libs/gtest.cmake)
 include(${GE_SOURCE_DIR}/cmake/external_libs/onnx.cmake)
 include(${GE_SOURCE_DIR}/cmake/external_libs/securec.cmake)
+include(${GE_SOURCE_DIR}/cmake/external_libs/kungfu.cmake)
+
 if (ENABLE_D)
     set(AS_MS_COMP TRUE)
     include(${GE_SOURCE_DIR}/cmake/external_libs/protobuf.cmake)
