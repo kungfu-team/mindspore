@@ -39,7 +39,6 @@ class AllReduce(ms.nn.Cell):
     def construct(self, x):
         return self.all_reduce(x)
 
-
 class Broadcast(ms.nn.Cell):
     def __init__(self):
         super(Broadcast, self).__init__()

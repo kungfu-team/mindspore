@@ -61,7 +61,11 @@ main() {
     # trace run_elastic
     # trace run_train_mnist_slp
     # trace run_train_mnist_lenet
-    trace run_train_mnist_lenet_elastic
+    # trace run_train_mnist_lenet_elastic
+    # trace ./kungfu_examples/gpu_examples/run.sh
+    trace ./kungfu_examples/gpu_examples/run_elastic_nccl_all_reduce.sh
 }
 
+# export GLOG_v=2
+# export GLOG_v=1
 main

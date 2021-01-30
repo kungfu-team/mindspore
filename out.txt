@@ -1,0 +1,16 @@
+BEGIN ./kungfu_examples/gpu_examples/run.sh
+rank: 0, size: 4
+rank: 1, size: 4
+rank: 2, size: 4
+rank: 3, size: 4
+warmup 1 took 21810.404ms, data rate: 0.052GiB/s
+step 1 took 17527.531ms, data rate: 0.065GiB/s
+step 2 took 17653.858ms, data rate: 0.065GiB/s
+step 3 took 17651.335ms, data rate: 0.065GiB/s
+called    856 times,    mean:    34.23us,    total:    29.31ms,    min:    13.86us,    max:    140.3us,    @NcclGpuKernel::Launch
+called    856 times,    mean:    33.74us,    total:    28.88ms,    min:    13.41us,    max:    107.2us,    @NcclGpuKernel::Launch
+called    856 times,    mean:    33.43us,    total:    28.61ms,    min:    12.49us,    max:    105.9us,    @NcclGpuKernel::Launch
+called    856 times,    mean:    34.28us,    total:    29.35ms,    min:    10.59us,    max:    115.5us,    @NcclGpuKernel::Launch
+END ./kungfu_examples/gpu_examples/run.sh
+
+

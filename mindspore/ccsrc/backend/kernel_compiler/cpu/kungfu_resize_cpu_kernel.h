@@ -5,7 +5,6 @@
 
 namespace mindspore {
 namespace kernel {
-
 class KungFuResizeCPUKernel : public CPUKernel {
  public:
   KungFuResizeCPUKernel() {}
@@ -16,11 +15,5 @@ class KungFuResizeCPUKernel : public CPUKernel {
   bool Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
               const std::vector<AddressPtr> &outputs) override;
 };
-
-MS_REG_CPU_KERNEL(
-  KungFuResize,
-  KernelAttr().AddInputAttr(kNumberTypeUInt32).AddOutputAttr(kNumberTypeBool).AddOutputAttr(kNumberTypeBool),
-  KungFuResizeCPUKernel);
-
 }  // namespace kernel
 }  // namespace mindspore

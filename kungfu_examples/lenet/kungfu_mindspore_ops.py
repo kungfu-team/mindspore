@@ -22,7 +22,7 @@ class KungFuBroadcast(ms.ops.PrimitiveWithInfer):
 class KungFuResize(ms.ops.PrimitiveWithInfer):
     @ms.ops.prim_attr_register
     def __init__(self):
-        self.init_prim_io_names(inputs=['n'], outputs=['changed', 'keep'])
+        self.init_prim_io_names(inputs=['n'], outputs=['changed', 'detached'])
 
     def infer_shape(self, *args):
         return ([], [])

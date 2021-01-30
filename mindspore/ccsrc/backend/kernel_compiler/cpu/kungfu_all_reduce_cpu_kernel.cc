@@ -7,10 +7,7 @@
 
 namespace mindspore {
 namespace kernel {
-void KungFuAllReduceCPUKernel::InitKernel(const CNodePtr &kernel_node) {
-  LOG_InitKernel("KungFuAllReduceCPUKernel");
-  init_kungfu_once();
-}
+void KungFuAllReduceCPUKernel::InitKernel(const CNodePtr &kernel_node) { LOG_InitKernel("KungFuAllReduceCPUKernel"); }
 
 bool KungFuAllReduceCPUKernel::Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
                                       const std::vector<AddressPtr> &outputs) {
