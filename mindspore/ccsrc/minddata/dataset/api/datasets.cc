@@ -100,6 +100,7 @@
 #include "minddata/dataset/engine/ir/datasetops/source/manifest_node.h"
 #include "minddata/dataset/engine/ir/datasetops/source/minddata_node.h"
 #include "minddata/dataset/engine/ir/datasetops/source/tf_record_node.h"
+#include "minddata/dataset/engine/ir/datasetops/source/elastic_tf_record_node.h"
 #include "minddata/dataset/engine/ir/datasetops/source/voc_node.h"
 #endif
 
@@ -1180,6 +1181,27 @@ TFRecordDataset::TFRecordDataset(const std::vector<std::vector<char>> &dataset_f
   ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
 }
 
+ElasticTFRecordDataset::ElasticTFRecordDataset(const std::vector<std::vector<char>> &dataset_files,
+                                               const std::vector<char> &schema,
+                                               const std::vector<std::vector<char>> &columns_list, int64_t num_samples,
+                                               ShuffleMode shuffle, int32_t num_shards, int32_t shard_id,
+                                               bool shard_equal_rows, std::shared_ptr<DatasetCache> cache) {
+  auto ds = std::make_shared<ElasticTFRecordNode>(VectorCharToString(dataset_files), CharToString(schema),
+                                                  VectorCharToString(columns_list), num_samples, shuffle, num_shards,
+                                                  shard_id, shard_equal_rows, cache);
+  ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
+}
+
+ElasticTFRecordDataset::ElasticTFRecordDataset(const std::vector<std::vector<char>> &dataset_files,
+                                               std::shared_ptr<SchemaObj> schema,
+                                               const std::vector<std::vector<char>> &columns_list, int64_t num_samples,
+                                               ShuffleMode shuffle, int32_t num_shards, int32_t shard_id,
+                                               bool shard_equal_rows, std::shared_ptr<DatasetCache> cache) {
+  auto ds =
+    std::make_shared<ElasticTFRecordNode>(VectorCharToString(dataset_files), schema, VectorCharToString(columns_list),
+                                          num_samples, shuffle, num_shards, shard_id, shard_equal_rows, cache);
+  ir_node_ = std::static_pointer_cast<DatasetNode>(ds);
+}
 #endif
 }  // namespace dataset
 }  // namespace mindspore

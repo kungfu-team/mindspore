@@ -1,0 +1,53 @@
+
+import mindspore.dataset as ds
+
+ds.TFRecordDataset
+defined in
+
+1. py
+mindspore/dataset/engine/datasets.py
+
+class TFRecordDataset(SourceDataset):
+
+2. .h
+mindspore/ccsrc/minddata/dataset/include/dataset/datasets.h
+
+class TFRecordDataset : public Dataset {
+
+
+3. .cc
+
+mindspore/ccsrc/minddata/dataset/api/datasets.cc
+
+TFRecordDataset::TFRecordDataset(...)
+
+
+
+
+class TFRecordNode
+
+1. .h
+mindspore/ccsrc/minddata/dataset/engine/ir/datasetops/source/tf_record_node.h
+
+class TFRecordNode : public NonMappableSourceNode {
+
+
+2. .cc
+mindspore/ccsrc/minddata/dataset/engine/ir/datasetops/source/tf_record_node.cc
+
+
+
+========== * ========== * ========== * ========== * ========== * ========== * ==========
+
+class ElasticTFRecordDataset;
+class ElasticTFRecordNode;
+
+Added Files:
+
+mindspore/ccsrc/minddata/dataset/engine/ir/datasetops/source/elastic_tf_record_node.h
+mindspore/ccsrc/minddata/dataset/engine/ir/datasetops/source/elastic_tf_record_node.cc
+
+Modified Files:
+
+mindspore/ccsrc/minddata/dataset/include/dataset/datasets.h
+mindspore/ccsrc/minddata/dataset/api/datasets.cc

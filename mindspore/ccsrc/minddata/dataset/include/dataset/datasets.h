@@ -1617,6 +1617,74 @@ std::shared_ptr<TFRecordDataset> TFRecord(const std::vector<std::string> &datase
   return ds;
 }
 
+class ElasticTFRecordDataset : public Dataset {
+ public:
+  ElasticTFRecordDataset(const std::vector<std::vector<char>> &dataset_files, const std::vector<char> &schema,
+                         const std::vector<std::vector<char>> &columns_list, int64_t num_samples, ShuffleMode shuffle,
+                         int32_t num_shards, int32_t shard_id, bool shard_equal_rows,
+                         std::shared_ptr<DatasetCache> cache);
+
+  /// \brief Constructor
+  /// \note Parameter 'schema' is shared pointer to Schema object
+  ElasticTFRecordDataset(const std::vector<std::vector<char>> &dataset_files, std::shared_ptr<SchemaObj> schema,
+                         const std::vector<std::vector<char>> &columns_list, int64_t num_samples, ShuffleMode shuffle,
+                         int32_t num_shards, int32_t shard_id, bool shard_equal_rows,
+                         std::shared_ptr<DatasetCache> cache);
+
+  ~ElasticTFRecordDataset() = default;
+};
+
+/// \brief Function to create a ElasticTFRecordDataset.
+/// \param[in] dataset_files List of files to be read to search for a pattern of files. The list
+///     will be sorted in a lexicographical order.
+/// \param[in] schema SchemaObj or string to schema path. (Default = nullptr, which means that the
+///     meta data from the TFData file is considered the schema).
+/// \param[in] columns_list List of columns to be read (Default = {}, read all columns).
+/// \param[in] num_samples The number of samples to be included in the dataset
+///     (Default = 0 means all samples).
+///     If num_samples is 0 and numRows(parsed from schema) does not exist, read the full dataset;
+///     If num_samples is 0 and numRows(parsed from schema) is greater than 0, read numRows rows;
+///     If both num_samples and numRows(parsed from schema) are greater than 0, read num_samples rows.
+/// \param[in] shuffle The mode for shuffling data every epoch. (Default = ShuffleMode::kGlobal)
+///     Can be any of:
+///     ShuffleMode::kFalse - No shuffling is performed.
+///     ShuffleMode::kFiles - Shuffle files only.
+///     ShuffleMode::kGlobal - Shuffle both the files and samples.
+/// \param[in] num_shards Number of shards that the dataset should be divided into (Default = 1).
+/// \param[in] shard_id The shard ID within num_shards. This argument should be specified only
+///     when num_shards is also specified (Default = 0).
+/// \param[in] shard_equal_rows Get equal rows for all shards (Default = False, number of rows of
+///     each shard may be not equal).
+/// \param[in] cache Tensor cache to use (default=nullptr which means no cache is used).
+/// \return Shared pointer to the ElasticTFRecordDataset.
+template <typename T = std::shared_ptr<SchemaObj>>
+std::shared_ptr<ElasticTFRecordDataset> ElasticTFRecord(
+  const std::vector<std::string> &dataset_files, const T &schema = nullptr,
+  const std::vector<std::string> &columns_list = {}, int64_t num_samples = 0,
+  ShuffleMode shuffle = ShuffleMode::kGlobal, int32_t num_shards = 1, int32_t shard_id = 0,
+  bool shard_equal_rows = false, const std::shared_ptr<DatasetCache> &cache = nullptr) {
+  std::shared_ptr<ElasticTFRecordDataset> ds = nullptr;
+  if constexpr (std::is_same<T, std::nullptr_t>::value || std::is_same<T, std::shared_ptr<SchemaObj>>::value) {
+    std::shared_ptr<SchemaObj> schema_obj = schema;
+    ds = std::make_shared<ElasticTFRecordDataset>(VectorStringToChar(dataset_files), std::move(schema_obj),
+                                                  VectorStringToChar(columns_list), num_samples, shuffle, num_shards,
+                                                  shard_id, shard_equal_rows, cache);
+  } else {
+    std::string schema_path = schema;
+    if (!schema_path.empty()) {
+      struct stat sb;
+      int rc = stat(schema_path.c_str(), &sb);
+      if (rc != 0) {
+        return nullptr;
+      }
+    }
+    ds = std::make_shared<ElasticTFRecordDataset>(VectorStringToChar(dataset_files), StringToChar(schema_path),
+                                                  VectorStringToChar(columns_list), num_samples, shuffle, num_shards,
+                                                  shard_id, shard_equal_rows, cache);
+  }
+  return ds;
+}
+
 class VOCDataset : public Dataset {
  public:
   explicit VOCDataset(const std::vector<char> &dataset_dir, const std::vector<char> &task,
