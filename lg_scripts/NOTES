@@ -51,3 +51,11 @@ Modified Files:
 
 mindspore/ccsrc/minddata/dataset/include/dataset/datasets.h
 mindspore/ccsrc/minddata/dataset/api/datasets.cc
+mindspore/ccsrc/minddata/dataset/api/python/bindings/dataset/engine/ir/datasetops/source/bindings.cc
+
+
+
+
+BUGS
+
+ImportError: /home/lg/.local/lib/python3.7/site-packages/mindspore/_c_dataengine.cpython-37m-x86_64-linux-gnu.so: undefined symbol: vtable for mindspore::dataset::ElasticTFRecordNode
