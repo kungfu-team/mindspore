@@ -47,6 +47,7 @@ class ShuffleNode;
 class SkipNode;
 class TakeNode;
 class TFRecordNode;
+class ElasticTFRecordNode;
 class TransferNode;
 class ZipNode;
 #ifdef ENABLE_PYTHON
@@ -212,6 +213,8 @@ class IRNodePass : public IRPass {
   virtual Status VisitAfter(std::shared_ptr<TakeNode> node, bool *const modified);
   virtual Status Visit(std::shared_ptr<TFRecordNode> node, bool *const modified);
   virtual Status VisitAfter(std::shared_ptr<TFRecordNode> node, bool *const modified);
+  virtual Status Visit(std::shared_ptr<ElasticTFRecordNode> node, bool *const modified);
+  virtual Status VisitAfter(std::shared_ptr<ElasticTFRecordNode> node, bool *const modified);
   virtual Status Visit(std::shared_ptr<TransferNode> node, bool *const modified);
   virtual Status VisitAfter(std::shared_ptr<TransferNode> node, bool *const modified);
   virtual Status Visit(std::shared_ptr<ZipNode> node, bool *const modified);

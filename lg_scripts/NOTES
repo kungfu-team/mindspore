@@ -52,10 +52,25 @@ Modified Files:
 mindspore/ccsrc/minddata/dataset/include/dataset/datasets.h
 mindspore/ccsrc/minddata/dataset/api/datasets.cc
 mindspore/ccsrc/minddata/dataset/api/python/bindings/dataset/engine/ir/datasetops/source/bindings.cc
-
-
+mindspore/ccsrc/minddata/dataset/engine/opt/pass.h
+mindspore/ccsrc/minddata/dataset/engine/opt/pass.cc
 
 
 BUGS
-
+1.
 ImportError: /home/lg/.local/lib/python3.7/site-packages/mindspore/_c_dataengine.cpython-37m-x86_64-linux-gnu.so: undefined symbol: vtable for mindspore::dataset::ElasticTFRecordNode
+
+Solution: add `ElasticTFRecordNode` to `.../bindings.cc`
+
+
+2.
+/home/lg/code/repos/github.com/lgarithm/mindspore/mindspore/ccsrc/minddata/dataset/engine/ir/datasetops/source/elastic_tf_record_node.cc:242:68: error: call of overloaded ‘Visit(std::shared_ptr<mindspore::dataset::ElasticTFRecordNode>, bool* const&)’ is ambiguous
+   return p->Visit(shared_from_base<ElasticTFRecordNode>(), modified);
+
+Solution: add `ElasticTFRecordNode` to `.../pass.h`
+                                                                  ^
+
+3.
+ImportError: /home/lg/.local/lib/python3.7/site-packages/mindspore/_c_dataengine.cpython-37m-x86_64-linux-gnu.so: undefined symbol: mindspore::dataset::IRNodePass::Visit(std::shared_ptr<mindspore::dataset::ElasticTFRecordNode>, bool*)
+
+Solution: add `...`  to `.../pass.cc`
