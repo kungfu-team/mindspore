@@ -1197,6 +1197,7 @@ ElasticTFRecordDataset::ElasticTFRecordDataset(const std::vector<std::vector<cha
                                                const std::vector<std::vector<char>> &columns_list, int64_t num_samples,
                                                ShuffleMode shuffle, int32_t num_shards, int32_t shard_id,
                                                bool shard_equal_rows, std::shared_ptr<DatasetCache> cache) {
+  fprintf(stderr, "creating %s\n", __func__);
   auto ds =
     std::make_shared<ElasticTFRecordNode>(VectorCharToString(dataset_files), schema, VectorCharToString(columns_list),
                                           num_samples, shuffle, num_shards, shard_id, shard_equal_rows, cache);

@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+. ./lg_scripts/measure.sh
+
+upgrade_mindspore() {
+    ./lg_scripts/build.sh
+    ./lg_scripts/install.sh
+}
+
+measure upgrade_mindspore

@@ -34,6 +34,7 @@ class ElasticTFRecordNode : public NonMappableSourceNode {
     // discretion is advised. Auto_num_worker_pass is currently an experimental feature which can still work if the
     // num_shards_ isn't 100% correct. The reason behind is for now, PreBuildSampler doesn't offer a way to return
     // num_shards. Once PreBuildSampler is phased out, this can be cleaned up.
+    fprintf(stderr, "[d] %s created with schema path '%s'.\n", __func__, schema.c_str());
     GlobalContext::config_manager()->set_num_shards_for_auto_num_workers(num_shards_);
   }
 
@@ -50,7 +51,9 @@ class ElasticTFRecordNode : public NonMappableSourceNode {
         shuffle_(shuffle),
         num_shards_(num_shards),
         shard_id_(shard_id),
-        shard_equal_rows_(shard_equal_rows) {}
+        shard_equal_rows_(shard_equal_rows) {
+    fprintf(stderr, "[d] %s created with schema obj.\n", __func__);
+  }
 
   /// \brief Destructor
   ~ElasticTFRecordNode() = default;
