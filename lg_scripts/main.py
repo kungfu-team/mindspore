@@ -2,6 +2,7 @@
 import mindspore.dataset as ds
 import mindspore.dataset.transforms.c_transforms as C
 import mindspore.common.dtype as mstype
+from elastic_tf_record_dataaset import ElasticTFRecordDataset
 
 
 def create_squad_dataset_2(
@@ -15,7 +16,7 @@ def create_squad_dataset_2(
 ):
     type_cast_op = C.TypeCast(mstype.int32)
     # TFRecordDataset < SourceDataset < Dataset
-    data_set = ds.TFRecordDataset(
+    data_set = ElasticTFRecordDataset(
         [
             data_file_path,
         ],
