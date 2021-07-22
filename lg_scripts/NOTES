@@ -74,3 +74,9 @@ Solution: add `ElasticTFRecordNode` to `.../pass.h`
 ImportError: /home/lg/.local/lib/python3.7/site-packages/mindspore/_c_dataengine.cpython-37m-x86_64-linux-gnu.so: undefined symbol: mindspore::dataset::IRNodePass::Visit(std::shared_ptr<mindspore::dataset::ElasticTFRecordNode>, bool*)
 
 Solution: add `...`  to `.../pass.cc`
+
+
+
+4.
+AttributeError: 'HTMLParser' object has no attribute 'unescape'
+Solution: python3.9 -m pip install -U setuptools
