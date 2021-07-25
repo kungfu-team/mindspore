@@ -56,6 +56,25 @@ mindspore/ccsrc/minddata/dataset/engine/opt/pass.h
 mindspore/ccsrc/minddata/dataset/engine/opt/pass.cc
 
 
+Related Files:
+./mindspore/ccsrc/minddata/dataset/engine/datasetops/skip_op.h
+./mindspore/ccsrc/minddata/dataset/engine/datasetops/skip_op.cc
+./mindspore/ccsrc/minddata/dataset/engine/ir/datasetops/skip_node.h
+./mindspore/ccsrc/minddata/dataset/engine/datasetops/source/tf_reader_op.h
+./mindspore/ccsrc/minddata/dataset/engine/datasetops/source/tf_reader_op.cc
+
+
+class BatchOp : public ParallelOp
+class ParallelOp : public DatasetOp
+
+class SkipOp : public PipelineOp
+class PipelineOp : public DatasetOp
+
+class DatasetOp : public std::enable_shared_from_this<DatasetOp>
+class CacheOp : public CacheBase, public RandomAccessOp
+class CacheBase : public ParallelOp
+
+
 BUGS
 1.
 ImportError: /home/lg/.local/lib/python3.7/site-packages/mindspore/_c_dataengine.cpython-37m-x86_64-linux-gnu.so: undefined symbol: vtable for mindspore::dataset::ElasticTFRecordNode

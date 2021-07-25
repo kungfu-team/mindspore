@@ -1595,6 +1595,7 @@ std::shared_ptr<TFRecordDataset> TFRecord(const std::vector<std::string> &datase
                                           ShuffleMode shuffle = ShuffleMode::kGlobal, int32_t num_shards = 1,
                                           int32_t shard_id = 0, bool shard_equal_rows = false,
                                           const std::shared_ptr<DatasetCache> &cache = nullptr) {
+  fprintf(stderr, "creating TFRecordDataset\n");
   std::shared_ptr<TFRecordDataset> ds = nullptr;
   if constexpr (std::is_same<T, std::nullptr_t>::value || std::is_same<T, std::shared_ptr<SchemaObj>>::value) {
     std::shared_ptr<SchemaObj> schema_obj = schema;
@@ -1663,6 +1664,7 @@ std::shared_ptr<ElasticTFRecordDataset> ElasticTFRecord(
   const std::vector<std::string> &columns_list = {}, int64_t num_samples = 0,
   ShuffleMode shuffle = ShuffleMode::kGlobal, int32_t num_shards = 1, int32_t shard_id = 0,
   bool shard_equal_rows = false, const std::shared_ptr<DatasetCache> &cache = nullptr) {
+  fprintf(stderr, "creating ElasticTFRecordDataset\n");
   std::shared_ptr<ElasticTFRecordDataset> ds = nullptr;
   if constexpr (std::is_same<T, std::nullptr_t>::value || std::is_same<T, std::shared_ptr<SchemaObj>>::value) {
     std::shared_ptr<SchemaObj> schema_obj = schema;

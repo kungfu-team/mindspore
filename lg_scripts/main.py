@@ -88,7 +88,13 @@ for i, items in enumerate(iter(dataset)):
 print('total: {}'.format(tot))
 '''
 
-for items in iter(dataset):
+dataset = dataset.batch(3)
+dataset = dataset.batch(2)
+n = dataset.get_dataset_size()
+print(n)
+
+for i, items in enumerate(dataset):
+    print('# %d' %(i))
     for t in items:
         print('{}{}'.format(t.dtype, t.shape))
-    break
+    # break
