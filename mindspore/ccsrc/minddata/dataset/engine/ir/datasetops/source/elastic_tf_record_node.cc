@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-#include "minddata/dataset/engine/datasetops/source/tf_reader_op.h"
+#include "minddata/dataset/engine/datasetops/source/elastic_tf_reader_op.h"
 #include "minddata/dataset/engine/jagged_connector.h"
 #include "minddata/dataset/engine/opt/pass.h"
 #include "minddata/dataset/util/status.h"
@@ -74,7 +74,7 @@ Status ElasticTFRecordNode::ValidateParams() {
 
   std::vector<std::string> invalid_files(dataset_files_.size());
   auto it = std::copy_if(dataset_files_.begin(), dataset_files_.end(), invalid_files.begin(),
-                         [](const std::string &filename) { return !TFReaderOp::ValidateFirstRowCrc(filename); });
+                         [](const std::string &filename) { return !ElasticTFReaderOp::ValidateFirstRowCrc(filename); });
   invalid_files.resize(std::distance(invalid_files.begin(), it));
   std::string err_msg;
   if (!invalid_files.empty()) {
@@ -105,8 +105,8 @@ Status ElasticTFRecordNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const
 
   bool shuffle_files = (shuffle_ == ShuffleMode::kGlobal || shuffle_ == ShuffleMode::kFiles);
 
-  // Create and initialize TFReaderOp
-  std::shared_ptr<TFReaderOp> tf_reader_op = std::make_shared<TFReaderOp>(
+  // Create and initialize ElasticTFReaderOp
+  std::shared_ptr<ElasticTFReaderOp> tf_reader_op = std::make_shared<ElasticTFReaderOp>(
     num_workers_, worker_connector_size_, num_samples_, sorted_dir_files, std::move(data_schema), connector_que_size_,
     columns_list_, shuffle_files, num_shards_, shard_id_, shard_equal_rows_);
 
@@ -123,7 +123,7 @@ Status ElasticTFRecordNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const
     int64_t num_rows = 0;
 
     // First, get the number of rows in the dataset
-    RETURN_IF_NOT_OK(TFReaderOp::CountTotalRows(&num_rows, sorted_dir_files));
+    RETURN_IF_NOT_OK(ElasticTFReaderOp::CountTotalRows(&num_rows, sorted_dir_files));
 
     // Add the shuffle op after this op
     RETURN_IF_NOT_OK(AddShuffleOp(sorted_dir_files.size(), num_shards_, num_rows, 0, connector_que_size_, &shuffle_op));
@@ -133,7 +133,7 @@ Status ElasticTFRecordNode::Build(std::vector<std::shared_ptr<DatasetOp>> *const
   }
   tf_reader_op->set_total_repeats(GetTotalRepeats());
   tf_reader_op->set_num_repeats_per_epoch(GetNumRepeatsPerEpoch());
-  // Add TFReaderOp
+  // Add ElasticTFReaderOp
   node_ops->push_back(tf_reader_op);
   return Status::OK();
 }
@@ -159,10 +159,10 @@ Status ElasticTFRecordNode::GetDatasetSize(const std::shared_ptr<DatasetSizeGett
     // Data will be sharded by file
     std::vector<std::string> shard_file_list;
     RETURN_IF_NOT_OK(GetShardFileList(&shard_file_list));
-    RETURN_IF_NOT_OK(TFReaderOp::CountTotalRows(&num_rows, shard_file_list, kThreadCount, estimate));
+    RETURN_IF_NOT_OK(ElasticTFReaderOp::CountTotalRows(&num_rows, shard_file_list, kThreadCount, estimate));
   } else {
     // Data will be sharded by row
-    RETURN_IF_NOT_OK(TFReaderOp::CountTotalRows(&num_rows, dataset_files_, kThreadCount, estimate));
+    RETURN_IF_NOT_OK(ElasticTFReaderOp::CountTotalRows(&num_rows, dataset_files_, kThreadCount, estimate));
     num_rows = static_cast<int64_t>(ceil(num_rows / (num_shards_ * 1.0)));
   }
   *dataset_size = num_samples_ > 0 ? std::min(num_rows, num_samples_) : num_rows;
