@@ -104,3 +104,23 @@ Solution: add `...`  to `.../pass.cc`
 4.
 AttributeError: 'HTMLParser' object has no attribute 'unescape'
 Solution: python3.9 -m pip install -U setuptools
+
+
+5. use batch twice:
+[ERROR] MD(1335,7f1f23fff700,python3.7):2021-07-26-17:26:27.557.977 [mindspore/ccsrc/minddata/dataset/util/task_manager.cc:217] InterruptMaster] Task is terminated with err msg(more detail in info level log):Unexpected error. Invalid data, batch operation expect same shape for each data row, but got inconsistent shape in column 0 expected shape for this column is:<5,1,384>, got shape:<1,1,384>
+Line of code : 209
+File         : /home/lg/code/repos/github.com/lgarithm/mindspore/mindspore/ccsrc/minddata/dataset/engine/datasetops/batch_op.cc
+
+Traceback (most recent call last):
+  File "origin.py", line 94, in <module>
+    for i, items in enumerate(dataset):
+  File "/home/lg/.local/lib/python3.7/site-packages/mindspore/dataset/engine/iterators.py", line 122, in __next__
+    data = self._get_next()
+  File "/home/lg/.local/lib/python3.7/site-packages/mindspore/dataset/engine/iterators.py", line 196, in _get_next
+    return [self._transform_tensor(t) for t in self._iterator.GetNextAsList()]
+RuntimeError: Unexpected error. Invalid data, batch operation expect same shape for each data row, but got inconsistent shape in column 0 expected shape for this column is:<5,1,384>, got shape:<1,1,384>
+Line of code : 209
+File         : /home/lg/code/repos/github.com/lgarithm/mindspore/mindspore/ccsrc/minddata/dataset/engine/datasetops/batch_op.cc
+
+
+
