@@ -38,8 +38,7 @@
 #include "minddata/dataset/util/wait_post.h"
 #include "utils/system/crc32c.h"
 
-namespace mindspore {
-namespace dataset {
+namespace mindspore::dataset {
 const int64_t kTFRecordFileLimit = 0x140000000;
 
 bool ElasticTFReaderOp::ValidateFirstRowCrc(const std::string &filename) {
@@ -80,15 +79,19 @@ bool ElasticTFReaderOp::ValidateFirstRowCrc(const std::string &filename) {
 }
 
 ElasticTFReaderOp::ElasticTFReaderOp(int32_t num_workers, int32_t worker_connector_size, int64_t total_num_rows,
-                       std::vector<std::string> dataset_files_list, std::unique_ptr<DataSchema> data_schema,
-                       int32_t op_connector_size, std::vector<std::string> columns_to_load, bool shuffle_files,
-                       int32_t num_devices, int32_t device_id, bool equal_rows_per_shard)
+                                     std::vector<std::string> dataset_files_list,
+                                     std::unique_ptr<DataSchema> data_schema, int32_t op_connector_size,
+                                     std::vector<std::string> columns_to_load, bool shuffle_files, int32_t num_devices,
+                                     int32_t device_id, bool equal_rows_per_shard)
     : NonMappableLeafOp(num_workers, worker_connector_size, total_num_rows, op_connector_size, shuffle_files,
                         num_devices, device_id),
       dataset_files_list_(std::move(dataset_files_list)),
       columns_to_load_(std::move(columns_to_load)),
       data_schema_(std::move(data_schema)),
-      equal_rows_per_shard_(equal_rows_per_shard) {}
+      equal_rows_per_shard_(equal_rows_per_shard) {
+  fprintf(stderr, "ElasticTFReaderOp created with(num_workers=%d, worker_connector_size=%d, total_num_rows=%d)\n",
+          num_workers, worker_connector_size, total_num_rows);
+}
 
 // A print method typically used for debugging
 void ElasticTFReaderOp::Print(std::ostream &out, bool show_all) const {
@@ -150,6 +153,7 @@ Status ElasticTFReaderOp::Init() {
 }
 
 Status ElasticTFReaderOp::CalculateNumRowsPerShard() {
+  fprintf(stderr, "ElasticTFReaderOp::CalculateNumRowsPerShard\n");
   if (!equal_rows_per_shard_) {
     return Status::OK();
   }
@@ -174,6 +178,7 @@ Status ElasticTFReaderOp::CalculateNumRowsPerShard() {
 }
 
 Status ElasticTFReaderOp::FillIOBlockShuffle(const std::vector<int64_t> &i_keys) {
+  fprintf(stderr, "ElasticTFReaderOp::FillIOBlockShuffle with %d i_keys\n", (int)i_keys.size());
   int32_t queue_index = 0;
   int32_t key_index = 0;
   int64_t pre_count = 0;
@@ -221,6 +226,7 @@ Status ElasticTFReaderOp::FillIOBlockShuffle(const std::vector<int64_t> &i_keys)
 }
 
 Status ElasticTFReaderOp::FillIOBlockNoShuffle() {
+  fprintf(stderr, "ElasticTFReaderOp::FillIOBlockNoShuffle\n");
   int32_t queue_index = 0;
   int32_t key_index = 0;
   int64_t pre_count = 0;
@@ -269,8 +275,10 @@ Status ElasticTFReaderOp::FillIOBlockNoShuffle() {
 }
 
 // Reads a tf_file file and loads the data into multiple TensorRows.
-Status ElasticTFReaderOp::LoadFile(const std::string &filename, int64_t start_offset, int64_t end_offset, int32_t worker_id) {
-  fprintf(stderr, "ElasticTFReaderOp::LoadFile: %s, %lld, %lld, worker: %d\n", filename.c_str(), start_offset, end_offset, worker_id);
+Status ElasticTFReaderOp::LoadFile(const std::string &filename, int64_t start_offset, int64_t end_offset,
+                                   int32_t worker_id) {
+  fprintf(stderr, "ElasticTFReaderOp::LoadFile: %s, %lld, %lld, worker: %d\n", filename.c_str(), start_offset,
+          end_offset, worker_id);
   auto realpath = Common::GetRealPath(filename);
   if (!realpath.has_value()) {
     MS_LOG(ERROR) << "Get real path failed, path=" << filename;
@@ -332,6 +340,7 @@ Status ElasticTFReaderOp::LoadFile(const std::string &filename, int64_t start_of
 
 // Parses a single row and puts the data into a tensor table.
 Status ElasticTFReaderOp::LoadExample(const dataengine::Example *tf_file, TensorRow *out_row) {
+  fprintf(stderr, "ElasticTFReaderOp::LoadExample\n");
   int32_t num_columns = data_schema_->NumColumns();
   for (int32_t col = 0; col < num_columns; ++col) {
     const ColDescriptor current_col = data_schema_->column(col);
@@ -350,7 +359,8 @@ Status ElasticTFReaderOp::LoadExample(const dataengine::Example *tf_file, Tensor
 
 // Parses a single cell and puts the data into a tensor table.
 Status ElasticTFReaderOp::LoadFeature(TensorRow *tensor_row, const dataengine::Feature &column_values_list,
-                               const ColDescriptor &current_col, int32_t col) {
+                                      const ColDescriptor &current_col, int32_t col) {
+  fprintf(stderr, "ElasticTFReaderOp::LoadFeature(?, ?, ?, col=%d)\n", col);
   const dataengine::Feature::KindCase column_list_type = column_values_list.kind_case();
   std::unique_ptr<float[]> float_array;     // For staging data from protobuf deserialization
   const unsigned char *data_ptr = nullptr;  // Generic pointer used for populating the Tensor
@@ -404,7 +414,8 @@ Status ElasticTFReaderOp::LoadFeature(TensorRow *tensor_row, const dataengine::F
 }
 
 Status ElasticTFReaderOp::LoadBytesList(const ColDescriptor &current_col, const dataengine::Feature &column_values_list,
-                                 int32_t *num_elements, std::shared_ptr<Tensor> *tensor) {
+                                        int32_t *num_elements, std::shared_ptr<Tensor> *tensor) {
+  fprintf(stderr, "ElasticTFReaderOp::LoadBytesList\n");
   // kBytesList can map to the following DE types ONLY!
   // DE_UINT8, DE_INT8
   // Must be single byte type for each element!
@@ -471,7 +482,7 @@ Status ElasticTFReaderOp::LoadBytesList(const ColDescriptor &current_col, const 
 }
 
 Status ElasticTFReaderOp::LoadFloatList(const ColDescriptor &current_col, const dataengine::Feature &column_values_list,
-                                 int32_t *num_elements, std::unique_ptr<float[]> *float_array) {
+                                        int32_t *num_elements, std::unique_ptr<float[]> *float_array) {
   // KFloatList can only map to DE types:
   // DE_FLOAT32
   if (current_col.type() != DataType::DE_FLOAT32) {
@@ -494,8 +505,9 @@ Status ElasticTFReaderOp::LoadFloatList(const ColDescriptor &current_col, const 
 }
 
 // Determines which template type to use and calls LoadIntList
-Status ElasticTFReaderOp::LoadIntListSwitch(const ColDescriptor &current_col, const dataengine::Feature &column_values_list,
-                                     int32_t *num_elements, std::shared_ptr<Tensor> *tensor) {
+Status ElasticTFReaderOp::LoadIntListSwitch(const ColDescriptor &current_col,
+                                            const dataengine::Feature &column_values_list, int32_t *num_elements,
+                                            std::shared_ptr<Tensor> *tensor) {
   if (current_col.type() == DataType::DE_UINT64) {
     RETURN_IF_NOT_OK(LoadIntList<uint64_t>(current_col, column_values_list, num_elements, tensor));
   } else if (current_col.type() == DataType::DE_INT64) {
@@ -526,7 +538,8 @@ Status ElasticTFReaderOp::LoadIntListSwitch(const ColDescriptor &current_col, co
 // compatible with int64_t
 template <typename T>
 Status ElasticTFReaderOp::LoadIntList(const ColDescriptor &current_col, const dataengine::Feature &column_values_list,
-                               int32_t *num_elements, std::shared_ptr<Tensor> *tensor) {
+                                      int32_t *num_elements, std::shared_ptr<Tensor> *tensor) {
+  fprintf(stderr, "ElasticTFReaderOp::LoadIntList\n");
   if (!(current_col.type().IsInt())) {
     std::string err_msg = "Invalid data, invalid data type for Tensor at column: " + current_col.name() +
                           ", data type should be int, but got " + current_col.type().ToString();
@@ -555,6 +568,7 @@ Status ElasticTFReaderOp::LoadIntList(const ColDescriptor &current_col, const da
 }
 
 Status ElasticTFReaderOp::CreateSchema(const std::string tf_file, std::vector<std::string> columns_to_load) {
+  fprintf(stderr, "ElasticTFReaderOp::CreateSchema(tf_file=%s, columns_to_load=?)\n", tf_file.c_str());
   auto realpath = Common::GetRealPath(tf_file);
   if (!realpath.has_value()) {
     MS_LOG(ERROR) << "Get real path failed, path=" << tf_file;
@@ -628,8 +642,9 @@ Status ElasticTFReaderOp::CreateSchema(const std::string tf_file, std::vector<st
   return Status::OK();
 }
 
-Status ElasticTFReaderOp::CountTotalRows(int64_t *out_total_rows, const std::vector<std::string> &filenames, int64_t threads,
-                                  bool estimate) {
+Status ElasticTFReaderOp::CountTotalRows(int64_t *out_total_rows, const std::vector<std::string> &filenames,
+                                         int64_t threads, bool estimate) {
+  fprintf(stderr, "ElasticTFReaderOp::CountTotalRows\n");
   try {
     if (threads > filenames.size()) {
       threads = filenames.size();
@@ -681,7 +696,9 @@ Status ElasticTFReaderOp::CountTotalRows(int64_t *out_total_rows, const std::vec
   return Status::OK();
 }
 
-int64_t ElasticTFReaderOp::CountTotalRowsSectioned(const std::vector<std::string> &filenames, int64_t begin, int64_t end) {
+int64_t ElasticTFReaderOp::CountTotalRowsSectioned(const std::vector<std::string> &filenames, int64_t begin,
+                                                   int64_t end) {
+  fprintf(stderr, "ElasticTFReaderOp::CountTotalRowsSectioned\n");
   int64_t rows_read = 0;
   for (int i = begin; i < end; i++) {
     auto realpath = Common::GetRealPath(filenames[i]);
@@ -718,6 +735,7 @@ int64_t ElasticTFReaderOp::CountTotalRowsSectioned(const std::vector<std::string
 }
 
 Status ElasticTFReaderOp::ComputeColMap() {
+  fprintf(stderr, "ElasticTFReaderOp::ComputeColMap\n");
   // Construct the column name map for this operator (base class field)
   if (column_name_id_map_.empty()) {
     for (int32_t i = 0; i < data_schema_->NumColumns(); ++i) {
@@ -728,12 +746,12 @@ Status ElasticTFReaderOp::ComputeColMap() {
   }
   return Status::OK();
 }
+
 Status ElasticTFReaderOp::FillIOBlockQueue(const std::vector<int64_t> &i_keys) {
+  fprintf(stderr, "ElasticTFReaderOp::FillIOBlockQueue\n");
   if (shuffle_files_) {
     return FillIOBlockShuffle(i_keys);
   }
   return FillIOBlockNoShuffle();
 }
-
-}  // namespace dataset
-}  // namespace mindspore
+}  // namespace mindspore::dataset

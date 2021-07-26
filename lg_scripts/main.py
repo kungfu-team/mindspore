@@ -88,8 +88,8 @@ for i, items in enumerate(iter(dataset)):
 print('total: {}'.format(tot))
 '''
 
-dataset = dataset.batch(3)
-dataset = dataset.batch(2)
+dataset = dataset.batch(5)
+dataset = dataset.batch(5)
 n = dataset.get_dataset_size()
 print(n)
 
@@ -98,3 +98,10 @@ for i, items in enumerate(dataset):
     for t in items:
         print('{}{}'.format(t.dtype, t.shape))
     # break
+
+'''
+ $ cat err.log | grep 'ElasticTFReaderOp::LoadFeature(?, ?, ?, col=6)'| wc -l
+88641
+'''
+
+
