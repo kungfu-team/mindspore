@@ -325,6 +325,7 @@ Status ElasticTFReaderOp::LoadFile(const std::string &filename, int64_t start_of
 
       std::vector<std::string> file_path(num_columns, filename);
       newRow.setPath(file_path);
+      fprintf(stderr, "calling LoadExample in LoadFile\n");
       RETURN_IF_NOT_OK(LoadExample(&tf_file, &newRow));
       rows_read++;
       RETURN_IF_NOT_OK(jagged_rows_connector_->Add(worker_id, std::move(newRow)));

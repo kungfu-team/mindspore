@@ -102,6 +102,9 @@ for i, items in enumerate(dataset):
 '''
  $ cat err.log | grep 'ElasticTFReaderOp::LoadFeature(?, ?, ?, col=6)'| wc -l
 88641
+
+$ cat err.log | grep LoadExample| wc -l
+88641
 '''
 
 
