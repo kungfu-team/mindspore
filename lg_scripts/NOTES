@@ -47,6 +47,9 @@ Added Files:
 mindspore/ccsrc/minddata/dataset/engine/ir/datasetops/source/elastic_tf_record_node.h
 mindspore/ccsrc/minddata/dataset/engine/ir/datasetops/source/elastic_tf_record_node.cc
 
+mindspore/ccsrc/minddata/dataset/engine/datasetops/source/elastic_tf_reader_op.cc
+mindspore/ccsrc/minddata/dataset/engine/datasetops/source/elastic_tf_reader_op.h
+
 Modified Files:
 
 mindspore/ccsrc/minddata/dataset/include/dataset/datasets.h
@@ -63,6 +66,8 @@ Related Files:
 ./mindspore/ccsrc/minddata/dataset/engine/datasetops/source/tf_reader_op.h
 ./mindspore/ccsrc/minddata/dataset/engine/datasetops/source/tf_reader_op.cc
 
+./mindspore/ccsrc/minddata/dataset/engine/datasetops/source/nonmappable_leaf_op.h
+./mindspore/ccsrc/minddata/dataset/engine/datasetops/source/nonmappable_leaf_op.cc
 
 class BatchOp : public ParallelOp
 class ParallelOp : public DatasetOp
