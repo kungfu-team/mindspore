@@ -40,7 +40,7 @@ from mindspore.common import set_seed
 # from src.kungfu_callback import KungFuElasticCallback
 # from src.elastic_schedule import schedule
 # from src.batch_sizer import BatchSizer
-# from mindspore_extension import StopCallback
+from mindspore_extension import StopCallback
 
 from src.parse_env import parse_kungfu_env
 from src.elastic_state import ElasticState, ElasticCallback
@@ -110,10 +110,16 @@ def do_train(dataset=None, network=None, load_checkpoint_path="", save_checkpoin
     callbacks.append(SummaryCollector(summary_path))
     callbacks.append(LossMonitor())
     # callbacks.append(KungFuElasticCallback(schedule))
-    callbacks.append(ElasticCallback(elastic_state))
+    # callbacks.append(ElasticCallback(elastic_state))
+    callbacks.append(StopCallback(1))
 
+    fake_train = False
+    if fake_train:
+        print('exit before train')
+        return
+    print('before train')
     model.train(epoch_num, dataset, callbacks=callbacks, dataset_sink_mode=False)
-
+    print('after train')
 
 def do_eval(dataset=None, load_checkpoint_path="", eval_batch_size=1):
     """ do eval """

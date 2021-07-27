@@ -56,6 +56,6 @@ kungfu-run $(kungfu_run_flags) \
     --load_pretrain_checkpoint_path="/data/bert/bert_base.ckpt" \
     --train_data_file_path=${DATA_DIR} \
     --eval_json_path="/data/squad1/dev-v1.1.json" \
-    --schema_file_path=${SCHEMA_DIR} >$ROOT/squad_elastic.log 2>&1
+    --schema_file_path=${SCHEMA_DIR} # >$ROOT/squad_elastic.log 2>&1
 
 echo "$0 done"

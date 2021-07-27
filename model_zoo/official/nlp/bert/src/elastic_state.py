@@ -1,3 +1,7 @@
+import os
+import sys
+import time
+
 class ElasticState:
     def __init__(self, max_progress=None):
         self._progress = 0
@@ -6,6 +10,8 @@ class ElasticState:
         self._stop_reason = None
 
         import pystdml as ml
+        print('creating new ElasticState, must be a singleton, pid=%d, sys.argv=%s' % (os.getpid(), sys.argv))
+        time.sleep(10)
         self._sess = ml.init_elastic()
 
     def begin(self):

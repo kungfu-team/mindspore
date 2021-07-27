@@ -1,6 +1,9 @@
 #!/bin/sh
 set -e
 
+export STDML_COLLECTIVE_ENABLE_LOG=1
+export KUNGFU_CONFIG_LOG_LEVEL=debug
+
 cd $(dirname $0)
 . ./lg_scripts/launcher.sh
 

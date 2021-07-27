@@ -15,6 +15,8 @@ kungfu_run_flags_default() {
     echo -q
     echo -logdir logs
     echo -logfile kungfu-run.log
+
+    echo -port-range 40000-41000
 }
 
 kungfu_run_flags_elastic() {

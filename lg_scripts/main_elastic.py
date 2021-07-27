@@ -114,6 +114,7 @@ def main_elastic_state():
 
 
 def main_elastic_context():
+    '''
     dataset = create_squad_dataset_2(
         batch_size=1,
         repeat_count=1,
@@ -125,23 +126,25 @@ def main_elastic_context():
     )
 
     it = iter(dataset)
+    '''
 
-    es = ElasticState(100)
+    es = ElasticState(10)
 
     while not es.stopped():
         with ElasticContext(es) as should_sync:
             print('# progress %d' % (es._progress))
             if should_sync:
                 print('user should sync states')
-                dataset.reset()
-                it = iter(dataset)
+                #dataset.reset()
+                #it = iter(dataset)
                 # FIXME: move it to es._progress
 
             # do step work
-            item = next(it)
+            #item = next(it)
             # print(item)
-            for t in item:
-                print('{}{}'.format(t.dtype, t.shape))
+            #for i,t in enumerate(item):
+            #    print('{}{}'.format(t.dtype, t.shape))
+            #    break
             time.sleep(1.0 / es._sess.size())
 
 
