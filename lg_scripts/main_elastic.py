@@ -1,7 +1,6 @@
 import pystdml as ml
 import time
 
-# from src.dataset import create_squad_dataset
 import mindspore.dataset as ds
 import mindspore.dataset.transforms.c_transforms as C
 import mindspore.common.dtype as mstype
@@ -93,42 +92,7 @@ def main_elastic_loop():
     print('main_elastic finished')
 
 
-class ElasticState:
-    def __init__(self, max_progress=None):
-        self._progress = 0
-        self._max_progress = max_progress
-        self._synced = False
-        self._stop_reason = None
-        self._sess = ml.init_elastic()
-
-    def begin(self):
-        should_sync = not self._synced
-        if should_sync:
-            new_progress = self._sess.all_reduce_max(self._progress)
-            self._step = new_progress
-            self._synced = True
-        return should_sync
-
-    def end(self):
-        self._progress += 1 # TODO: customize _progress incremental function
-        if self._max_progress:
-            if self._progress >= self._max_progress:
-                self._stop_reason = 'finished'
-                return
-
-        result = self._sess.resize()
-        if result.changed:
-            if result.detached:
-                self._stop_reason = 'detached'
-                return
-            self._synced = False
-
-    def stopped(self):
-        return self._stop_reason is not None
-
-    def stop_reason(self):
-        return self._stop_reason
-
+from elastic_state import ElasticState, ElasticContext
 
 def main_elastic_state():
     max_step = 100
@@ -147,6 +111,20 @@ def main_elastic_state():
     print('stop reason: %s' % (es.stop_reason()))
 
 
+
+def main_elastic_context():
+    es = ElasticState(100)
+
+    while not es.stopped():
+        with ElasticContext(es) as should_sync:
+            print('# progress %d' %(es._progress))
+            if should_sync:
+                print('user should sync states')
+
+            # do step work
+            time.sleep(1.0 / es._sess.size())
+
+
 def main():
     train_data_file_path = "/data/squad1/train.tf_record"
     schema_file_path = "/data/squad1/squad_schema.json"
@@ -163,7 +141,6 @@ def main():
 
     n = dataset.get_dataset_size()  # == 88641
     print(n)  # 88641
-
     '''
     tot = 0
     for i, items in enumerate(iter(dataset)):
@@ -180,12 +157,13 @@ def main():
     print(n)
 
     for i, items in enumerate(dataset):
-        print('# %d' %(i))
+        print('# %d' % (i))
         for t in items:
             print('{}{}'.format(t.dtype, t.shape))
 
+
 # main_elastic_loop()
-main_elastic_state()
+# main_elastic_state()
+main_elastic_context()
 
 #main()
-
