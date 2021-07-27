@@ -11,3 +11,9 @@ dataset/engine/iterators.py
 class TupleIterator(Iterator):
 
  train/dataset_helper.py
+
+
+status: unsolved
+
+reproduce:
+./lg_scripts/run_squad_debug.sh
