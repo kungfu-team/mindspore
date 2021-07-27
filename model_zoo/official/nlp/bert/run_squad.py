@@ -118,7 +118,7 @@ def do_train(dataset=None, network=None, load_checkpoint_path="", save_checkpoin
     # SAVE CHECKPOINT
     #  save_checkpoint(network, "./marcel.ckpt")
 
-    # CALLBACKS 
+    # CALLBACKS
     if distributed:
         rank = D.get_rank()
         summary_path = "./summary_{}".format(rank)
@@ -292,5 +292,13 @@ def run_squad():
         SQuad_postprocess(args_opt.eval_json_path, all_predictions, output_metrics=output_path)
 
 
+print('before main!!!!!!')
+
 if __name__ == "__main__":
     run_squad()
+else:
+    print('exit!!!!!')
+    #exit(1)
+
+
+print('after main!!!!!!')

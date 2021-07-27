@@ -16,7 +16,8 @@ def create_squad_dataset_2(
 ):
     type_cast_op = C.TypeCast(mstype.int32)
     # TFRecordDataset < SourceDataset < Dataset
-    data_set = ElasticTFRecordDataset(
+    #data_set = ElasticTFRecordDataset(
+    data_set = ds.TFRecordDataset(
         [
             data_file_path,
         ],
@@ -76,8 +77,9 @@ dataset = create_squad_dataset_2(
     rank=0,
 )
 
+from mindspore.train.dataset_helper import DatasetHelper
 n = dataset.get_dataset_size()  # == 88641
-print(n)  # 88641
+print('n=',n) # 88641
 '''
 tot = 0
 for i, items in enumerate(iter(dataset)):
@@ -88,15 +90,17 @@ for i, items in enumerate(iter(dataset)):
 print('total: {}'.format(tot))
 '''
 
-dataset = dataset.batch(5)
-dataset = dataset.batch(5)
+dataset = dataset.batch(1024)
+#dataset = dataset.batch(15)
 n = dataset.get_dataset_size()
-print(n)
+print('n=',n)
+
+dataset = DatasetHelper(dataset, False)
 
 for i, items in enumerate(dataset):
     print('# %d' %(i))
-    for t in items:
-        print('{}{}'.format(t.dtype, t.shape))
+    for i, t in enumerate(items):
+        print('{}: {}{}'.format(i, t.dtype, t.shape))
     # break
 
 '''

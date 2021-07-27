@@ -20,7 +20,7 @@ export GLOG_log_dir=${CUR_DIR}/ms_log
 
 SCHEMA_DIR="/data/squad1/squad_schema.json"
 
-python3.7 run_squad.py \
+python3.7 run_squad_debug.py \
     --device_target="GPU" \
     --do_train="true" \
     --do_eval="false" \

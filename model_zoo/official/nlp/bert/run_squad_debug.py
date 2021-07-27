@@ -1,25 +1,6 @@
-# Copyright 2020 Huawei Technologies Co., Ltd
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ============================================================================
-
-'''
-Bert finetune and evaluation script.
-'''
 import os
 import argparse
 import collections
-import sys
 from src.bert_for_finetune import BertSquadCell, BertSquad
 from src.finetune_eval_config import optimizer_cfg, bert_net_cfg
 from src.dataset import create_squad_dataset
@@ -34,27 +15,19 @@ from mindspore.train.model import Model
 from mindspore.train.callback import (CheckpointConfig, ModelCheckpoint, TimeMonitor,
                                       SummaryCollector, LossMonitor)
 from mindspore.train.serialization import load_checkpoint, load_param_into_net
-# import mindspore.ops.operations.kungfu_comm_ops as kfops
-from mindspore.common import set_seed
-# from src.kungfu_mindspore_optimizer import KungFuLamb
-# from src.kungfu_callback import KungFuElasticCallback
-# from src.elastic_schedule import schedule
-# from src.batch_sizer import BatchSizer
-from mindspore_extension import StopCallback
+import mindspore.communication.management as D
+from mindspore.context import ParallelMode
+from mindspore.train.serialization import save_checkpoint
 
-from src.parse_env import parse_kungfu_env
-from src.elastic_state import ElasticState, ElasticCallback
-# import pystdml as ml
-
-kf_env = parse_kungfu_env()
-print('calling constructor of ElasticState')
-#elastic_state = ElasticState()
-#print(elastic_state)
 _cur_dir = os.getcwd()
+
+""" seed """
+from mindspore.common import set_seed
+set_seed(1)
 
 
 def do_train(dataset=None, network=None, load_checkpoint_path="", save_checkpoint_path="",
-             epoch_num=1, distributed=False):
+             epoch_num=1):
     """ do train """
     if load_checkpoint_path == "":
         raise ValueError("Pretrain model missed, finetune task must load pretrain model!")
@@ -79,7 +52,6 @@ def do_train(dataset=None, network=None, load_checkpoint_path="", save_checkpoin
                                        warmup_steps=int(steps_per_epoch * epoch_num * 0.1),
                                        decay_steps=steps_per_epoch * epoch_num,
                                        power=optimizer_cfg.Lamb.power)
-        # optimizer = KungFuLamb(network.trainable_params(), learning_rate=lr_schedule)
         optimizer = Lamb(network.trainable_params(), learning_rate=lr_schedule)
     elif optimizer_cfg.optimizer == 'Momentum':
         optimizer = Momentum(network.trainable_params(), learning_rate=optimizer_cfg.Momentum.learning_rate,
@@ -101,62 +73,15 @@ def do_train(dataset=None, network=None, load_checkpoint_path="", save_checkpoin
     model = Model(netwithgrads)
     callbacks = [TimeMonitor(dataset.get_dataset_size()), LossCallBack(dataset.get_dataset_size()), ckpoint_cb]
 
-    """ callbacks """
-    if distributed:
-        # rank = kfops.kungfu_current_rank()
-        rank = kf_env['rank']
-        summary_path = "./summary_{}".format(rank)
-    else:
-        summary_path = "./summary"
+    # SAVE CHECKPOINT
+    #  save_checkpoint(network, "./marcel.ckpt")
+
+    summary_path = "./summary"
     callbacks.append(SummaryCollector(summary_path))
     callbacks.append(LossMonitor())
-    # callbacks.append(KungFuElasticCallback(schedule))
-    # callbacks.append(ElasticCallback(elastic_state))
-    callbacks.append(StopCallback(1))
 
-    fake_train = False
-    if fake_train:
-        print('exit before train')
-        return
-    print('before train')
     model.train(epoch_num, dataset, callbacks=callbacks, dataset_sink_mode=False)
-    print('after train')
 
-def do_eval(dataset=None, load_checkpoint_path="", eval_batch_size=1):
-    """ do eval """
-    if load_checkpoint_path == "":
-        raise ValueError("Finetune model missed, evaluation task must load finetune model!")
-    net = BertSquad(bert_net_cfg, False, 2)
-    net.set_train(False)
-    param_dict = load_checkpoint(load_checkpoint_path)
-    load_param_into_net(net, param_dict)
-    model = Model(net)
-    output = []
-    RawResult = collections.namedtuple("RawResult", ["unique_id", "start_logits", "end_logits"])
-    columns_list = ["input_ids", "input_mask", "segment_ids", "unique_ids"]
-    for data in dataset.create_dict_iterator(num_epochs=1):
-        input_data = []
-        for i in columns_list:
-            input_data.append(data[i])
-        input_ids, input_mask, segment_ids, unique_ids = input_data
-        start_positions = Tensor([1], mstype.float32)
-        end_positions = Tensor([1], mstype.float32)
-        is_impossible = Tensor([1], mstype.float32)
-        logits = model.predict(input_ids, input_mask, segment_ids, start_positions,
-                               end_positions, unique_ids, is_impossible)
-        ids = logits[0].asnumpy()
-        start = logits[1].asnumpy()
-        end = logits[2].asnumpy()
-
-        for i in range(eval_batch_size):
-            unique_id = int(ids[i])
-            start_logits = [float(x) for x in start[i].flat]
-            end_logits = [float(x) for x in end[i].flat]
-            output.append(RawResult(
-                unique_id=unique_id,
-                start_logits=start_logits,
-                end_logits=end_logits))
-    return output
 
 def run_squad():
     """run squad task"""
@@ -203,24 +128,8 @@ def run_squad():
         if args_opt.eval_json_path == "":
             raise ValueError("'tokenization_file_path' must be set when do evaluation task")
 
-    """ distributed """
-    if args_opt.distribute.lower() == "true":
-        distributed = True
-    else:
-        distributed = False
-    if distributed:
-        # kfops.init(args_opt.device_target)
-        #device_num = kfops.kungfu_current_cluster_size()
-        #rank = kfops.kungfu_current_rank()
-        device_num = kf_env['size']
-        rank = kf_env['rank']
-        print("kungfu rank={}, size={}".format(rank, device_num))
-
-        save_finetune_checkpoint_path = os.path.join(save_finetune_checkpoint_path,
-                                                     "ckpt_" + str(rank))
-    else:
-        device_num = 1
-        rank = 0
+    device_num = 1
+    rank = 0
 
     target = args_opt.device_target
     if target == "Ascend":
@@ -236,18 +145,13 @@ def run_squad():
     netwithloss = BertSquad(bert_net_cfg, True, 2, dropout_prob=0.1)
 
     if args_opt.do_train.lower() == "true":
-        batch_size = args_opt.train_batch_size
-        # batch_size = BatchSizer(batch_size)
         ds = create_squad_dataset(batch_size=args_opt.train_batch_size, repeat_count=1,
                                   data_file_path=args_opt.train_data_file_path,
                                   schema_file_path=args_opt.schema_file_path,
                                   do_shuffle=(args_opt.train_data_shuffle.lower() == "true"),
                                   device_num=device_num, rank=rank)
-
         do_train(ds, netwithloss, load_pretrain_checkpoint_path, save_finetune_checkpoint_path,
-                epoch_num, distributed)
-        print('do_train finished')
-
+                epoch_num)
         if args_opt.do_eval.lower() == "true":
             if save_finetune_checkpoint_path == "":
                 load_finetune_checkpoint_dir = _cur_dir
@@ -256,61 +160,14 @@ def run_squad():
             load_finetune_checkpoint_path = LoadNewestCkpt(load_finetune_checkpoint_dir,
                                                            ds.get_dataset_size(), epoch_num, "squad")
 
-    if distributed:
-        # kfops.finalize(args_opt.device_target)
-        print('kfops.finalize done')
 
+print('before main!!!!!!')
 
-    print('Train Finished!!!')
-    print('Train Finished!!!', file=sys.stderr)
-    return
-
-    if kf_env['rank'] > 0:
-        return
-    #if kfops.kungfu_current_rank() > 0:
-    #    return
-
-    print('=' * 80)
-    print('=' * 80, file=sys.stderr)
-
-    if args_opt.do_eval.lower() == "true":
-        print('eval...')
-        from src import tokenization
-        from src.create_squad_data import read_squad_examples, convert_examples_to_features
-        from src.squad_get_predictions import write_predictions
-        from src.squad_postprocess import SQuad_postprocess
-        tokenizer = tokenization.FullTokenizer(vocab_file=args_opt.vocab_file_path, do_lower_case=True)
-        eval_examples = read_squad_examples(args_opt.eval_json_path, False)
-        eval_features = convert_examples_to_features(
-            examples=eval_examples,
-            tokenizer=tokenizer,
-            max_seq_length=bert_net_cfg.seq_length,
-            doc_stride=128,
-            max_query_length=64,
-            is_training=False,
-            output_fn=None,
-            vocab_file=args_opt.vocab_file_path)
-        ds = create_squad_dataset(batch_size=args_opt.eval_batch_size, repeat_count=1,
-                                  data_file_path=eval_features,
-                                  schema_file_path=args_opt.schema_file_path, is_training=False,
-                                  do_shuffle=(args_opt.eval_data_shuffle.lower() == "true"),
-                                  device_num=device_num, rank=rank)
-        outputs = do_eval(ds, load_finetune_checkpoint_path, args_opt.eval_batch_size)
-        all_predictions = write_predictions(eval_examples, eval_features, outputs, 20, 30, True)
-
-        if distributed:
-            output_path = "./output_{}.json".format(rank)
-        else:
-            output_path = "./output.json"
-
-        SQuad_postprocess(args_opt.eval_json_path, all_predictions, output_metrics=output_path)
-        print('eval finshed')
-
-
-print('before main!!!!!!!')
 if __name__ == "__main__":
-    print('%s started' % (__file__))
-    set_seed(1)
     run_squad()
-    print('%s finished' % (__file__))
-    print('%s finished' % (__file__), file=sys.stderr)
+else:
+    print('exit!!!!!')
+    #exit(1)
+
+
+print('after main!!!!!!')
