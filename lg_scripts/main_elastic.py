@@ -65,6 +65,7 @@ def create_squad_dataset_2(
 
     return data_set
 
+
 def main_elastic_loop():
     sess = ml.init_elastic()
     print(sess)
@@ -93,17 +94,17 @@ def main_elastic_loop():
 
 
 class ElasticState:
-    def __init__(self, max_step=None):
-        self._step = 0
-        self._max_step = max_step
+    def __init__(self, max_progress=None):
+        self._progress = 0
+        self._max_progress = max_progress
         self._synced = False
         self._stop_reason = None
         self._sess = ml.init_elastic()
 
     def begin(self):
         if not self._synced:
-            new_step = self._sess.all_reduce_max(self._step)
-            self._step = new_step
+            new_progress = self._sess.all_reduce_max(self._progress)
+            self._step = new_progress
             self._synced = True
 
     def end(self):
@@ -114,9 +115,9 @@ class ElasticState:
                 return
             self._synced = False
 
-        self._step += 1
-        if self._max_step:
-            if self._step >= self._max_step:
+        self._progress += 1 # TODO: customize _progress incremental function
+        if self._max_progress:
+            if self._progress >= self._max_progress:
                 self._stop_reason = 'finished'
 
     def stopped(self):
@@ -125,18 +126,20 @@ class ElasticState:
     def stop_reason(self):
         return self._stop_reason
 
+
 def main_elastic_state():
     max_step = 100
     es = ElasticState(100)
 
     while not es.stopped():
         es.begin()
-        print('# %d' % (es._step))
+        print('# %d' % (es._progress))
         time.sleep(1.0 / es._sess.size())
         es.end()
 
     print('main_elastic_state stopped')
     print('stop reason: %s' % (es.stop_reason()))
+
 
 def main():
     train_data_file_path = "/data/squad1/train.tf_record"
