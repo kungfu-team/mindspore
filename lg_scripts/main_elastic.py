@@ -102,23 +102,26 @@ class ElasticState:
         self._sess = ml.init_elastic()
 
     def begin(self):
-        if not self._synced:
+        should_sync = not self._synced
+        if should_sync:
             new_progress = self._sess.all_reduce_max(self._progress)
             self._step = new_progress
             self._synced = True
+        return should_sync
 
     def end(self):
+        self._progress += 1 # TODO: customize _progress incremental function
+        if self._max_progress:
+            if self._progress >= self._max_progress:
+                self._stop_reason = 'finished'
+                return
+
         result = self._sess.resize()
         if result.changed:
             if result.detached:
                 self._stop_reason = 'detached'
                 return
             self._synced = False
-
-        self._progress += 1 # TODO: customize _progress incremental function
-        if self._max_progress:
-            if self._progress >= self._max_progress:
-                self._stop_reason = 'finished'
 
     def stopped(self):
         return self._stop_reason is not None
@@ -132,8 +135,11 @@ def main_elastic_state():
     es = ElasticState(100)
 
     while not es.stopped():
-        es.begin()
+        should_sync = es.begin()
         print('# %d' % (es._progress))
+        if should_sync:
+            print('user should sync states')
+
         time.sleep(1.0 / es._sess.size())
         es.end()
 
