@@ -12,7 +12,7 @@ class ElasticState:
         should_sync = not self._synced
         if should_sync:
             new_progress = self._sess.all_reduce_max(self._progress)
-            self._step = new_progress
+            self._progress = new_progress
             self._synced = True
         return should_sync
 

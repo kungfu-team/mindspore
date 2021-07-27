@@ -47,9 +47,6 @@ from src.elastic_state import ElasticState, ElasticCallback
 # import pystdml as ml
 
 kf_env = parse_kungfu_env()
-print('calling constructor of ElasticState')
-#elastic_state = ElasticState()
-#print(elastic_state)
 _cur_dir = os.getcwd()
 
 
@@ -101,6 +98,11 @@ def do_train(dataset=None, network=None, load_checkpoint_path="", save_checkpoin
     model = Model(netwithgrads)
     callbacks = [TimeMonitor(dataset.get_dataset_size()), LossCallBack(dataset.get_dataset_size()), ckpoint_cb]
 
+
+    # don't construct ElasticState outside of main
+    elastic_state = ElasticState()
+    print(elastic_state)
+
     """ callbacks """
     if distributed:
         # rank = kfops.kungfu_current_rank()
@@ -111,16 +113,11 @@ def do_train(dataset=None, network=None, load_checkpoint_path="", save_checkpoin
     callbacks.append(SummaryCollector(summary_path))
     callbacks.append(LossMonitor())
     # callbacks.append(KungFuElasticCallback(schedule))
-    # callbacks.append(ElasticCallback(elastic_state))
-    callbacks.append(StopCallback(1))
+    callbacks.append(ElasticCallback(elastic_state))
+    # callbacks.append(StopCallback(1))
 
-    fake_train = False
-    if fake_train:
-        print('exit before train')
-        return
-    print('before train')
     model.train(epoch_num, dataset, callbacks=callbacks, dataset_sink_mode=False)
-    print('after train')
+
 
 def do_eval(dataset=None, load_checkpoint_path="", eval_batch_size=1):
     """ do eval """
@@ -307,7 +304,6 @@ def run_squad():
         print('eval finshed')
 
 
-print('before main!!!!!!!')
 if __name__ == "__main__":
     print('%s started' % (__file__))
     set_seed(1)

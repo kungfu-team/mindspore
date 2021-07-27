@@ -11,17 +11,14 @@ class ElasticState:
 
         import pystdml as ml
         # print('creating new ElasticState, must be a singleton, pid=%d, sys.argv=%s' % (os.getpid(), sys.argv))
-        print('creating new ElasticState, must be a singleton, pid=%d' % (os.getpid()))
-        for i, a in enumerate(sys.argv):
-            print('[%d]=%s' % (i,a))
-        time.sleep(10)
+        # print('creating new ElasticState, must be a singleton, pid=%d' % (os.getpid()))
         self._sess = ml.init_elastic()
 
     def begin(self):
         should_sync = not self._synced
         if should_sync:
             new_progress = self._sess.all_reduce_max(self._progress)
-            self._step = new_progress
+            self._progress = new_progress
             self._synced = True
         return should_sync
 
@@ -80,7 +77,7 @@ class ElasticCallback(ms.train.callback.Callback):
         print('ElasticCallback::step_begin')
         should_sync = self._elastic_state.begin()
         if should_sync:
-            print('TODO: sync states')
+            print('TODO: sync state to %d' % (self._elastic_state._progress))
         print('progress: %d' % (self._elastic_state._progress))
 
     def step_end(self, run_context):
