@@ -107,3 +107,7 @@ mindspore/lite/test/do_test/
 
 # lite opencl compile file
 *.cl.inc
+
+
+/checkpoint
+/model_zoo/official/nlp/bert/summary
