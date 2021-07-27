@@ -29,7 +29,7 @@ python3.7 run_squad.py \
     --eval_data_shuffle="false" \
     --train_batch_size=16 \
     --eval_batch_size=1 \
-    --vocab_file_path="/home/marcel/Mindspore/bert_uncased_L-12_H-768_A-12/vocab.txt" \
+    --vocab_file_path="/data/bert/vocab.txt" \
     --save_finetune_checkpoint_path="$ROOT/checkpoint" \
     --load_pretrain_checkpoint_path="/data/bert/bert_base.ckpt" \
     --train_data_file_path="/data/squad1/train.tf_record" \

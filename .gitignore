@@ -110,4 +110,4 @@ mindspore/lite/test/do_test/
 
 
 /checkpoint
-/model_zoo/official/nlp/bert/summary
+**/events.out.events.summary.*

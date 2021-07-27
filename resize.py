@@ -34,24 +34,28 @@ def peer_id(ipv4: str, port: int):
     }
 
 
+port_range_start = 40000
+
+
 def gen_cluster_config(n):
     runners = [peer_id('127.0.0.1', 38080)]
-    workers = [peer_id('127.0.0.1', 10000 + i) for i in range(n)]
+    workers = [peer_id('127.0.0.1', port_range_start + i) for i in range(n)]
     return {
         'Runners': runners,
         'Workers': workers,
     }
 
 
+url = 'http://127.0.0.1:9999/config'
+
+
 def resize_to(n):
-    url = 'http://127.0.0.1:9100/config'
     config = gen_cluster_config(n)
     requests.put(url, json.dumps(config).encode())
 
 
 def get_config():
     # url = os.getenv('KUNGFU_CONFIG_SERVER')
-    url = 'http://127.0.0.1:9100/config'
     resp = requests.get(url)
     o = resp.text
     print(o)

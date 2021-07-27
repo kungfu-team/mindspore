@@ -10,4 +10,5 @@ cd $(dirname $0)
 
 # erun 1 python3.7 ./lg_scripts/main_elastic.py
 
-./lg_scripts/run_squad_origin.sh
+# ./lg_scripts/run_squad_origin.sh
+./lg_scripts/run_squad_elastic.sh
