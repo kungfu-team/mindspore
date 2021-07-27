@@ -8,4 +8,8 @@ cd $(dirname $0)/..
 CUDA_HOME=/usr/local/cuda
 export CUDACXX=$CUDA_HOME/bin/nvcc
 
-measure ./build.sh -e gpu
+if [ `uname` = "Darwin" ]; then
+    measure ./build.sh -e cpu
+else
+    measure ./build.sh -e gpu
+fi
