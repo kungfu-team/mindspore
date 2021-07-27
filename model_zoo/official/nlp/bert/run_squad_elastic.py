@@ -254,6 +254,10 @@ def run_squad():
         print('kfops.finalize done')
 
 
+    print('Train Finished!!!')
+    print('Train Finished!!!', file=sys.stderr)
+    return
+
     if kf_env['rank'] > 0:
         return
     #if kfops.kungfu_current_rank() > 0:
@@ -301,3 +305,4 @@ if __name__ == "__main__":
     set_seed(1)
     run_squad()
     print('%s finished' % (__file__))
+    print('%s finished' % (__file__), file=sys.stderr)
