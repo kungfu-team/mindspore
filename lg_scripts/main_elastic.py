@@ -5,6 +5,7 @@ import mindspore.dataset as ds
 import mindspore.dataset.transforms.c_transforms as C
 import mindspore.common.dtype as mstype
 from elastic_tf_record_dataaset import ElasticTFRecordDataset
+from elastic_state import ElasticState, ElasticContext
 
 
 def create_squad_dataset_2(
@@ -65,6 +66,10 @@ def create_squad_dataset_2(
     return data_set
 
 
+train_data_file_path = "/data/squad1/train.tf_record"
+schema_file_path = "/data/squad1/squad_schema.json"
+
+
 def main_elastic_loop():
     sess = ml.init_elastic()
     print(sess)
@@ -75,7 +80,7 @@ def main_elastic_loop():
     while step < max_step:
         if not synced:
             step = sess.all_reduce_max(step)
-            self.synced = True
+            synced = True
         print('step: %d from %s' % (step, sess))
 
         # BEGIN step work
@@ -92,10 +97,7 @@ def main_elastic_loop():
     print('main_elastic finished')
 
 
-from elastic_state import ElasticState, ElasticContext
-
 def main_elastic_state():
-    max_step = 100
     es = ElasticState(100)
 
     while not es.stopped():
@@ -111,24 +113,7 @@ def main_elastic_state():
     print('stop reason: %s' % (es.stop_reason()))
 
 
-
 def main_elastic_context():
-    es = ElasticState(100)
-
-    while not es.stopped():
-        with ElasticContext(es) as should_sync:
-            print('# progress %d' %(es._progress))
-            if should_sync:
-                print('user should sync states')
-
-            # do step work
-            time.sleep(1.0 / es._sess.size())
-
-
-def main():
-    train_data_file_path = "/data/squad1/train.tf_record"
-    schema_file_path = "/data/squad1/squad_schema.json"
-
     dataset = create_squad_dataset_2(
         batch_size=1,
         repeat_count=1,
@@ -139,27 +124,25 @@ def main():
         rank=0,
     )
 
-    n = dataset.get_dataset_size()  # == 88641
-    print(n)  # 88641
-    '''
-    tot = 0
-    for i, items in enumerate(iter(dataset)):
-        if (i + 1) % 10000 == 0:
-            print('{} {}'.format(i, items))
-        tot += 1
+    it = iter(dataset)
 
-    print('total: {}'.format(tot))
-    '''
+    es = ElasticState(100)
 
-    dataset = dataset.batch(5)
-    dataset = dataset.batch(5)
-    n = dataset.get_dataset_size()
-    print(n)
+    while not es.stopped():
+        with ElasticContext(es) as should_sync:
+            print('# progress %d' % (es._progress))
+            if should_sync:
+                print('user should sync states')
+                dataset.reset()
+                it = iter(dataset)
+                # FIXME: move it to es._progress
 
-    for i, items in enumerate(dataset):
-        print('# %d' % (i))
-        for t in items:
-            print('{}{}'.format(t.dtype, t.shape))
+            # do step work
+            item = next(it)
+            # print(item)
+            for t in item:
+                print('{}{}'.format(t.dtype, t.shape))
+            time.sleep(1.0 / es._sess.size())
 
 
 # main_elastic_loop()
