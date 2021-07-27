@@ -80,8 +80,20 @@ def do_train(dataset=None, network=None, load_checkpoint_path="", save_checkpoin
     callbacks.append(SummaryCollector(summary_path))
     callbacks.append(LossMonitor())
 
-    model.train(epoch_num, dataset, callbacks=callbacks, dataset_sink_mode=False)
+    # model.train(epoch_num, dataset, callbacks=callbacks, dataset_sink_mode=False)
+    for item in dataset:
+        for i, t in enumerate(item):
+            print(i, t.shape)
+        break
 
+    from mindspore.train.dataset_helper import DatasetHelper
+    helper = DatasetHelper(dataset, False)
+
+    for item in helper:
+        for i, t in enumerate(item):
+            print(i, t.shape)
+        break
+    import time;time.sleep(10)
 
 def run_squad():
     """run squad task"""
