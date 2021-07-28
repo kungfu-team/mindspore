@@ -23,8 +23,8 @@ kungfu_run_flags_elastic() {
     kungfu_run_flags_default
 
     echo -w
-    echo -builtin-config-port 9100
-    echo -config-server http://127.0.0.1:9100/config
+    echo -builtin-config-port 9999
+    echo -config-server http://127.0.0.1:9999/config
 }
 
 kungfu_run_n() {

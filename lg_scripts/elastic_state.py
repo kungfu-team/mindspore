@@ -1,3 +1,7 @@
+import os
+import sys
+import time
+
 class ElasticState:
     def __init__(self, max_progress=None):
         self._progress = 0
@@ -6,6 +10,8 @@ class ElasticState:
         self._stop_reason = None
 
         import pystdml as ml
+        # print('creating new ElasticState, must be a singleton, pid=%d, sys.argv=%s' % (os.getpid(), sys.argv))
+        # print('creating new ElasticState, must be a singleton, pid=%d' % (os.getpid()))
         self._sess = ml.init_elastic()
 
     def begin(self):
@@ -46,3 +52,45 @@ class ElasticContext:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._elastic_state.end()
+
+
+import mindspore as ms
+
+
+class ElasticCallback(ms.train.callback.Callback):
+    def __init__(self, elastic_state, dataset=None):
+        self._elastic_state = elastic_state
+        self._dataset = dataset
+
+    def begin(self, run_context):
+        pass
+        print('ElasticCallback::begin')
+
+    def epoch_begin(self, run_context):
+        pass
+        print('ElasticCallback::epoch_begin')
+
+    def epoch_end(self, run_context):
+        pass
+        print('ElasticCallback::epoch_end')
+
+    def step_begin(self, run_context):
+        print('ElasticCallback::step_begin')
+        should_sync = self._elastic_state.begin()
+        if should_sync:
+            print('TODO: sync state to %d' % (self._elastic_state._progress))
+            #print('resetting dataset')
+            #self._dataset.reset()
+
+        print('progress: %d' % (self._elastic_state._progress))
+
+    def step_end(self, run_context):
+        print('ElasticCallback::step_end')
+        self._elastic_state.end()
+        if self._elastic_state.stopped():
+            print('_elastic_state stopped, requesting run_context to stop')
+            run_context.request_stop()
+
+    def end(self, run_context):
+        pass
+        print('StopCallback::end')

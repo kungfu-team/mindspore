@@ -113,7 +113,7 @@ def do_train(dataset=None, network=None, load_checkpoint_path="", save_checkpoin
     callbacks.append(SummaryCollector(summary_path))
     callbacks.append(LossMonitor())
     # callbacks.append(KungFuElasticCallback(schedule))
-    callbacks.append(ElasticCallback(elastic_state))
+    callbacks.append(ElasticCallback(elastic_state, dataset))
     # callbacks.append(StopCallback(1))
 
     model.train(epoch_num, dataset, callbacks=callbacks, dataset_sink_mode=False)

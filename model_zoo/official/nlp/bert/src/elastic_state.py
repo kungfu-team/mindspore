@@ -58,8 +58,9 @@ import mindspore as ms
 
 
 class ElasticCallback(ms.train.callback.Callback):
-    def __init__(self, elastic_state):
+    def __init__(self, elastic_state, dataset):
         self._elastic_state = elastic_state
+        self._dataset = dataset
 
     def begin(self, run_context):
         pass
@@ -78,6 +79,9 @@ class ElasticCallback(ms.train.callback.Callback):
         should_sync = self._elastic_state.begin()
         if should_sync:
             print('TODO: sync state to %d' % (self._elastic_state._progress))
+            #print('resetting dataset')
+            #self._dataset.reset()
+
         print('progress: %d' % (self._elastic_state._progress))
 
     def step_end(self, run_context):
