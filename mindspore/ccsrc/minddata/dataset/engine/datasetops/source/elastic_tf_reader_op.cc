@@ -325,7 +325,9 @@ Status ElasticTFReaderOp::LoadFile(const std::string &filename, int64_t start_of
 
       std::vector<std::string> file_path(num_columns, filename);
       newRow.setPath(file_path);
-      fprintf(stderr, "calling LoadExample in LoadFile\n");
+      if (false) {
+        fprintf(stderr, "calling LoadExample in LoadFile\n");
+      }
       RETURN_IF_NOT_OK(LoadExample(&tf_file, &newRow));
       rows_read++;
       RETURN_IF_NOT_OK(jagged_rows_connector_->Add(worker_id, std::move(newRow)));
@@ -341,7 +343,9 @@ Status ElasticTFReaderOp::LoadFile(const std::string &filename, int64_t start_of
 
 // Parses a single row and puts the data into a tensor table.
 Status ElasticTFReaderOp::LoadExample(const dataengine::Example *tf_file, TensorRow *out_row) {
-  fprintf(stderr, "ElasticTFReaderOp::LoadExample\n");
+  if (false) {
+    fprintf(stderr, "ElasticTFReaderOp::LoadExample\n");
+  }
   int32_t num_columns = data_schema_->NumColumns();
   for (int32_t col = 0; col < num_columns; ++col) {
     const ColDescriptor current_col = data_schema_->column(col);
@@ -361,7 +365,9 @@ Status ElasticTFReaderOp::LoadExample(const dataengine::Example *tf_file, Tensor
 // Parses a single cell and puts the data into a tensor table.
 Status ElasticTFReaderOp::LoadFeature(TensorRow *tensor_row, const dataengine::Feature &column_values_list,
                                       const ColDescriptor &current_col, int32_t col) {
-  fprintf(stderr, "ElasticTFReaderOp::LoadFeature(?, ?, ?, col=%d)\n", col);
+  if (false) {
+    fprintf(stderr, "ElasticTFReaderOp::LoadFeature(?, ?, ?, col=%d)\n", col);
+  }
   const dataengine::Feature::KindCase column_list_type = column_values_list.kind_case();
   std::unique_ptr<float[]> float_array;     // For staging data from protobuf deserialization
   const unsigned char *data_ptr = nullptr;  // Generic pointer used for populating the Tensor
@@ -540,7 +546,9 @@ Status ElasticTFReaderOp::LoadIntListSwitch(const ColDescriptor &current_col,
 template <typename T>
 Status ElasticTFReaderOp::LoadIntList(const ColDescriptor &current_col, const dataengine::Feature &column_values_list,
                                       int32_t *num_elements, std::shared_ptr<Tensor> *tensor) {
-  fprintf(stderr, "ElasticTFReaderOp::LoadIntList\n");
+  if (false) {
+    fprintf(stderr, "ElasticTFReaderOp::LoadIntList\n");
+  }
   if (!(current_col.type().IsInt())) {
     std::string err_msg = "Invalid data, invalid data type for Tensor at column: " + current_col.name() +
                           ", data type should be int, but got " + current_col.type().ToString();

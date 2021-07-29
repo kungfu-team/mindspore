@@ -3,6 +3,8 @@
 # export CUDA_VISIBLE_DEVICES=0,1,2,3
 # export CUDA_VISIBLE_DEVICES=2,3
 
+KF_RUN=$HOME/go/bin/kungfu-run
+
 default_device() {
     if [ -c /dev/nvidia0 ]; then
         echo GPU
@@ -30,13 +32,13 @@ kungfu_run_flags_elastic() {
 kungfu_run_n() {
     local np=$1
     shift
-    kungfu-run -np $np $(kungfu_run_flags_default) $@
+    $KF_RUN -np $np $(kungfu_run_flags_default) $@
 }
 
 kungfu_run_elastic_n() {
     local np=$1
     shift
-    kungfu-run -np $np $(kungfu_run_flags_elastic) $@
+    $KF_RUN -np $np $(kungfu_run_flags_elastic) $@
 }
 
 _show_duration() {

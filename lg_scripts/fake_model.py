@@ -135,6 +135,15 @@ class QuadraticFunction(ms.nn.Cell):
         )
 
     def construct(self, *args, **kwargs):
+         # RuntimeError: mindspore/ccsrc/pipeline/jit/static_analysis/prim.cc:915 GetEvaluatedValueForBuiltinTypeAttrOrMethod] Mindspore don't support this usage '__class__' for the object with type <Tensor[Int32]>.
+        # print(args[0].__class__)
+        '''
+        for a in args:
+            print(a)
+        for k,v in kwargs.iterms():
+            print(k, v)
+        '''
+
         return self.w * self.w
 
 
@@ -155,8 +164,25 @@ def main_model_train():
     callbacks += [SleepCallback()]
 
     elastic_state = ElasticState(20)
-    callbacks += [ElasticCallback(elastic_state)]
+    elastic_callback = ElasticCallback(elastic_state)
+    callbacks += [elastic_callback]
 
+    old_create_tuple_iterator = dataset.__class__.create_tuple_iterator
+    print(old_create_tuple_iterator)  # <function Dataset.create_tuple_iterator at 0x7f10bfb60830>
+
+    def create_tuple_iterator(self, num_epochs=None, do_copy=None):
+        print('create_tuple_iterator intercepted')
+        it = old_create_tuple_iterator(self, num_epochs=num_epochs, do_copy=do_copy)
+        print(it)  # <mindspore.dataset.engine.iterators.TupleIterator object at 0x7f7eedebd590>
+        elastic_callback._iter = it
+        return it
+
+    dataset.__class__.create_tuple_iterator = create_tuple_iterator
+
+
+    #dataset_helper = DatasetHelper(dataset)
+    #dataset_helper.iter()
+    # iter = TupleIterator(dataset)
     model.train(1, dataset, callbacks=callbacks, dataset_sink_mode=False)
 
 

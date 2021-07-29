@@ -61,6 +61,7 @@ class ElasticCallback(ms.train.callback.Callback):
     def __init__(self, elastic_state, dataset=None):
         self._elastic_state = elastic_state
         self._dataset = dataset
+        self._iter = None
 
     def begin(self, run_context):
         pass
@@ -79,6 +80,8 @@ class ElasticCallback(ms.train.callback.Callback):
         should_sync = self._elastic_state.begin()
         if should_sync:
             print('TODO: sync state to %d' % (self._elastic_state._progress))
+            print('will reset', self._iter)
+            # self._iter.reset()  # 'TupleIterator' object has no attribute 'reset'
             #print('resetting dataset')
             #self._dataset.reset()
 
