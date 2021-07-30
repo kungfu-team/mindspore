@@ -186,7 +186,47 @@ def main_model_train():
     model.train(1, dataset, callbacks=callbacks, dataset_sink_mode=False)
 
 
+def main_user_loop():
+    batch_size = 1024
+    dataset = create_squad_dataset_2(
+        batch_size=batch_size,
+        repeat_count=1,
+        data_file_path=train_data_file_path,
+        schema_file_path=schema_file_path,
+        do_shuffle=False,
+        device_num=1,
+        rank=0,
+    )
+    net = QuadraticFunction()
+    model = ms.train.Model(net)
+
+    callbacks = []
+    #callbacks += [SleepCallback()]
+
+    elastic_state = ElasticState(20)
+    elastic_callback = ElasticCallback(elastic_state)
+    callbacks += [elastic_callback]
+
+    from mindspore.train.dataset_helper import DatasetHelper
+    dataset_helper = DatasetHelper(dataset, dataset_sink_mode=False, sink_size=-1, epoch_num=1)
+    # dataset_helper.iter()
+
+    n_epochs = 2
+    for epoch in range(n_epochs):
+        print('begin epoch %d' % (epoch))
+        for step, item in enumerate(dataset_helper):
+            print('eopch %4d, step %6d, %d tensors from item' % (epoch, step, len(item)))
+
+        print('will reset dataset')
+        dataset.reset()
+        print('dataset reset done')
+
+    print('main_user_loop finished')
+
+
 print('before main!!!')
 # main_elastic_state()
 # main_elastic_context()
-main_model_train()
+# main_model_train()
+main_user_loop()
+
