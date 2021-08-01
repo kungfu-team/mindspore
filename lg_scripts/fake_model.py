@@ -8,16 +8,17 @@ import mindspore.common.dtype as mstype
 from elastic_tf_record_dataaset import ElasticTFRecordDataset
 from elastic_state import ElasticState, ElasticContext, ElasticCallback
 from mindspore_extension import SleepCallback
+from debug_ops import KungFuLogTensor
 
 
 def create_squad_dataset_2(
-    batch_size=1,
-    repeat_count=1,
-    data_file_path=None,
-    schema_file_path=None,
-    do_shuffle=True,
-    device_num=1,
-    rank=0,
+        batch_size=1,
+        repeat_count=1,
+        data_file_path=None,
+        schema_file_path=None,
+        do_shuffle=True,
+        device_num=1,
+        rank=0,
 ):
     type_cast_op = C.TypeCast(mstype.int32)
     # TFRecordDataset < SourceDataset < Dataset
@@ -135,7 +136,7 @@ class QuadraticFunction(ms.nn.Cell):
         )
 
     def construct(self, *args, **kwargs):
-         # RuntimeError: mindspore/ccsrc/pipeline/jit/static_analysis/prim.cc:915 GetEvaluatedValueForBuiltinTypeAttrOrMethod] Mindspore don't support this usage '__class__' for the object with type <Tensor[Int32]>.
+        # RuntimeError: mindspore/ccsrc/pipeline/jit/static_analysis/prim.cc:915 GetEvaluatedValueForBuiltinTypeAttrOrMethod] Mindspore don't support this usage '__class__' for the object with type <Tensor[Int32]>.
         # print(args[0].__class__)
         '''
         for a in args:
@@ -168,17 +169,21 @@ def main_model_train():
     callbacks += [elastic_callback]
 
     old_create_tuple_iterator = dataset.__class__.create_tuple_iterator
-    print(old_create_tuple_iterator)  # <function Dataset.create_tuple_iterator at 0x7f10bfb60830>
+    print(old_create_tuple_iterator
+          )  # <function Dataset.create_tuple_iterator at 0x7f10bfb60830>
 
     def create_tuple_iterator(self, num_epochs=None, do_copy=None):
         print('create_tuple_iterator intercepted')
-        it = old_create_tuple_iterator(self, num_epochs=num_epochs, do_copy=do_copy)
-        print(it)  # <mindspore.dataset.engine.iterators.TupleIterator object at 0x7f7eedebd590>
+        it = old_create_tuple_iterator(self,
+                                       num_epochs=num_epochs,
+                                       do_copy=do_copy)
+        print(
+            it
+        )  # <mindspore.dataset.engine.iterators.TupleIterator object at 0x7f7eedebd590>
         elastic_callback._iter = it
         return it
 
     dataset.__class__.create_tuple_iterator = create_tuple_iterator
-
 
     #dataset_helper = DatasetHelper(dataset)
     #dataset_helper.iter()
@@ -210,16 +215,21 @@ def main_user_loop():
     n_epochs = 2
 
     from mindspore.train.dataset_helper import DatasetHelper
-    dataset_helper = DatasetHelper(dataset, dataset_sink_mode=False, sink_size=-1, epoch_num=n_epochs)
+    dataset_helper = DatasetHelper(dataset,
+                                   dataset_sink_mode=False,
+                                   sink_size=-1,
+                                   epoch_num=n_epochs)
     # dataset_helper.iter()
 
+    log_tensor = KungFuLogTensor()
     for epoch in range(n_epochs):
         print('begin epoch %d' % (epoch))
         for step, item in enumerate(dataset_helper):
-            print('eopch %4d, step %6d, %d tensors from item' % (epoch, step, len(item)))
+            print('eopch %4d, step %6d, %d tensors from item' %
+                  (epoch, step, len(item)))
             for i, t in enumerate(item):
                 print('%d %s%s' % (i, t.dtype, t.shape))
-
+                log_tensor(t)
         '''
         print('will reset dataset')
         dataset.reset()
@@ -233,4 +243,3 @@ print('before main!!!')
 # main_elastic_context()
 # main_model_train()
 main_user_loop()
-
