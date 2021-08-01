@@ -32,7 +32,7 @@ void dbg_log_tensor<T>::operator()(const T *input_addr, T *output_addr, size_t c
   if (result != cudaSuccess) {
     MS_LOG(ERROR) << "cudaStreamSynchronize failed";
   } else {
-    uint32_t crc = system::Crc32c::GetMaskCrc32cValue(x.data(), size);
+    uint32_t crc = system::Crc32c::GetMaskCrc32cValue((char *)x.data(), size);
     fprintf(stderr, "dbg_log_tensor: crc32:    0x%08x, %s[%d], \n", crc, dtype_name<T>()(), (int)count);
   }
 }
