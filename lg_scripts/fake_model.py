@@ -207,20 +207,24 @@ def main_user_loop():
     elastic_callback = ElasticCallback(elastic_state)
     callbacks += [elastic_callback]
 
+    n_epochs = 2
+
     from mindspore.train.dataset_helper import DatasetHelper
-    dataset_helper = DatasetHelper(dataset, dataset_sink_mode=False, sink_size=-1, epoch_num=1)
+    dataset_helper = DatasetHelper(dataset, dataset_sink_mode=False, sink_size=-1, epoch_num=n_epochs)
     # dataset_helper.iter()
 
-    n_epochs = 2
     for epoch in range(n_epochs):
         print('begin epoch %d' % (epoch))
         for step, item in enumerate(dataset_helper):
             print('eopch %4d, step %6d, %d tensors from item' % (epoch, step, len(item)))
+            for i, t in enumerate(item):
+                print('%d %s%s' % (i, t.dtype, t.shape))
 
+        '''
         print('will reset dataset')
         dataset.reset()
         print('dataset reset done')
-
+        '''
     print('main_user_loop finished')
 
 
