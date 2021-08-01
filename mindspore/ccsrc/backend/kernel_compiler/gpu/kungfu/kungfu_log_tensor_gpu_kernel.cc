@@ -53,6 +53,10 @@ MS_REG_GPU_KERNEL_ONE(KungFuLogTensor, KernelAttr().AddInputAttr(kNumberTypeFloa
                       KungFuLogTensorGpuKernel, float)
 MS_REG_GPU_KERNEL_ONE(KungFuLogTensor, KernelAttr().AddInputAttr(kNumberTypeInt32).AddOutputAttr(kNumberTypeInt32),
                       KungFuLogTensorGpuKernel, int32_t)
-MS_REG_GPU_KERNEL_ONE(KungFuLogTensor, KernelAttr().AddInputAttr(kNumberTypeInt64).AddOutputAttr(kNumberTypeInt64),
-                      KungFuLogTensorGpuKernel, int64_t)
+
+// Can't define int64_t
+// TypeError: mindspore/ccsrc/backend/kernel_compiler/gpu/gpu_kernel.h:276 GetCudnnDataType] kNumberTypeInt64 is not
+// supported. MS_REG_GPU_KERNEL_ONE(KungFuLogTensor,
+// KernelAttr().AddInputAttr(kNumberTypeInt64).AddOutputAttr(kNumberTypeInt64),
+//                       KungFuLogTensorGpuKernel, int64_t)
 }  // namespace mindspore::kernel
