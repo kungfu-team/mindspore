@@ -21,6 +21,11 @@ struct dtype_name<int32_t> {
   const char *operator()() const { return "i32"; }
 };
 
+template <>
+struct dtype_name<int64_t> {
+  const char *operator()() const { return "i64"; }
+};
+
 template <typename T>
 void dbg_log_tensor<T>::operator()(const T *input_addr, T *output_addr, size_t count, cudaStream_t stream) {
   const size_t size = count * sizeof(T);
@@ -39,6 +44,7 @@ void dbg_log_tensor<T>::operator()(const T *input_addr, T *output_addr, size_t c
 
 template struct dbg_log_tensor<float>;
 template struct dbg_log_tensor<int32_t>;
+template struct dbg_log_tensor<int64_t>;
 
 // MS_REG_GPU_KERNEL_ONE(KungFuLogTensor,
 // KernelAttr().AddInputAttr(kNumberTypeFloat16).AddOutputAttr(kNumberTypeFloat16),
@@ -47,4 +53,6 @@ MS_REG_GPU_KERNEL_ONE(KungFuLogTensor, KernelAttr().AddInputAttr(kNumberTypeFloa
                       KungFuLogTensorGpuKernel, float)
 MS_REG_GPU_KERNEL_ONE(KungFuLogTensor, KernelAttr().AddInputAttr(kNumberTypeInt32).AddOutputAttr(kNumberTypeInt32),
                       KungFuLogTensorGpuKernel, int32_t)
+MS_REG_GPU_KERNEL_ONE(KungFuLogTensor, KernelAttr().AddInputAttr(kNumberTypeInt64).AddOutputAttr(kNumberTypeInt64),
+                      KungFuLogTensorGpuKernel, int64_t)
 }  // namespace mindspore::kernel
