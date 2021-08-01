@@ -24,7 +24,7 @@ struct dtype_name<int32_t> {
 template <typename T>
 void dbg_log_tensor<T>::operator()(const T *input_addr, T *output_addr, size_t count, cudaStream_t stream) {
   const size_t size = count * sizeof(T);
-  cudaMemcpyAsync(output_addr, input_addr, size, , cudaMemcpyDeviceToDevice, stream);
+  cudaMemcpyAsync(output_addr, input_addr, size, cudaMemcpyDeviceToDevice, stream);
   std::vector<T> x(count);
 
   cudaMemcpyAsync(x.data(), output_addr, size, cudaMemcpyDeviceToHost, stream);
