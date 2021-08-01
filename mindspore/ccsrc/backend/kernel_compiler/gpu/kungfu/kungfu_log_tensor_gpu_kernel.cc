@@ -36,7 +36,7 @@ namespace mindspore::kernel {
 template <typename T>
 void dbg_log_tensor<T>::operator()(const T *input_addr, T *output_addr, size_t count, cudaStream_t stream) {
   cudaMemcpyAsync(output_addr, input_addr, count * sizeof(T), cudaMemcpyDeviceToDevice, stream);
-  fprintf(stderr, "TODO: dbg_log_tensor(%lld)\n", count);
+  fprintf(stderr, "TODO: dbg_log_tensor(%d)\n", (int)count);
 }
 
 template struct dbg_log_tensor<float>;
@@ -63,8 +63,9 @@ template struct dbg_log_tensor<int32_t>;
 //   }
 // }
 
-MS_REG_GPU_KERNEL_ONE(KungFuLogTensor, KernelAttr().AddInputAttr(kNumberTypeFloat16).AddOutputAttr(kNumberTypeFloat16),
-                      KungFuLogTensorGpuKernel, kungfu::float16)
+// MS_REG_GPU_KERNEL_ONE(KungFuLogTensor,
+// KernelAttr().AddInputAttr(kNumberTypeFloat16).AddOutputAttr(kNumberTypeFloat16),
+//                       KungFuLogTensorGpuKernel, kungfu::float16)
 MS_REG_GPU_KERNEL_ONE(KungFuLogTensor, KernelAttr().AddInputAttr(kNumberTypeFloat32).AddOutputAttr(kNumberTypeFloat32),
                       KungFuLogTensorGpuKernel, float)
 MS_REG_GPU_KERNEL_ONE(KungFuLogTensor, KernelAttr().AddInputAttr(kNumberTypeInt32).AddOutputAttr(kNumberTypeInt32),
