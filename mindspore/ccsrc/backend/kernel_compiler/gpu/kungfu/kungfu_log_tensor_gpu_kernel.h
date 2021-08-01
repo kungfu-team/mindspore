@@ -9,7 +9,12 @@
 //#include "backend/kernel_compiler/gpu/kungfu/kungfu_gpu_common.h"
 
 namespace mindspore::kernel {
-void log_workspace(int idx, const kungfu::Workspace &w, cudaStream_t stream);
+// void log_workspace(int idx, const kungfu::Workspace &w, cudaStream_t stream);
+
+template <typename T>
+struct dbg_log_tensor {
+  void operator()(const T *input_addr, T *output_addr, size_t count, cudaStream_t stream);
+};
 
 template <typename T>
 class KungFuLogTensorGpuKernel : public GpuKernel {
@@ -33,20 +38,21 @@ class KungFuLogTensorGpuKernel : public GpuKernel {
 
   bool Launch(const std::vector<AddressPtr> &inputs, const std::vector<AddressPtr> &workspace,
               const std::vector<AddressPtr> &outputs, void *stream_ptr) override {
-    LOG_Kernel_Launch("KungFuLogTensorGpuKernel", inputs, workspace, outputs);
+    // LOG_Kernel_Launch("KungFuLogTensorGpuKernel", inputs, workspace, outputs);
 
     const T *input_addr = GetDeviceAddress<T>(inputs, 0);
     T *output_addr = GetDeviceAddress<T>(outputs, 0);
 
     cudaStream_t stream = comm_stream_ ? comm_stream_ : reinterpret_cast<cudaStream_t>(stream_ptr);
 
-    auto w = make_kungfu_workspace(input_addr, output_addr, input_count_);
-    log_workspace(idx_++, w, stream);
+    dbg_log_tensor<T>()(input_addr, output_addr, input_count_, stream);
+    // auto w = make_kungfu_workspace(input_addr, output_addr, input_count_);
+    // log_workspace(idx_++, w, stream);
     return true;
   }
 
   bool Init(const CNodePtr &kernel_node) override {
-    LOG_InitKernel("KungFuLogTensorGpuKernel");
+    // LOG_InitKernel("KungFuLogTensorGpuKernel");
 
     InitResource();
     data_type_ = GetCudnnDataType(TypeIdLabel(AnfAlgo::GetInputDeviceDataType(kernel_node, 0)));
