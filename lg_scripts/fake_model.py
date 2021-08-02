@@ -239,6 +239,8 @@ def main_user_loop():
             for i, t in enumerate(item):
                 print('%d %s%s' % (i, t.dtype, t.shape))
                 log_tensor(t)
+
+            # dataset.reset()  # doesn't work
         '''
         print('will reset dataset')
         dataset.reset()

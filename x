@@ -12,7 +12,8 @@ cd $(dirname $0)
 #python3.7 ./lg_scripts/main.py
 
 # erun 1 python3.7 ./lg_scripts/main_elastic.py
-erun 1 python3.7 ./lg_scripts/fake_model.py --shuffle
+# erun 1 python3.7 ./lg_scripts/fake_model.py --shuffle
+erun 1 python3.7 ./lg_scripts/fake_model.py
 
 #./lg_scripts/run_squad_origin.sh
 #./lg_scripts/run_squad_debug.sh
