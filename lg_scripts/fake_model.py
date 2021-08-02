@@ -1,5 +1,6 @@
 import pystdml as ml
 import time
+import argparse
 
 import mindspore as ms
 import mindspore.dataset as ds
@@ -9,6 +10,12 @@ from elastic_tf_record_dataaset import ElasticTFRecordDataset
 from elastic_state import ElasticState, ElasticContext, ElasticCallback
 from mindspore_extension import SleepCallback
 from debug_ops import KungFuLogTensor
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description='')
+    p.add_argument('--shuffle', action='store_true', default=False)
+    return p.parse_args()
 
 
 def create_squad_dataset_2(
@@ -192,13 +199,15 @@ def main_model_train():
 
 
 def main_user_loop():
+    args = parse_args()
+
     batch_size = 1024
     dataset = create_squad_dataset_2(
         batch_size=batch_size,
         repeat_count=1,
         data_file_path=train_data_file_path,
         schema_file_path=schema_file_path,
-        do_shuffle=False,
+        do_shuffle=args.shuffle,
         device_num=1,
         rank=0,
     )
