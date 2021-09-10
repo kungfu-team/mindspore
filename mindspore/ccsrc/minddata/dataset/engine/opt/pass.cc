@@ -44,6 +44,7 @@
 #endif
 #include "minddata/dataset/engine/ir/datasetops/source/random_node.h"
 #include "minddata/dataset/engine/ir/datasetops/source/tf_record_node.h"
+#include "minddata/dataset/engine/ir/datasetops/source/elastic_tf_record_node.h"
 #ifdef ENABLE_PYTHON
 #include "minddata/dataset/engine/ir/datasetops/sync_wait_node.h"
 #endif
@@ -253,6 +254,12 @@ Status IRNodePass::Visit(std::shared_ptr<TFRecordNode> node, bool *const modifie
   return Visit(std::static_pointer_cast<NonMappableSourceNode>(node), modified);
 }
 Status IRNodePass::VisitAfter(std::shared_ptr<TFRecordNode> node, bool *const modified) {
+  return VisitAfter(std::static_pointer_cast<NonMappableSourceNode>(node), modified);
+}
+Status IRNodePass::Visit(std::shared_ptr<ElasticTFRecordNode> node, bool *const modified) {
+  return Visit(std::static_pointer_cast<NonMappableSourceNode>(node), modified);
+}
+Status IRNodePass::VisitAfter(std::shared_ptr<ElasticTFRecordNode> node, bool *const modified) {
   return VisitAfter(std::static_pointer_cast<NonMappableSourceNode>(node), modified);
 }
 Status IRNodePass::Visit(std::shared_ptr<TransferNode> node, bool *const modified) {

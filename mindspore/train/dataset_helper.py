@@ -244,10 +244,12 @@ class DatasetHelper:
                     iterclass = _DatasetIterPyNative
             self.iter = iterclass(dataset, sink_size, epoch_num)
         else:
+            print('DatasetHelper using iterclass = _DatasetIterNormal')
             iterclass = _DatasetIterNormal
             self.iter = iterclass(dataset, epoch_num=epoch_num)
 
     def __iter__(self):
+        print('DatasetHelper::__iter__ called')
         return self.iter.__iter__()
 
     # A temp solution for loop sink. Delete later
@@ -442,6 +444,7 @@ class _DatasetIterNormal:
         self.dataset = dataset
         self.device_num = _get_device_num()
         self.global_rank = _get_global_rank()
+        print('_DatasetIterNormal creating iter = self.dataset.create_tuple_iterator(...)')
         self.iter = self.dataset.create_tuple_iterator(num_epochs=epoch_num, do_copy=True)
 
     def __iter__(self):

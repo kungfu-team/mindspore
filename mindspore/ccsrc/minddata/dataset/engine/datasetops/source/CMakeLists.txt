@@ -16,12 +16,14 @@ set(DATASET_ENGINE_DATASETOPS_SOURCE_SRC_FILES
     album_op.cc
     mappable_leaf_op.cc
     nonmappable_leaf_op.cc
+    elastic_state.cc
     )
 
 set(DATASET_ENGINE_DATASETOPS_SOURCE_SRC_FILES
     ${DATASET_ENGINE_DATASETOPS_SOURCE_SRC_FILES}
     mindrecord_op.cc
     tf_reader_op.cc
+    elastic_tf_reader_op.cc
     )
 
 if(ENABLE_PYTHON)

@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+cd $(dirname $0)
+
+. ./lg_scripts/measure.sh
+
+upgrade_mindspore() {
+    # ./lg_scripts/install-kungfu.sh
+    ./lg_scripts/build.sh
+    ./lg_scripts/install.sh
+}
+
+measure upgrade_mindspore
