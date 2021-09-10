@@ -1,0 +1,27 @@
+#!/bin/sh
+
+set -e
+
+root=127.0.0.1:10000
+
+if [ "$KUNGFU_SELF_SPEC" = "$root" ]; then
+    export STD_TRACER_REPORT_STDOUT=1
+else
+    export STD_TRACER_REPORT_STDOUT=0
+fi
+
+log_env() {
+    if [ ! -z "$CUDA_VISIBLE_DEVICES" ]; then
+        echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+    fi
+
+    env | grep KUNGFU | sort
+}
+
+
+export STD_TRACER_REPORT_STDOUT=0
+
+
+# log_env
+
+$@

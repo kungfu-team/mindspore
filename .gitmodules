@@ -4,3 +4,15 @@
 [submodule "graphengine"]
 	path = graphengine
 	url = https://gitee.com/mindspore/graphengine.git
+[submodule "third_party/stdtracer"]
+	path = third_party/stdtracer
+	url = git@github.com:/stdml/stdtracer.git
+[submodule "third_party/stdtensor"]
+	path = third_party/stdtensor
+	url = http://github.com/stdml/stdtensor
+[submodule "third_party/stdnn-ops"]
+	path = third_party/stdnn-ops
+	url = http://github.com/stdml/stdnn-ops
+[submodule "third_party/stdml-collective"]
+	path = third_party/stdml-collective
+	url = http://github.com/stdml/stdml-collective-experimental

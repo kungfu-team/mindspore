@@ -1,0 +1,19 @@
+14130 pts/0    S+     0:00  |               \_ /bin/sh ./lg_scripts/run_squad_elastic.sh
+14135 pts/0    Sl+    0:00  |                   \_ /usr/bin/python3 /home/lg/.local/bin/kungfu-run -np 1 -logfile kungfu-run.log -logdir ./log -port-range 40000-41000 -w -builtin-config-port 9999 -config-server http://127.0.0.1:9999/config python3.7 run_squad_elastic.py --device_target=GPU --distribute=true --do_train=true --do_eval=false --device_id=0 --epoch_num=1 --num_class=2 --train_data_shuffle=false --eval_data_shuffle=false --train_batch_size=8 --eval_batch_size=1 --vocab_file_path=/data/bert/vocab.txt --save_finetune_checkpoint_path=/home/lg/code/repos/github.com/lgarithm/mindspore/checkpoint --load_pretrain_checkpoint_path=/data/bert/bert_base.ckpt --train_data_file_path=/data/squad1/train.tf_record --eval_json_path=/data/squad1/dev-v1.1.json --schema_file_path=/data/squad1/squad_schema.json
+14146 pts/0    Rl+    0:27  |                       \_ python3.7 run_squad_elastic.py --device_target=GPU --distribute=true --do_train=true --do_eval=false --device_id=0 --epoch_num=1 --num_class=2 --train_data_shuffle=false --eval_data_shuffle=false --train_batch_size=8 --eval_batch_size=1 --vocab_file_path=/data/bert/vocab.txt --save_finetune_checkpoint_path=/home/lg/code/repos/github.com/lgarithm/mindspore/checkpoint --load_pretrain_checkpoint_path=/data/bert/bert_base.ckpt --train_data_file_path=/data/squad1/train.tf_record --eval_json_path=/data/squad1/dev-v1.1.json --schema_file_path=/data/squad1/squad_schema.json
+14311 pts/0    S+     0:00  |                           \_ /usr/bin/python3.7 -Wignore -c from multiprocessing.semaphore_tracker import main;main(6)
+14312 pts/0    S+     0:00  |                           \_ /usr/bin/python3.7 -Wignore -c from multiprocessing.forkserver import main; main(6, 9, ['__main__'], **{'sys_path': ['/home/lg/code/repos/github.com/lgarithm/mindspore/model_zoo/official/nlp/bert', '/usr/lib/python37.zip', '/usr/lib/python3.7', '/usr/lib/python3.7/lib-dynload', '/home/lg/.local/lib/python3.7/site-packages', '/usr/local/lib/python3.7/dist-packages', '/usr/lib/python3/dist-packages']})
+14313 pts/0    Sl+    0:02  |                               \_ /usr/bin/python3.7 -Wignore -c from multiprocessing.forkserver import main; main(6, 9, ['__main__'], **{'sys_path': ['/home/lg/code/repos/github.com/lgarithm/mindspore/model_zoo/official/nlp/bert', '/usr/lib/python37.zip', '/usr/lib/python3.7', '/usr/lib/python3.7/lib-dynload', '/home/lg/.local/lib/python3.7/site-packages', '/usr/local/lib/python3.7/dist-packages', '/usr/lib/python3/dist-packages']})
+
+
+
+dataset/engine/iterators.py
+class TupleIterator(Iterator):
+
+ train/dataset_helper.py
+
+
+status: unsolved
+
+reproduce:
+./lg_scripts/run_squad_debug.sh

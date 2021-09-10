@@ -43,6 +43,7 @@ namespace dataset {
 const int64_t kTFRecordFileLimit = 0x140000000;
 
 bool TFReaderOp::ValidateFirstRowCrc(const std::string &filename) {
+  fprintf(stderr, "TFReaderOp::ValidateFirstRowCrc: %s\n", filename.c_str());
   auto realpath = Common::GetRealPath(filename);
   if (!realpath.has_value()) {
     MS_LOG(ERROR) << "Get real path failed, path=" << filename;
@@ -269,6 +270,7 @@ Status TFReaderOp::FillIOBlockNoShuffle() {
 
 // Reads a tf_file file and loads the data into multiple TensorRows.
 Status TFReaderOp::LoadFile(const std::string &filename, int64_t start_offset, int64_t end_offset, int32_t worker_id) {
+  fprintf(stderr, "TFReaderOp::LoadFile: %s, %lld, %lld, worker: %d\n", filename.c_str(), start_offset, end_offset, worker_id);
   auto realpath = Common::GetRealPath(filename);
   if (!realpath.has_value()) {
     MS_LOG(ERROR) << "Get real path failed, path=" << filename;

@@ -1,0 +1,126 @@
+
+import mindspore.dataset as ds
+
+ds.TFRecordDataset
+defined in
+
+1. py
+mindspore/dataset/engine/datasets.py
+
+class TFRecordDataset(SourceDataset):
+
+2. .h
+mindspore/ccsrc/minddata/dataset/include/dataset/datasets.h
+
+class TFRecordDataset : public Dataset {
+
+
+3. .cc
+
+mindspore/ccsrc/minddata/dataset/api/datasets.cc
+
+TFRecordDataset::TFRecordDataset(...)
+
+
+
+
+class TFRecordNode
+
+1. .h
+mindspore/ccsrc/minddata/dataset/engine/ir/datasetops/source/tf_record_node.h
+
+class TFRecordNode : public NonMappableSourceNode {
+
+
+2. .cc
+mindspore/ccsrc/minddata/dataset/engine/ir/datasetops/source/tf_record_node.cc
+
+
+
+========== * ========== * ========== * ========== * ========== * ========== * ==========
+
+class ElasticTFRecordDataset;
+class ElasticTFRecordNode;
+
+Added Files:
+
+mindspore/ccsrc/minddata/dataset/engine/ir/datasetops/source/elastic_tf_record_node.h
+mindspore/ccsrc/minddata/dataset/engine/ir/datasetops/source/elastic_tf_record_node.cc
+
+mindspore/ccsrc/minddata/dataset/engine/datasetops/source/elastic_tf_reader_op.cc
+mindspore/ccsrc/minddata/dataset/engine/datasetops/source/elastic_tf_reader_op.h
+
+Modified Files:
+
+mindspore/ccsrc/minddata/dataset/include/dataset/datasets.h
+mindspore/ccsrc/minddata/dataset/api/datasets.cc
+mindspore/ccsrc/minddata/dataset/api/python/bindings/dataset/engine/ir/datasetops/source/bindings.cc
+mindspore/ccsrc/minddata/dataset/engine/opt/pass.h
+mindspore/ccsrc/minddata/dataset/engine/opt/pass.cc
+
+
+Related Files:
+./mindspore/ccsrc/minddata/dataset/engine/datasetops/skip_op.h
+./mindspore/ccsrc/minddata/dataset/engine/datasetops/skip_op.cc
+./mindspore/ccsrc/minddata/dataset/engine/ir/datasetops/skip_node.h
+./mindspore/ccsrc/minddata/dataset/engine/datasetops/source/tf_reader_op.h
+./mindspore/ccsrc/minddata/dataset/engine/datasetops/source/tf_reader_op.cc
+
+./mindspore/ccsrc/minddata/dataset/engine/datasetops/source/nonmappable_leaf_op.h
+./mindspore/ccsrc/minddata/dataset/engine/datasetops/source/nonmappable_leaf_op.cc
+
+class BatchOp : public ParallelOp
+class ParallelOp : public DatasetOp
+
+class SkipOp : public PipelineOp
+class PipelineOp : public DatasetOp
+
+class DatasetOp : public std::enable_shared_from_this<DatasetOp>
+class CacheOp : public CacheBase, public RandomAccessOp
+class CacheBase : public ParallelOp
+
+
+BUGS
+1.
+ImportError: /home/lg/.local/lib/python3.7/site-packages/mindspore/_c_dataengine.cpython-37m-x86_64-linux-gnu.so: undefined symbol: vtable for mindspore::dataset::ElasticTFRecordNode
+
+Solution: add `ElasticTFRecordNode` to `.../bindings.cc`
+
+
+2.
+/home/lg/code/repos/github.com/lgarithm/mindspore/mindspore/ccsrc/minddata/dataset/engine/ir/datasetops/source/elastic_tf_record_node.cc:242:68: error: call of overloaded ‘Visit(std::shared_ptr<mindspore::dataset::ElasticTFRecordNode>, bool* const&)’ is ambiguous
+   return p->Visit(shared_from_base<ElasticTFRecordNode>(), modified);
+
+Solution: add `ElasticTFRecordNode` to `.../pass.h`
+                                                                  ^
+
+3.
+ImportError: /home/lg/.local/lib/python3.7/site-packages/mindspore/_c_dataengine.cpython-37m-x86_64-linux-gnu.so: undefined symbol: mindspore::dataset::IRNodePass::Visit(std::shared_ptr<mindspore::dataset::ElasticTFRecordNode>, bool*)
+
+Solution: add `...`  to `.../pass.cc`
+
+
+
+4.
+AttributeError: 'HTMLParser' object has no attribute 'unescape'
+Solution: python3.9 -m pip install -U setuptools
+
+
+5. use batch twice:
+[ERROR] MD(1335,7f1f23fff700,python3.7):2021-07-26-17:26:27.557.977 [mindspore/ccsrc/minddata/dataset/util/task_manager.cc:217] InterruptMaster] Task is terminated with err msg(more detail in info level log):Unexpected error. Invalid data, batch operation expect same shape for each data row, but got inconsistent shape in column 0 expected shape for this column is:<5,1,384>, got shape:<1,1,384>
+Line of code : 209
+File         : /home/lg/code/repos/github.com/lgarithm/mindspore/mindspore/ccsrc/minddata/dataset/engine/datasetops/batch_op.cc
+
+Traceback (most recent call last):
+  File "origin.py", line 94, in <module>
+    for i, items in enumerate(dataset):
+  File "/home/lg/.local/lib/python3.7/site-packages/mindspore/dataset/engine/iterators.py", line 122, in __next__
+    data = self._get_next()
+  File "/home/lg/.local/lib/python3.7/site-packages/mindspore/dataset/engine/iterators.py", line 196, in _get_next
+    return [self._transform_tensor(t) for t in self._iterator.GetNextAsList()]
+RuntimeError: Unexpected error. Invalid data, batch operation expect same shape for each data row, but got inconsistent shape in column 0 expected shape for this column is:<5,1,384>, got shape:<1,1,384>
+Line of code : 209
+File         : /home/lg/code/repos/github.com/lgarithm/mindspore/mindspore/ccsrc/minddata/dataset/engine/datasetops/batch_op.cc
+
+
+

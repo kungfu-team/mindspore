@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.14.0)
 project(MindSpore)
 
+#add_subdirectory(${CMAKE_SOURCE_DIR}/ms-elastic)
+#INCLUDE_DIRECTORIES(${CMAKE_SOURCE_DIR}/ms-elastic/include)
+include(${CMAKE_SOURCE_DIR}/ms-elastic/CMakeLists.txt)
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.3.0)
         message(FATAL_ERROR "GCC version ${CMAKE_CXX_COMPILER_VERSION} must not be less than 7.3.0")
@@ -53,6 +57,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/securec/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/flatbuffers/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/flatbuffers/include/flatbuffers)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/third_party/stdtracer/include)
 
 include(${CMAKE_SOURCE_DIR}/cmake/dependency_utils.cmake)
 find_package(Python3 COMPONENTS Interpreter Development)
@@ -101,3 +106,5 @@ elseif(CMAKE_SYSTEM_NAME MATCHES "Windows")
 else()
     include(cmake/package.cmake)
 endif()
+
+target_link_libraries(mindspore ms-elastic)

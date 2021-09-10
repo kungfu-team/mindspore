@@ -107,3 +107,9 @@ mindspore/lite/test/do_test/
 
 # lite opencl compile file
 *.cl.inc
+
+
+/checkpoint
+**/events.out.events.summary.*
+*.idx.txt
+*.tf_record
